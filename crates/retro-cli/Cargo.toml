@@ -1,0 +1,14 @@
+[package]
+name = "retro-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "retro"
+path = "src/main.rs"
+
+[dependencies]
+retro-core = { path = "../retro-core" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+colored = "2"
