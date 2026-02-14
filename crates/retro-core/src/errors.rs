@@ -19,6 +19,9 @@ pub enum CoreError {
 
     #[error("Not initialized: {0}")]
     NotInitialized(String),
+
+    #[error("Analysis error: {0}")]
+    Analysis(String),
 }
 
 impl From<rusqlite::Error> for CoreError {

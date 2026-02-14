@@ -1,3 +1,5 @@
+pub mod analysis;
+pub mod audit_log;
 pub mod config;
 pub mod db;
 pub mod errors;

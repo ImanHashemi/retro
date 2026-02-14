@@ -56,6 +56,25 @@ pub fn scrub_secrets(text: &str) -> String {
     result
 }
 
+/// Scrub sensitive data from a parsed session in place.
+pub fn scrub_session(session: &mut crate::models::Session) {
+    for msg in &mut session.user_messages {
+        msg.text = scrub_secrets(&msg.text);
+    }
+    for msg in &mut session.assistant_messages {
+        msg.text = scrub_secrets(&msg.text);
+        if let Some(ref thinking) = msg.thinking_summary {
+            msg.thinking_summary = Some(scrub_secrets(thinking));
+        }
+    }
+    for err in &mut session.errors {
+        *err = scrub_secrets(err);
+    }
+    for summary in &mut session.summaries {
+        *summary = scrub_secrets(summary);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

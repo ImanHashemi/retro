@@ -77,6 +77,31 @@ impl std::fmt::Display for SuggestedTarget {
     }
 }
 
+impl SuggestedTarget {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "skill" => Self::Skill,
+            "claude_md" => Self::ClaudeMd,
+            "global_agent" => Self::GlobalAgent,
+            "db_only" => Self::DbOnly,
+            _ => Self::DbOnly,
+        }
+    }
+}
+
+impl PatternType {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "repetitive_instruction" => Self::RepetitiveInstruction,
+            "recurring_mistake" => Self::RecurringMistake,
+            "workflow_pattern" => Self::WorkflowPattern,
+            "stale_context" => Self::StaleContext,
+            "redundant_context" => Self::RedundantContext,
+            _ => Self::WorkflowPattern,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pattern {
     pub id: String,
@@ -370,4 +395,106 @@ pub struct IngestedSession {
     pub file_size: u64,
     pub file_mtime: String,
     pub ingested_at: DateTime<Utc>,
+}
+
+// ── Analysis types ──
+
+/// AI response: either a new pattern or an update to an existing one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action")]
+pub enum PatternUpdate {
+    #[serde(rename = "new")]
+    New(NewPattern),
+    #[serde(rename = "update")]
+    Update(UpdateExisting),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewPattern {
+    pub pattern_type: PatternType,
+    pub description: String,
+    pub confidence: f64,
+    #[serde(default)]
+    pub source_sessions: Vec<String>,
+    #[serde(default)]
+    pub related_files: Vec<String>,
+    pub suggested_content: String,
+    pub suggested_target: SuggestedTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateExisting {
+    pub existing_id: String,
+    #[serde(default)]
+    pub new_sessions: Vec<String>,
+    pub new_confidence: f64,
+}
+
+/// Top-level AI response wrapper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisResponse {
+    pub patterns: Vec<PatternUpdate>,
+}
+
+/// Claude CLI --output-format json wrapper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeCliOutput {
+    #[serde(default)]
+    pub result: Option<String>,
+    #[serde(default)]
+    pub is_error: bool,
+    #[serde(default)]
+    pub cost_usd: f64,
+    #[serde(default)]
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+/// Audit log entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEntry {
+    pub timestamp: DateTime<Utc>,
+    pub action: String,
+    pub details: serde_json::Value,
+}
+
+/// Result of an analysis run.
+#[derive(Debug, Clone)]
+pub struct AnalyzeResult {
+    pub sessions_analyzed: usize,
+    pub new_patterns: usize,
+    pub updated_patterns: usize,
+    pub total_patterns: usize,
+    pub ai_cost: f64,
+}
+
+/// Compact session format for serialization to AI prompts.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompactSession {
+    pub session_id: String,
+    pub project: String,
+    pub user_messages: Vec<CompactUserMessage>,
+    pub tools_used: Vec<String>,
+    pub errors: Vec<String>,
+    pub thinking_highlights: Vec<String>,
+    pub summaries: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CompactUserMessage {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+}
+
+/// Compact pattern format for inclusion in AI prompts.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompactPattern {
+    pub id: String,
+    pub pattern_type: String,
+    pub description: String,
+    pub confidence: f64,
+    pub times_seen: i64,
+    pub suggested_target: String,
 }

@@ -449,6 +449,7 @@ dependencies = [
  "clap",
  "colored",
  "retro-core",
+ "serde_json",
 ]
 
 [[package]]

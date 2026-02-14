@@ -19,6 +19,21 @@ enum Commands {
         #[arg(long)]
         global: bool,
     },
+    /// Analyze sessions to discover patterns (AI-powered)
+    Analyze {
+        /// Analyze sessions for all projects, not just the current one
+        #[arg(long)]
+        global: bool,
+        /// Analysis window in days (default: from config, typically 14)
+        #[arg(long)]
+        since: Option<u32>,
+    },
+    /// List discovered patterns
+    Patterns {
+        /// Filter by status: discovered, active, archived, dismissed
+        #[arg(long)]
+        status: Option<String>,
+    },
     /// Show retro status: session counts, last analysis, patterns
     Status,
 }
@@ -29,6 +44,8 @@ fn main() {
     let result = match cli.command {
         Commands::Init => commands::init::run(),
         Commands::Ingest { global } => commands::ingest::run(global),
+        Commands::Analyze { global, since } => commands::analyze::run(global, since),
+        Commands::Patterns { status } => commands::patterns::run(status),
         Commands::Status => commands::status::run(),
     };
 

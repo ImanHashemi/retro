@@ -1,0 +1,121 @@
+use crate::config::AiConfig;
+use crate::errors::CoreError;
+use crate::models::ClaudeCliOutput;
+use std::io::Write;
+use std::process::Command;
+use super::backend::{AnalysisBackend, BackendResponse};
+
+/// AI backend that spawns `claude -p` in non-interactive mode.
+pub struct ClaudeCliBackend {
+    model: String,
+    max_budget: f64,
+}
+
+impl ClaudeCliBackend {
+    pub fn new(config: &AiConfig) -> Self {
+        Self {
+            model: config.model.clone(),
+            max_budget: config.max_budget_per_call,
+        }
+    }
+
+    /// Check if the claude CLI is available on PATH.
+    pub fn is_available() -> bool {
+        Command::new("claude")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+}
+
+impl AnalysisBackend for ClaudeCliBackend {
+    fn execute(&self, prompt: &str) -> Result<BackendResponse, CoreError> {
+        let budget_str = format!("{:.2}", self.max_budget);
+
+        // Pipe prompt via stdin to avoid ARG_MAX limits on large prompts
+        let mut child = Command::new("claude")
+            .args([
+                "-p",
+                "-",
+                "--output-format",
+                "json",
+                "--model",
+                &self.model,
+                "--max-turns",
+                "1",
+                "--max-budget-usd",
+                &budget_str,
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                CoreError::Analysis(format!(
+                    "failed to spawn claude CLI: {e}. Is claude installed and on PATH?"
+                ))
+            })?;
+
+        // Write prompt to stdin and close it
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(prompt.as_bytes()).map_err(|e| {
+                CoreError::Analysis(format!("failed to write prompt to claude stdin: {e}"))
+            })?;
+            // stdin is dropped here, closing the pipe
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| CoreError::Analysis(format!("claude CLI execution failed: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(CoreError::Analysis(format!(
+                "claude CLI exited with {}: {}",
+                output.status, stderr
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // Parse the JSON wrapper
+        let cli_output: ClaudeCliOutput = serde_json::from_str(&stdout).map_err(|e| {
+            CoreError::Analysis(format!(
+                "failed to parse claude CLI output: {e}\nraw output: {}",
+                truncate_for_error(&stdout)
+            ))
+        })?;
+
+        if cli_output.is_error {
+            let error_text = cli_output.result.unwrap_or_else(|| "unknown error".to_string());
+            return Err(CoreError::Analysis(format!(
+                "claude CLI returned error: {}",
+                error_text
+            )));
+        }
+
+        let result_text = cli_output
+            .result
+            .ok_or_else(|| CoreError::Analysis("claude CLI returned empty result".to_string()))?;
+
+        Ok(BackendResponse {
+            text: result_text,
+            cost_usd: cli_output.cost_usd,
+        })
+    }
+}
+
+fn truncate_for_error(s: &str) -> &str {
+    if s.len() <= 500 {
+        s
+    } else {
+        let mut i = 500;
+        while i > 0 && !s.is_char_boundary(i) {
+            i -= 1;
+        }
+        &s[..i]
+    }
+}

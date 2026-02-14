@@ -12,3 +12,4 @@ retro-core = { path = "../retro-core" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 colored = "2"
+serde_json = "1"

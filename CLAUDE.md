@@ -71,8 +71,8 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 
 ## Implementation Status
 
-- **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working. 18 sessions ingested from real data. 6 unit tests passing.
-- **Phase 2: TODO** — Analysis Backend + Pattern Discovery
+- **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working. 18 sessions ingested from real data.
+- **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend, prompt builder, pattern merging with Levenshtein dedup, audit log. 19 unit tests passing.
 - **Phase 3: TODO** — Projection + Apply
 - **Phase 4: TODO** — Full Apply + Clean + Audit + Git
 - **Phase 5: TODO** — Hooks + Polish
