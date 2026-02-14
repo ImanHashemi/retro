@@ -76,7 +76,7 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 
 - **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working. 18 sessions ingested from real data.
 - **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend (stdin), prompt builder, pattern merging with Levenshtein dedup, audit log. 19 unit tests.
-- **Phase 3: TODO** — Projection + Apply. `projection/{skill,claude_md,global_agent}.rs`, `retro apply [--dry-run]`, `retro diff`. Two-phase skill gen (draft+validate). `projections` table exists but needs CRUD.
+- **Phase 3: DONE** — Projection + Apply. `projection/{mod,skill,claude_md,global_agent}.rs`, `retro apply [--dry-run]`, `retro diff`. Two-phase skill gen (draft+validate), CLAUDE.md managed section, global agent generation, projection CRUD, file backups, two-track classification (personal/shared). 45 unit tests.
 - **Phase 4: TODO** — Full Apply + Clean + Audit + Git. `git.rs`, `curator.rs`, `retro clean`, `retro audit`, `retro log`, `retro hooks remove`.
 - **Phase 5: TODO** — Hooks + Polish. Git hook installation, `--auto` mode, `--verbose`, colored output polish.
 

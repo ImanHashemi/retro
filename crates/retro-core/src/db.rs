@@ -1,5 +1,5 @@
 use crate::errors::CoreError;
-use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, SuggestedTarget};
+use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projection, SuggestedTarget};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -474,6 +474,71 @@ pub fn get_sessions_for_analysis(
     Ok(sessions)
 }
 
+// ── Projection operations ──
+
+/// Insert a new projection record.
+pub fn insert_projection(conn: &Connection, proj: &Projection) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT INTO projections (id, pattern_id, target_type, target_path, content, applied_at, pr_url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            proj.id,
+            proj.pattern_id,
+            proj.target_type,
+            proj.target_path,
+            proj.content,
+            proj.applied_at.to_rfc3339(),
+            proj.pr_url,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Check if a pattern already has an active projection.
+pub fn has_projection_for_pattern(conn: &Connection, pattern_id: &str) -> Result<bool, CoreError> {
+    let count: u64 = conn.query_row(
+        "SELECT COUNT(*) FROM projections WHERE pattern_id = ?1",
+        params![pattern_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Update a pattern's status.
+pub fn update_pattern_status(
+    conn: &Connection,
+    id: &str,
+    status: &PatternStatus,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE patterns SET status = ?2 WHERE id = ?1",
+        params![id, status.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Set or clear the generation_failed flag on a pattern.
+pub fn set_generation_failed(
+    conn: &Connection,
+    id: &str,
+    failed: bool,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE patterns SET generation_failed = ?2 WHERE id = ?1",
+        params![id, failed as i32],
+    )?;
+    Ok(())
+}
+
+/// Update a pattern's last_projected timestamp to now.
+pub fn update_pattern_last_projected(conn: &Connection, id: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE patterns SET last_projected = ?2 WHERE id = ?1",
+        params![id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,5 +661,55 @@ mod tests {
         record_analyzed_session(&conn, "sess-1", "/test").unwrap();
         let pending = get_sessions_for_analysis(&conn, None, &since).unwrap();
         assert_eq!(pending.len(), 0);
+    }
+
+    #[test]
+    fn test_insert_and_check_projection() {
+        let conn = test_db();
+        let pattern = test_pattern("pat-1", "Use uv");
+        insert_pattern(&conn, &pattern).unwrap();
+
+        assert!(!has_projection_for_pattern(&conn, "pat-1").unwrap());
+
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "claude_md".to_string(),
+            target_path: "/test/CLAUDE.md".to_string(),
+            content: "Always use uv".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+        };
+        insert_projection(&conn, &proj).unwrap();
+
+        assert!(has_projection_for_pattern(&conn, "pat-1").unwrap());
+        assert!(!has_projection_for_pattern(&conn, "pat-2").unwrap());
+    }
+
+    #[test]
+    fn test_update_pattern_status() {
+        let conn = test_db();
+        let pattern = test_pattern("pat-1", "Test pattern");
+        insert_pattern(&conn, &pattern).unwrap();
+
+        update_pattern_status(&conn, "pat-1", &PatternStatus::Active).unwrap();
+        let patterns = get_patterns(&conn, &["active"], None).unwrap();
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].id, "pat-1");
+    }
+
+    #[test]
+    fn test_set_generation_failed() {
+        let conn = test_db();
+        let pattern = test_pattern("pat-1", "Test pattern");
+        insert_pattern(&conn, &pattern).unwrap();
+
+        assert!(!get_all_patterns(&conn, None).unwrap()[0].generation_failed);
+
+        set_generation_failed(&conn, "pat-1", true).unwrap();
+        assert!(get_all_patterns(&conn, None).unwrap()[0].generation_failed);
+
+        set_generation_failed(&conn, "pat-1", false).unwrap();
+        assert!(!get_all_patterns(&conn, None).unwrap()[0].generation_failed);
     }
 }

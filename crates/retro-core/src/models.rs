@@ -498,3 +498,90 @@ pub struct CompactPattern {
     pub times_seen: i64,
     pub suggested_target: String,
 }
+
+// ── Projection types ──
+
+/// A projection record — tracks what was generated and where it was applied.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Projection {
+    pub id: String,
+    pub pattern_id: String,
+    pub target_type: String,
+    pub target_path: String,
+    pub content: String,
+    pub applied_at: DateTime<Utc>,
+    pub pr_url: Option<String>,
+}
+
+/// A generated skill draft (output of AI skill generation).
+#[derive(Debug, Clone)]
+pub struct SkillDraft {
+    pub name: String,
+    pub content: String,
+    pub pattern_id: String,
+}
+
+/// Skill validation result from AI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillValidation {
+    pub valid: bool,
+    #[serde(default)]
+    pub feedback: String,
+}
+
+/// A generated global agent draft.
+#[derive(Debug, Clone)]
+pub struct AgentDraft {
+    pub name: String,
+    pub content: String,
+    pub pattern_id: String,
+}
+
+/// A planned action for `retro apply`.
+#[derive(Debug, Clone)]
+pub struct ApplyAction {
+    pub pattern_id: String,
+    pub pattern_description: String,
+    pub target_type: SuggestedTarget,
+    pub target_path: String,
+    pub content: String,
+    pub track: ApplyTrack,
+}
+
+/// Whether a change is auto-applied (personal) or needs a PR (shared).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApplyTrack {
+    /// Auto-apply: global agents
+    Personal,
+    /// Needs PR (Phase 4): skills, CLAUDE.md rules
+    Shared,
+}
+
+impl std::fmt::Display for ApplyTrack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Personal => write!(f, "personal"),
+            Self::Shared => write!(f, "shared"),
+        }
+    }
+}
+
+/// The full apply plan — all actions to take.
+#[derive(Debug, Clone)]
+pub struct ApplyPlan {
+    pub actions: Vec<ApplyAction>,
+}
+
+impl ApplyPlan {
+    pub fn is_empty(&self) -> bool {
+        self.actions.is_empty()
+    }
+
+    pub fn personal_actions(&self) -> Vec<&ApplyAction> {
+        self.actions.iter().filter(|a| a.track == ApplyTrack::Personal).collect()
+    }
+
+    pub fn shared_actions(&self) -> Vec<&ApplyAction> {
+        self.actions.iter().filter(|a| a.track == ApplyTrack::Shared).collect()
+    }
+}

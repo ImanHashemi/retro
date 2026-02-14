@@ -34,6 +34,14 @@ enum Commands {
         #[arg(long)]
         status: Option<String>,
     },
+    /// Project patterns into skills, CLAUDE.md rules, and global agents
+    Apply {
+        /// Show what would be changed without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show pending changes in diff format (alias for apply --dry-run)
+    Diff,
     /// Show retro status: session counts, last analysis, patterns
     Status,
 }
@@ -46,6 +54,8 @@ fn main() {
         Commands::Ingest { global } => commands::ingest::run(global),
         Commands::Analyze { global, since } => commands::analyze::run(global, since),
         Commands::Patterns { status } => commands::patterns::run(status),
+        Commands::Apply { dry_run } => commands::apply::run(dry_run),
+        Commands::Diff => commands::diff::run(),
         Commands::Status => commands::status::run(),
     };
 

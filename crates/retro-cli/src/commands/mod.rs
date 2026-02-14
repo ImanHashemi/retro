@@ -1,4 +1,6 @@
 pub mod analyze;
+pub mod apply;
+pub mod diff;
 pub mod ingest;
 pub mod init;
 pub mod patterns;

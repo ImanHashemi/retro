@@ -6,4 +6,5 @@ pub mod errors;
 pub mod ingest;
 pub mod lock;
 pub mod models;
+pub mod projection;
 pub mod scrub;
