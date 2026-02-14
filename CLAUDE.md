@@ -21,7 +21,7 @@ Cargo workspace with two crates:
 - **No git2 crate** — shell out to `git` and `gh` directly.
 - **SQLite bundled** — `rusqlite` with `bundled` feature. WAL mode always.
 - **Error handling** — `thiserror` in retro-core, `anyhow` in retro-cli.
-- **AI backend** — sync `AnalysisBackend` trait. Primary impl: `claude -p "..." --output-format json`.
+- **AI backend** — sync `AnalysisBackend` trait. Primary impl: `claude -p - --output-format json` (prompt piped via stdin).
 - **CLAUDE.md protection** — only write within `<!-- retro:managed:start/end -->` delimiters, never touch user content.
 - **MEMORY.md** — read-only input, never write. Claude Code owns it.
 - **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
@@ -67,15 +67,18 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - Process-alive checks use `libc::kill(pid, 0)` — portable across Linux and macOS (not `/proc/` which is Linux-only)
 - Backup files to `~/.retro/backups/` before any modification
 - Audit log: append-only JSONL at `~/.retro/audit.jsonl`
+- AI prompts must be piped via stdin (`-p -`), never as CLI arguments (ARG_MAX risk with 150K prompts)
+- When progressively fitting content into a prompt budget, drop items from the end — never truncate mid-JSON
+- Shared helper `git_root_or_cwd()` lives in `retro-cli/src/commands/mod.rs` — use `super::git_root_or_cwd`
 - Test strategy: unit tests with fixtures (no AI), integration tests with `MockBackend`
 
 ## Implementation Status
 
 - **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working. 18 sessions ingested from real data.
-- **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend, prompt builder, pattern merging with Levenshtein dedup, audit log. 19 unit tests passing.
-- **Phase 3: TODO** — Projection + Apply
-- **Phase 4: TODO** — Full Apply + Clean + Audit + Git
-- **Phase 5: TODO** — Hooks + Polish
+- **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend (stdin), prompt builder, pattern merging with Levenshtein dedup, audit log. 19 unit tests.
+- **Phase 3: TODO** — Projection + Apply. `projection/{skill,claude_md,global_agent}.rs`, `retro apply [--dry-run]`, `retro diff`. Two-phase skill gen (draft+validate). `projections` table exists but needs CRUD.
+- **Phase 4: TODO** — Full Apply + Clean + Audit + Git. `git.rs`, `curator.rs`, `retro clean`, `retro audit`, `retro log`, `retro hooks remove`.
+- **Phase 5: TODO** — Hooks + Polish. Git hook installation, `--auto` mode, `--verbose`, colored output polish.
 
 ## Full Plan
 
