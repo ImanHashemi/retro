@@ -8,7 +8,7 @@ use super::git_root_or_cwd;
 
 pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
     if uninstall {
-        return run_uninstall(purge);
+        return run_uninstall(purge, verbose);
     }
 
     let dir = retro_dir();
@@ -33,7 +33,7 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
     let conn = db::open_db(&db_path)?;
 
     if verbose {
-        println!("[verbose] retro dir: {}", dir.display());
+        eprintln!("[verbose] retro dir: {}", dir.display());
     }
 
     let is_wal = db::verify_wal_mode(&conn)?;
@@ -87,7 +87,7 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
     Ok(())
 }
 
-fn run_uninstall(purge: bool) -> Result<()> {
+fn run_uninstall(purge: bool, _verbose: bool) -> Result<()> {
     println!("{}", "Uninstalling retro...".cyan());
 
     // Remove git hooks from current repo

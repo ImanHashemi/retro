@@ -34,7 +34,7 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     let project = git_root_or_cwd()?;
 
     if verbose {
-        println!("[verbose] project path: {}", project);
+        eprintln!("[verbose] project path: {}", project);
     }
 
     println!(

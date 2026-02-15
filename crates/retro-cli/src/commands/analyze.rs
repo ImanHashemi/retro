@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use colored::Colorize;
 use retro_core::analysis;
 use retro_core::audit_log;
@@ -8,7 +7,7 @@ use retro_core::db;
 use retro_core::ingest;
 use retro_core::lock::LockFile;
 
-use super::git_root_or_cwd;
+use super::{git_root_or_cwd, within_cooldown};
 
 pub fn run(global: bool, since_days: Option<u32>, auto: bool, verbose: bool) -> Result<()> {
     let dir = retro_dir();
@@ -41,20 +40,15 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, verbose: bool) -> 
         };
 
         // Check cooldown: skip if analyzed within auto_cooldown_minutes
-        if let Ok(Some(last)) = db::last_analyzed_at(&conn) {
-            if let Ok(last_time) = DateTime::parse_from_rfc3339(&last) {
-                let last_utc = last_time.with_timezone(&Utc);
-                let cooldown = chrono::Duration::minutes(config.hooks.auto_cooldown_minutes as i64);
-                if Utc::now() - last_utc < cooldown {
-                    if verbose {
-                        eprintln!(
-                            "[verbose] skipping analyze: last run {}m ago (cooldown: {}m)",
-                            (Utc::now() - last_utc).num_minutes(),
-                            config.hooks.auto_cooldown_minutes
-                        );
-                    }
-                    return Ok(());
+        if let Ok(Some(ref last)) = db::last_analyzed_at(&conn) {
+            if within_cooldown(last, config.hooks.auto_cooldown_minutes) {
+                if verbose {
+                    eprintln!(
+                        "[verbose] skipping analyze: within cooldown ({}m)",
+                        config.hooks.auto_cooldown_minutes
+                    );
                 }
+                return Ok(());
             }
         }
 
@@ -67,11 +61,16 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, verbose: bool) -> 
         let window_days = since_days.unwrap_or(config.analysis.window_days);
 
         // Run ingestion silently
-        let _ = if global {
+        let ingest_result = if global {
             ingest::ingest_all_projects(&conn, &config)
         } else {
             ingest::ingest_project(&conn, &config, project.as_deref().unwrap())
         };
+        if let Err(e) = &ingest_result {
+            if verbose {
+                eprintln!("[verbose] ingest error (continuing to analyze): {e}");
+            }
+        }
 
         // Run analysis silently
         match analysis::analyze(&conn, &config, project.as_deref(), window_days) {
@@ -122,9 +121,9 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, verbose: bool) -> 
 
     if verbose {
         if let Some(ref p) = project {
-            println!("[verbose] project path: {}", p);
+            eprintln!("[verbose] project path: {}", p);
         }
-        println!("[verbose] window: {} days", window_days);
+        eprintln!("[verbose] window: {} days", window_days);
     }
 
     // Step 1: Run ingestion first

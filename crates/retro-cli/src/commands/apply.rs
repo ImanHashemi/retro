@@ -54,7 +54,7 @@ pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode, verbose
 
     if verbose {
         if let Some(ref p) = project {
-            println!("[verbose] project path: {}", p);
+            eprintln!("[verbose] project path: {}", p);
         }
     }
 

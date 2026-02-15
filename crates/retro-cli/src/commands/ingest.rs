@@ -1,12 +1,11 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use colored::Colorize;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
 use retro_core::ingest;
 use retro_core::lock::LockFile;
 
-use super::git_root_or_cwd;
+use super::{git_root_or_cwd, within_cooldown};
 
 pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
     let dir = retro_dir();
@@ -38,20 +37,15 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
         };
 
         // Check cooldown: skip if ingested within auto_cooldown_minutes
-        if let Ok(Some(last)) = db::last_ingested_at(&conn) {
-            if let Ok(last_time) = DateTime::parse_from_rfc3339(&last) {
-                let last_utc = last_time.with_timezone(&Utc);
-                let cooldown = chrono::Duration::minutes(config.hooks.auto_cooldown_minutes as i64);
-                if Utc::now() - last_utc < cooldown {
-                    if verbose {
-                        eprintln!(
-                            "[verbose] skipping ingest: last run {}m ago (cooldown: {}m)",
-                            (Utc::now() - last_utc).num_minutes(),
-                            config.hooks.auto_cooldown_minutes
-                        );
-                    }
-                    return Ok(());
+        if let Ok(Some(ref last)) = db::last_ingested_at(&conn) {
+            if within_cooldown(last, config.hooks.auto_cooldown_minutes) {
+                if verbose {
+                    eprintln!(
+                        "[verbose] skipping ingest: within cooldown ({}m)",
+                        config.hooks.auto_cooldown_minutes
+                    );
                 }
+                return Ok(());
             }
         }
 
@@ -89,7 +83,7 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
     } else {
         let project_path = git_root_or_cwd()?;
         if verbose {
-            println!("[verbose] project path: {}", project_path);
+            eprintln!("[verbose] project path: {}", project_path);
         }
         println!(
             "{} {}",

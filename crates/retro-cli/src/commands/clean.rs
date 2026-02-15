@@ -33,7 +33,7 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     );
 
     if verbose {
-        println!("[verbose] staleness threshold: {} days", config.analysis.staleness_days);
+        eprintln!("[verbose] staleness threshold: {} days", config.analysis.staleness_days);
     }
 
     let stale_items = curator::detect_stale(&conn, &config)?;
