@@ -33,6 +33,15 @@ impl LockFile {
             path: path.to_path_buf(),
         })
     }
+
+    /// Try to acquire the lockfile, returning None if already locked (instead of an error).
+    /// Used by --auto mode to silently skip when another process is running.
+    pub fn try_acquire(path: &Path) -> Option<Self> {
+        match Self::acquire(path) {
+            Ok(lock) => Some(lock),
+            Err(_) => None,
+        }
+    }
 }
 
 impl Drop for LockFile {

@@ -6,7 +6,7 @@ use retro_core::git;
 
 use super::git_root_or_cwd;
 
-pub fn run(uninstall: bool, purge: bool) -> Result<()> {
+pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
     if uninstall {
         return run_uninstall(purge);
     }
@@ -31,6 +31,10 @@ pub fn run(uninstall: bool, purge: bool) -> Result<()> {
     let db_path = dir.join("retro.db");
     let db_existed = db_path.exists();
     let conn = db::open_db(&db_path)?;
+
+    if verbose {
+        println!("[verbose] retro dir: {}", dir.display());
+    }
 
     let is_wal = db::verify_wal_mode(&conn)?;
     let label = if db_existed { "Exists" } else { "Created" };

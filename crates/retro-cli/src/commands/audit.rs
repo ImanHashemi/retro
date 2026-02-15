@@ -11,7 +11,7 @@ use retro_core::util::{strip_code_fences, truncate_str};
 
 use super::git_root_or_cwd;
 
-pub fn run(dry_run: bool) -> Result<()> {
+pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -33,9 +33,17 @@ pub fn run(dry_run: bool) -> Result<()> {
 
     let project = git_root_or_cwd()?;
 
+    if verbose {
+        println!("[verbose] project path: {}", project);
+    }
+
     println!(
         "{}",
         "Auditing context for redundancy and contradictions (AI-powered)...".cyan()
+    );
+    println!(
+        "  {}",
+        "This may take a minute (AI-powered audit)...".dimmed()
     );
 
     // Snapshot current context

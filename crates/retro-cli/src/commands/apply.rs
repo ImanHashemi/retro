@@ -21,7 +21,7 @@ pub enum DisplayMode {
 }
 
 /// Shared entry point: build the apply plan and either display or execute it.
-pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode) -> Result<()> {
+pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode, verbose: bool) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -52,9 +52,19 @@ pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode) -> Resu
 
     let backend = ClaudeCliBackend::new(&config.ai);
 
+    if verbose {
+        if let Some(ref p) = project {
+            println!("[verbose] project path: {}", p);
+        }
+    }
+
     println!(
         "{}",
         "Building apply plan (this may call AI for skill generation)...".cyan()
+    );
+    println!(
+        "  {}",
+        "This may take a minute per pattern...".dimmed()
     );
 
     let plan = projection::build_apply_plan(&conn, &config, &backend, project.as_deref())?;
@@ -307,8 +317,8 @@ fn execute_shared_with_pr(
 }
 
 /// CLI entry point for `retro apply`.
-pub fn run(global: bool, dry_run: bool) -> Result<()> {
-    run_apply(global, dry_run, DisplayMode::Plan { dry_run })
+pub fn run(global: bool, dry_run: bool, verbose: bool) -> Result<()> {
+    run_apply(global, dry_run, DisplayMode::Plan { dry_run }, verbose)
 }
 
 fn display_plan(plan: &ApplyPlan, dry_run: bool) {

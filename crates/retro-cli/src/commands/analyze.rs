@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use colored::Colorize;
 use retro_core::analysis;
 use retro_core::audit_log;
@@ -9,7 +10,7 @@ use retro_core::lock::LockFile;
 
 use super::git_root_or_cwd;
 
-pub fn run(global: bool, since_days: Option<u32>) -> Result<()> {
+pub fn run(global: bool, since_days: Option<u32>, auto: bool, verbose: bool) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -18,13 +19,96 @@ pub fn run(global: bool, since_days: Option<u32>) -> Result<()> {
 
     // Check initialization
     if !db_path.exists() {
+        if auto {
+            return Ok(());
+        }
         anyhow::bail!("retro not initialized. Run `retro init` first.");
     }
 
     let config = Config::load(&config_path)?;
     let conn = db::open_db(&db_path)?;
 
-    // Acquire lockfile (analyze is a long-running command)
+    // In auto mode: acquire lockfile silently, check cooldown
+    if auto {
+        let _lock = match LockFile::try_acquire(&lock_path) {
+            Some(lock) => lock,
+            None => {
+                if verbose {
+                    eprintln!("[verbose] skipping analyze: another process holds the lock");
+                }
+                return Ok(());
+            }
+        };
+
+        // Check cooldown: skip if analyzed within auto_cooldown_minutes
+        if let Ok(Some(last)) = db::last_analyzed_at(&conn) {
+            if let Ok(last_time) = DateTime::parse_from_rfc3339(&last) {
+                let last_utc = last_time.with_timezone(&Utc);
+                let cooldown = chrono::Duration::minutes(config.hooks.auto_cooldown_minutes as i64);
+                if Utc::now() - last_utc < cooldown {
+                    if verbose {
+                        eprintln!(
+                            "[verbose] skipping analyze: last run {}m ago (cooldown: {}m)",
+                            (Utc::now() - last_utc).num_minutes(),
+                            config.hooks.auto_cooldown_minutes
+                        );
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
+        let project = if global {
+            None
+        } else {
+            Some(git_root_or_cwd()?)
+        };
+
+        let window_days = since_days.unwrap_or(config.analysis.window_days);
+
+        // Run ingestion silently
+        let _ = if global {
+            ingest::ingest_all_projects(&conn, &config)
+        } else {
+            ingest::ingest_project(&conn, &config, project.as_deref().unwrap())
+        };
+
+        // Run analysis silently
+        match analysis::analyze(&conn, &config, project.as_deref(), window_days) {
+            Ok(result) => {
+                if result.sessions_analyzed > 0 {
+                    // Record audit log even in auto mode
+                    let audit_details = serde_json::json!({
+                        "sessions_analyzed": result.sessions_analyzed,
+                        "new_patterns": result.new_patterns,
+                        "updated_patterns": result.updated_patterns,
+                        "total_patterns": result.total_patterns,
+                        "ai_cost_usd": result.ai_cost,
+                        "window_days": window_days,
+                        "global": global,
+                        "project": project,
+                        "auto": true,
+                    });
+                    let _ = audit_log::append(&audit_path, "analyze", audit_details);
+                }
+                if verbose {
+                    eprintln!(
+                        "[verbose] analyzed {} sessions, {} new patterns, {} updated",
+                        result.sessions_analyzed, result.new_patterns, result.updated_patterns
+                    );
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("[verbose] analyze error: {e}");
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
+    // Interactive mode — acquire lockfile (error if locked)
     let _lock = LockFile::acquire(&lock_path)
         .map_err(|e| anyhow::anyhow!("could not acquire lock: {e}"))?;
 
@@ -35,6 +119,13 @@ pub fn run(global: bool, since_days: Option<u32>) -> Result<()> {
     };
 
     let window_days = since_days.unwrap_or(config.analysis.window_days);
+
+    if verbose {
+        if let Some(ref p) = project {
+            println!("[verbose] project path: {}", p);
+        }
+        println!("[verbose] window: {} days", window_days);
+    }
 
     // Step 1: Run ingestion first
     println!("{}", "Step 1/3: Ingesting new sessions...".cyan());
@@ -55,6 +146,10 @@ pub fn run(global: bool, since_days: Option<u32>) -> Result<()> {
     println!(
         "{}",
         format!("Step 2/3: Analyzing sessions (window: {}d)...", window_days).cyan()
+    );
+    println!(
+        "  {}",
+        "This may take a minute (AI-powered analysis)...".dimmed()
     );
 
     let result = analysis::analyze(&conn, &config, project.as_deref(), window_days)?;

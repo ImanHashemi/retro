@@ -592,12 +592,13 @@
  - retro init --uninstall [--purge]
  - Deliverable: Full loop works end-to-end
 
- Phase 5: Hooks + Polish
+ Phase 5: Hooks + Polish (DONE)
 
- - Git hook installation in retro init (post-commit: ingest, post-merge: analyze)
- - --auto mode with lockfile + cooldown
- - Colored terminal output, progress indicators
- - --verbose global flag
+ - Git hook installation in retro init (post-commit: ingest --auto, post-merge: analyze --auto)
+ - --auto mode on ingest and analyze: LockFile::try_acquire() (skip if locked), cooldown check against config.hooks.auto_cooldown_minutes, suppress all output, exit silently on errors
+ - --verbose global flag: threads through all commands, [verbose] debug output to stderr
+ - Progress indicators: "This may take a minute..." messages before AI calls in analyze, apply, audit
+ - Colored terminal output: consistency pass on all commands
  - Deliverable: v0.1 complete
 
  ---

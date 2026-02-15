@@ -1,38 +1,102 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use colored::Colorize;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
 use retro_core::ingest;
+use retro_core::lock::LockFile;
 
 use super::git_root_or_cwd;
 
-pub fn run(global: bool) -> Result<()> {
+pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
+    let lock_path = dir.join("retro.lock");
 
     // Check initialization
     if !db_path.exists() {
+        if auto {
+            return Ok(());
+        }
         anyhow::bail!("retro not initialized. Run `retro init` first.");
     }
 
     let config = Config::load(&config_path)?;
     let conn = db::open_db(&db_path)?;
 
+    // In auto mode: acquire lockfile silently, check cooldown
+    if auto {
+        let _lock = match LockFile::try_acquire(&lock_path) {
+            Some(lock) => lock,
+            None => {
+                if verbose {
+                    eprintln!("[verbose] skipping ingest: another process holds the lock");
+                }
+                return Ok(());
+            }
+        };
+
+        // Check cooldown: skip if ingested within auto_cooldown_minutes
+        if let Ok(Some(last)) = db::last_ingested_at(&conn) {
+            if let Ok(last_time) = DateTime::parse_from_rfc3339(&last) {
+                let last_utc = last_time.with_timezone(&Utc);
+                let cooldown = chrono::Duration::minutes(config.hooks.auto_cooldown_minutes as i64);
+                if Utc::now() - last_utc < cooldown {
+                    if verbose {
+                        eprintln!(
+                            "[verbose] skipping ingest: last run {}m ago (cooldown: {}m)",
+                            (Utc::now() - last_utc).num_minutes(),
+                            config.hooks.auto_cooldown_minutes
+                        );
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
+        // Run ingestion silently — any error exits quietly
+        let result = if global {
+            ingest::ingest_all_projects(&conn, &config)
+        } else {
+            let project_path = git_root_or_cwd()?;
+            ingest::ingest_project(&conn, &config, &project_path)
+        };
+
+        match result {
+            Ok(r) => {
+                if verbose {
+                    eprintln!(
+                        "[verbose] ingested {} sessions ({} skipped)",
+                        r.sessions_ingested, r.sessions_skipped
+                    );
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("[verbose] ingest error: {e}");
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
+    // Interactive mode
     let result = if global {
         println!("{}", "Ingesting all projects...".cyan());
         ingest::ingest_all_projects(&conn, &config)?
     } else {
-        // Determine current project from git root, falling back to cwd
         let project_path = git_root_or_cwd()?;
-
+        if verbose {
+            println!("[verbose] project path: {}", project_path);
+        }
         println!(
             "{} {}",
             "Ingesting project:".cyan(),
             project_path.white()
         );
-        ingest::ingest_project(&conn, &config, &project_path)
-            ?
+        ingest::ingest_project(&conn, &config, &project_path)?
     };
 
     // Print results

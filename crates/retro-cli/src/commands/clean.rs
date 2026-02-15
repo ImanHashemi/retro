@@ -6,7 +6,7 @@ use retro_core::curator;
 use retro_core::db;
 use retro_core::lock::LockFile;
 
-pub fn run(dry_run: bool) -> Result<()> {
+pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -31,6 +31,10 @@ pub fn run(dry_run: bool) -> Result<()> {
         )
         .cyan()
     );
+
+    if verbose {
+        println!("[verbose] staleness threshold: {} days", config.analysis.staleness_days);
+    }
 
     let stale_items = curator::detect_stale(&conn, &config)?;
 

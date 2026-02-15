@@ -145,7 +145,7 @@ pub fn install_hooks(repo_root: &str) -> Result<Vec<String>, CoreError> {
     let post_commit_path = hooks_dir.join("post-commit");
     if install_hook_lines(
         &post_commit_path,
-        &format!("{HOOK_MARKER}\nretro ingest 2>/dev/null &\n"),
+        &format!("{HOOK_MARKER}\nretro ingest --auto 2>/dev/null &\n"),
     )? {
         installed.push("post-commit".to_string());
     }
