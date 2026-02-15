@@ -44,6 +44,9 @@ enum Commands {
         /// Silent mode for git hooks: skip if locked, check cooldown, suppress output
         #[arg(long)]
         auto: bool,
+        /// Preview what would be analyzed without making AI calls
+        #[arg(long)]
+        dry_run: bool,
     },
     /// List discovered patterns
     Patterns {
@@ -110,7 +113,8 @@ fn main() {
             global,
             since,
             auto,
-        } => commands::analyze::run(global, since, auto, verbose),
+            dry_run,
+        } => commands::analyze::run(global, since, auto, dry_run, verbose),
         Commands::Patterns { status } => commands::patterns::run(status),
         Commands::Apply { global, dry_run } => commands::apply::run(global, dry_run, verbose),
         Commands::Diff { global } => commands::diff::run(global, verbose),

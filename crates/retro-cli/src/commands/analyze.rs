@@ -1,15 +1,24 @@
+use std::path::Path;
+
 use anyhow::Result;
+use chrono::{Duration, Utc};
 use colored::Colorize;
 use retro_core::analysis;
 use retro_core::audit_log;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
 use retro_core::ingest;
+use retro_core::ingest::session;
 use retro_core::lock::LockFile;
+use retro_core::util;
 
 use super::{git_root_or_cwd, within_cooldown};
 
-pub fn run(global: bool, since_days: Option<u32>, auto: bool, verbose: bool) -> Result<()> {
+pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, verbose: bool) -> Result<()> {
+    if dry_run && auto {
+        anyhow::bail!("--dry-run and --auto cannot be used together");
+    }
+
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -141,6 +150,11 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, verbose: bool) -> 
         );
     }
 
+    // Dry-run: show preview of what would be analyzed, then return
+    if dry_run {
+        return print_dry_run_preview(&conn, project.as_deref(), window_days, verbose);
+    }
+
     // Step 2: Run analysis
     println!(
         "{}",
@@ -212,5 +226,132 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, verbose: bool) -> 
         );
     }
 
+    Ok(())
+}
+
+fn print_dry_run_preview(
+    conn: &retro_core::db::Connection,
+    project: Option<&str>,
+    window_days: u32,
+    verbose: bool,
+) -> Result<()> {
+    let since = Utc::now() - Duration::days(window_days as i64);
+    let sessions_to_analyze = db::get_sessions_for_analysis(conn, project, &since)?;
+
+    if sessions_to_analyze.is_empty() {
+        println!();
+        println!(
+            "  {}",
+            "No new sessions to analyze within the time window.".yellow()
+        );
+        println!();
+        println!("{}", "Dry run — no AI calls made.".yellow().bold());
+        return Ok(());
+    }
+
+    // Re-parse sessions from disk to get message/error counts
+    println!();
+    println!("{}", "Sessions to analyze:".white().bold());
+    let mut total_user_msgs = 0;
+    let mut total_assistant_msgs = 0;
+    let mut total_errors = 0;
+
+    for ingested in &sessions_to_analyze {
+        let path = Path::new(&ingested.session_path);
+        if !path.exists() {
+            println!(
+                "  {} {} {}",
+                "-".dimmed(),
+                ingested.session_id.cyan(),
+                "(file missing)".red()
+            );
+            continue;
+        }
+
+        match session::parse_session_file(path, &ingested.session_id, &ingested.project) {
+            Ok(s) => {
+                let user_count = s.user_messages.len();
+                let assistant_count = s.assistant_messages.len();
+                let error_count = s.errors.len();
+                total_user_msgs += user_count;
+                total_assistant_msgs += assistant_count;
+                total_errors += error_count;
+
+                let project_label = &ingested.project;
+                let detail = format!(
+                    "{} user, {} assistant msgs{}",
+                    user_count,
+                    assistant_count,
+                    if error_count > 0 {
+                        format!(", {} errors", error_count)
+                    } else {
+                        String::new()
+                    }
+                );
+                println!(
+                    "  {} {} {} ({})",
+                    "-".dimmed(),
+                    util::truncate_str(&ingested.session_id, 8).cyan(),
+                    project_label.dimmed(),
+                    detail.dimmed()
+                );
+
+                if verbose {
+                    eprintln!(
+                        "[verbose]   path: {}, size: {} bytes",
+                        ingested.session_path, ingested.file_size
+                    );
+                }
+            }
+            Err(e) => {
+                println!(
+                    "  {} {} {}",
+                    "-".dimmed(),
+                    ingested.session_id.cyan(),
+                    format!("(parse error: {e})").red()
+                );
+            }
+        }
+    }
+
+    // Existing patterns
+    let existing = db::get_patterns(conn, &["discovered", "active"], project)?;
+    let batch_count =
+        (sessions_to_analyze.len() + analysis::BATCH_SIZE - 1) / analysis::BATCH_SIZE;
+
+    println!();
+    println!("{}", "Summary:".white().bold());
+    println!(
+        "  {} {}",
+        "Sessions:".white(),
+        sessions_to_analyze.len().to_string().cyan()
+    );
+    println!(
+        "  {} {} user, {} assistant",
+        "Messages:".white(),
+        total_user_msgs.to_string().cyan(),
+        total_assistant_msgs.to_string().cyan()
+    );
+    if total_errors > 0 {
+        println!(
+            "  {} {}",
+            "Errors:".white(),
+            total_errors.to_string().yellow()
+        );
+    }
+    println!(
+        "  {} {}",
+        "Existing patterns:".white(),
+        existing.len().to_string().cyan()
+    );
+    println!(
+        "  {} {} (batch size: {})",
+        "AI calls:".white(),
+        batch_count.to_string().cyan(),
+        analysis::BATCH_SIZE
+    );
+
+    println!();
+    println!("{}", "Dry run — no AI calls made.".yellow().bold());
     Ok(())
 }
