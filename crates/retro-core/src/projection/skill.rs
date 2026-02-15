@@ -1,6 +1,7 @@
 use crate::analysis::backend::AnalysisBackend;
 use crate::errors::CoreError;
 use crate::models::{Pattern, SkillDraft, SkillValidation};
+use crate::util;
 
 const MAX_RETRIES: usize = 2;
 
@@ -16,10 +17,7 @@ pub fn generate_with_retry(
     for attempt in 0..=retries {
         let prompt = build_generation_prompt(pattern, if attempt > 0 { Some(&feedback) } else { None });
         let response = backend.execute(&prompt)?;
-        let content = response.text.trim().to_string();
-
-        // Strip markdown code fences if present
-        let content = strip_code_fences(&content);
+        let content = util::strip_code_fences(&response.text);
 
         let name = match parse_skill_name(&content) {
             Some(n) => n,
@@ -219,46 +217,9 @@ fn has_valid_frontmatter(content: &str) -> bool {
     lines[1..].iter().any(|line| line.trim() == "---")
 }
 
-/// Strip markdown code fences from AI response.
-fn strip_code_fences(content: &str) -> String {
-    let trimmed = content.trim();
-    if !trimmed.starts_with("```") {
-        return trimmed.to_string();
-    }
-
-    let lines: Vec<&str> = trimmed.lines().collect();
-    let mut result = Vec::new();
-    let mut in_block = false;
-
-    for line in lines {
-        if line.starts_with("```") && !in_block {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("```") && in_block {
-            break;
-        }
-        if in_block {
-            result.push(line);
-        }
-    }
-
-    if result.is_empty() {
-        trimmed.to_string()
-    } else {
-        result.join("\n")
-    }
-}
-
 /// Parse the validation response JSON.
 fn parse_validation(text: &str) -> Option<SkillValidation> {
-    let trimmed = text.trim();
-    // Handle markdown-wrapped JSON
-    let json_str = if trimmed.starts_with("```") {
-        strip_code_fences(trimmed)
-    } else {
-        trimmed.to_string()
-    };
+    let json_str = util::strip_code_fences(text);
     serde_json::from_str(&json_str).ok()
 }
 
@@ -300,19 +261,6 @@ mod tests {
         assert!(has_valid_frontmatter("---\nname: test\n---\nbody"));
         assert!(!has_valid_frontmatter("no frontmatter"));
         assert!(!has_valid_frontmatter("---\nno closing delimiter"));
-    }
-
-    #[test]
-    fn test_strip_code_fences() {
-        let input = "```yaml\n---\nname: test\n---\nbody\n```";
-        let result = strip_code_fences(input);
-        assert_eq!(result, "---\nname: test\n---\nbody");
-    }
-
-    #[test]
-    fn test_strip_code_fences_no_fences() {
-        let input = "---\nname: test\n---\nbody";
-        assert_eq!(strip_code_fences(input), input);
     }
 
     #[test]

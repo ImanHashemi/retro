@@ -1,6 +1,7 @@
 use crate::analysis::backend::AnalysisBackend;
 use crate::errors::CoreError;
 use crate::models::{AgentDraft, Pattern};
+use crate::util;
 
 /// Generate a global agent from a pattern via AI.
 pub fn generate_agent(
@@ -9,10 +10,7 @@ pub fn generate_agent(
 ) -> Result<AgentDraft, CoreError> {
     let prompt = build_generation_prompt(pattern);
     let response = backend.execute(&prompt)?;
-    let content = response.text.trim().to_string();
-
-    // Strip markdown code fences if present
-    let content = strip_code_fences(&content);
+    let content = util::strip_code_fences(&response.text);
 
     let name = parse_agent_name(&content).ok_or_else(|| {
         CoreError::Analysis(format!(
@@ -104,37 +102,6 @@ pub fn parse_agent_name(content: &str) -> Option<String> {
     None
 }
 
-/// Strip markdown code fences from AI response.
-fn strip_code_fences(content: &str) -> String {
-    let trimmed = content.trim();
-    if !trimmed.starts_with("```") {
-        return trimmed.to_string();
-    }
-
-    let lines: Vec<&str> = trimmed.lines().collect();
-    let mut result = Vec::new();
-    let mut in_block = false;
-
-    for line in lines {
-        if line.starts_with("```") && !in_block {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("```") && in_block {
-            break;
-        }
-        if in_block {
-            result.push(line);
-        }
-    }
-
-    if result.is_empty() {
-        trimmed.to_string()
-    } else {
-        result.join("\n")
-    }
-}
-
 /// Determine the agent file path: ~/.claude/agents/{name}.md
 pub fn agent_path(claude_dir: &str, name: &str) -> String {
     format!("{claude_dir}/agents/{name}.md")
@@ -179,10 +146,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_strip_code_fences() {
-        let input = "```markdown\n---\nname: test\n---\nbody\n```";
-        let result = strip_code_fences(input);
-        assert_eq!(result, "---\nname: test\n---\nbody");
-    }
 }

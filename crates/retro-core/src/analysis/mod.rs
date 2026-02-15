@@ -156,7 +156,7 @@ fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> 
 
     // Handle case where AI wraps response in markdown code blocks
     let json_str = if trimmed.starts_with("```") {
-        extract_json_from_markdown(trimmed)
+        crate::util::strip_code_fences(trimmed)
     } else {
         trimmed.to_string()
     };
@@ -169,32 +169,6 @@ fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> 
     })?;
 
     Ok(response.patterns)
-}
-
-/// Extract JSON from a markdown code block.
-fn extract_json_from_markdown(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut in_block = false;
-    let mut json_lines = Vec::new();
-
-    for line in lines {
-        if (line.starts_with("```json") || line.starts_with("```")) && !in_block {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("```") && in_block {
-            break;
-        }
-        if in_block {
-            json_lines.push(line);
-        }
-    }
-
-    if json_lines.is_empty() {
-        text.to_string()
-    } else {
-        json_lines.join("\n")
-    }
 }
 
 fn truncate_for_error(s: &str) -> &str {

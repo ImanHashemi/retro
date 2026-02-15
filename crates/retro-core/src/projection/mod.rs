@@ -91,8 +91,8 @@ pub fn build_apply_plan(
     }
 
     // Global agents — AI generation
+    let claude_dir = config.claude_dir().to_string_lossy().to_string();
     for pattern in &agent_patterns {
-        let claude_dir = config.claude_dir().to_string_lossy().to_string();
         match global_agent::generate_agent(backend, pattern) {
             Ok(draft) => {
                 let path = global_agent::agent_path(&claude_dir, &draft.name);
@@ -189,12 +189,13 @@ fn get_qualifying_patterns(
     project: Option<&str>,
 ) -> Result<Vec<Pattern>, CoreError> {
     let patterns = db::get_patterns(conn, &["discovered", "active"], project)?;
+    let projected_ids = db::get_projected_pattern_ids(conn)?;
     Ok(patterns
         .into_iter()
         .filter(|p| p.confidence >= config.analysis.confidence_threshold)
         .filter(|p| p.suggested_target != SuggestedTarget::DbOnly)
         .filter(|p| !p.generation_failed)
-        .filter(|p| !db::has_projection_for_pattern(conn, &p.id).unwrap_or(true))
+        .filter(|p| !projected_ids.contains(&p.id))
         .collect())
 }
 
@@ -247,14 +248,16 @@ fn write_file_with_backup(
 }
 
 /// Backup a file to the backup directory.
+/// Uses a sanitized path to avoid collisions between files with the same name
+/// in different directories (e.g., /proj-a/CLAUDE.md vs /proj-b/CLAUDE.md).
 fn backup_file(path: &str, backup_dir: &Path) -> Result<(), CoreError> {
-    let filename = Path::new(path)
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+    let sanitized = path
+        .replace(['/', '\\'], "_")
+        .trim_start_matches('_')
+        .to_string();
 
     let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-    let backup_path = backup_dir.join(format!("{filename}.{timestamp}.bak"));
+    let backup_path = backup_dir.join(format!("{sanitized}.{timestamp}.bak"));
 
     std::fs::copy(path, &backup_path).map_err(|e| {
         CoreError::Io(format!(

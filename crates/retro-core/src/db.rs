@@ -504,6 +504,18 @@ pub fn has_projection_for_pattern(conn: &Connection, pattern_id: &str) -> Result
     Ok(count > 0)
 }
 
+/// Get the set of all pattern IDs that already have projections.
+pub fn get_projected_pattern_ids(
+    conn: &Connection,
+) -> Result<std::collections::HashSet<String>, CoreError> {
+    let mut stmt = conn.prepare("SELECT DISTINCT pattern_id FROM projections")?;
+    let ids = stmt
+        .query_map([], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(ids)
+}
+
 /// Update a pattern's status.
 pub fn update_pattern_status(
     conn: &Connection,

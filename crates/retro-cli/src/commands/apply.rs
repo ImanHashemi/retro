@@ -5,12 +5,22 @@ use retro_core::audit_log;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
 use retro_core::lock::LockFile;
-use retro_core::models::SuggestedTarget;
+use retro_core::models::{ApplyPlan, SuggestedTarget};
 use retro_core::projection;
+use retro_core::projection::claude_md;
 
 use super::git_root_or_cwd;
 
-pub fn run(dry_run: bool) -> Result<()> {
+/// Output mode for displaying the plan.
+pub enum DisplayMode {
+    /// Show plan summary (used by `retro apply --dry-run`)
+    Plan { dry_run: bool },
+    /// Show diff-style output (used by `retro diff`)
+    Diff,
+}
+
+/// Shared entry point: build the apply plan and either display or execute it.
+pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -28,7 +38,11 @@ pub fn run(dry_run: bool) -> Result<()> {
     let _lock = LockFile::acquire(&lock_path)
         .map_err(|e| anyhow::anyhow!("could not acquire lock: {e}"))?;
 
-    let project = git_root_or_cwd()?;
+    let project = if global {
+        None
+    } else {
+        Some(git_root_or_cwd()?)
+    };
 
     // Check claude CLI availability (needed for skill/agent generation)
     if !ClaudeCliBackend::is_available() {
@@ -42,7 +56,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         "Building apply plan (this may call AI for skill generation)...".cyan()
     );
 
-    let plan = projection::build_apply_plan(&conn, &config, &backend, Some(&project))?;
+    let plan = projection::build_apply_plan(&conn, &config, &backend, project.as_deref())?;
 
     if plan.is_empty() {
         println!(
@@ -52,31 +66,53 @@ pub fn run(dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Display the plan
-    display_plan(&plan, dry_run);
+    // Display based on mode
+    match &display_mode {
+        DisplayMode::Plan { dry_run: dr } => display_plan(&plan, *dr),
+        DisplayMode::Diff => display_diff(&plan),
+    }
 
     if dry_run {
         println!();
-        println!(
-            "{}",
-            "Dry run — no files were modified. Run `retro apply` to apply changes."
-                .yellow()
-                .bold()
-        );
+        let hint = match display_mode {
+            DisplayMode::Diff => "Dry run — no files were modified. Run `retro apply` to apply changes.",
+            _ => "Dry run — no files were modified. Run `retro apply` to apply changes.",
+        };
+        println!("{}", hint.yellow().bold());
+        return Ok(());
+    }
+
+    // Confirm before writing
+    println!();
+    print!(
+        "{} ",
+        format!(
+            "Apply {} changes? [y/N]",
+            plan.actions.len()
+        )
+        .yellow()
+        .bold()
+    );
+    use std::io::Write;
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    if !input.trim().eq_ignore_ascii_case("y") {
+        println!("{}", "Aborted.".dimmed());
         return Ok(());
     }
 
     // Execute the plan
-    println!();
     println!("{}", "Applying changes...".cyan());
 
-    let result = projection::execute_plan(&conn, &config, &plan, Some(&project))?;
+    let result = projection::execute_plan(&conn, &config, &plan, project.as_deref())?;
 
     // Audit log
     let audit_details = serde_json::json!({
         "files_written": result.files_written,
         "patterns_activated": result.patterns_activated,
         "project": project,
+        "global": global,
     });
     audit_log::append(&audit_path, "apply", audit_details)?;
 
@@ -110,7 +146,12 @@ pub fn run(dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-fn display_plan(plan: &retro_core::models::ApplyPlan, dry_run: bool) {
+/// CLI entry point for `retro apply`.
+pub fn run(global: bool, dry_run: bool) -> Result<()> {
+    run_apply(global, dry_run, DisplayMode::Plan { dry_run })
+}
+
+fn display_plan(plan: &ApplyPlan, dry_run: bool) {
     let personal = plan.personal_actions();
     let shared = plan.shared_actions();
 
@@ -160,6 +201,70 @@ fn display_plan(plan: &retro_core::models::ApplyPlan, dry_run: bool) {
                 action.pattern_description.white()
             );
             println!("           → {}", action.target_path.dimmed());
+        }
+    }
+}
+
+fn display_diff(plan: &ApplyPlan) {
+    println!();
+
+    // CLAUDE.md diff
+    let claude_md_actions: Vec<_> = plan
+        .actions
+        .iter()
+        .filter(|a| a.target_type == SuggestedTarget::ClaudeMd)
+        .collect();
+
+    if !claude_md_actions.is_empty() {
+        let target_path = &claude_md_actions[0].target_path;
+        let rules: Vec<String> = claude_md_actions.iter().map(|a| a.content.clone()).collect();
+        println!("{} {}", "---".dimmed(), target_path.bold());
+
+        // Show existing managed section if any
+        if let Ok(existing) = std::fs::read_to_string(target_path) {
+            if let Some(old_rules) = claude_md::read_managed_section(&existing) {
+                for rule in &old_rules {
+                    println!("{} - {rule}", "-".red());
+                }
+            }
+        }
+
+        // Show new rules
+        for rule in &rules {
+            println!("{} - {rule}", "+".green());
+        }
+        println!();
+    }
+
+    // Skills diff
+    for action in &plan.actions {
+        if action.target_type == SuggestedTarget::Skill {
+            println!(
+                "{} {} {}",
+                "---".dimmed(),
+                action.target_path.bold(),
+                "(new)".green()
+            );
+            for line in action.content.lines() {
+                println!("{} {line}", "+".green());
+            }
+            println!();
+        }
+    }
+
+    // Global agents diff
+    for action in &plan.actions {
+        if action.target_type == SuggestedTarget::GlobalAgent {
+            println!(
+                "{} {} {}",
+                "---".dimmed(),
+                action.target_path.bold(),
+                "(new)".green()
+            );
+            for line in action.content.lines() {
+                println!("{} {line}", "+".green());
+            }
+            println!();
         }
     }
 }

@@ -39,9 +39,16 @@ enum Commands {
         /// Show what would be changed without writing files
         #[arg(long)]
         dry_run: bool,
+        /// Apply patterns for all projects, not just the current one
+        #[arg(long)]
+        global: bool,
     },
     /// Show pending changes in diff format (alias for apply --dry-run)
-    Diff,
+    Diff {
+        /// Show changes for all projects, not just the current one
+        #[arg(long)]
+        global: bool,
+    },
     /// Show retro status: session counts, last analysis, patterns
     Status,
 }
@@ -54,8 +61,8 @@ fn main() {
         Commands::Ingest { global } => commands::ingest::run(global),
         Commands::Analyze { global, since } => commands::analyze::run(global, since),
         Commands::Patterns { status } => commands::patterns::run(status),
-        Commands::Apply { dry_run } => commands::apply::run(dry_run),
-        Commands::Diff => commands::diff::run(),
+        Commands::Apply { global, dry_run } => commands::apply::run(global, dry_run),
+        Commands::Diff { global } => commands::diff::run(global),
         Commands::Status => commands::status::run(),
     };
 
