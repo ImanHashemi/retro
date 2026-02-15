@@ -39,9 +39,9 @@ Cargo workspace with two crates:
 | uuid | Pattern/projection IDs |
 | glob | Finding session files |
 | colored | Terminal output |
-| dialoguer | Confirmation dialogs |
 | regex | Sensitive data scrubbing |
 | libc | Portable process-alive check (kill signal 0) |
+| toml | Config file parsing |
 
 ## Build
 
@@ -70,13 +70,17 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - AI prompts must be piped via stdin (`-p -`), never as CLI arguments (ARG_MAX risk with 150K prompts)
 - When progressively fitting content into a prompt budget, drop items from the end — never truncate mid-JSON
 - Shared helper `git_root_or_cwd()` lives in `retro-cli/src/commands/mod.rs` — use `super::git_root_or_cwd`
+- Shared `strip_code_fences()` lives in `retro-core/src/util.rs` — use `crate::util::strip_code_fences`
+- Confirmation prompts use `stdin` y/N pattern (not dialoguer) — keep it simple
+- CLI commands that share logic should expose a shared entry point (e.g., `run_apply()` with `DisplayMode` enum) rather than duplicating code
+- Batch DB queries into HashSets when filtering (avoid N+1 queries in loops)
 - Test strategy: unit tests with fixtures (no AI), integration tests with `MockBackend`
 
 ## Implementation Status
 
 - **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working. 18 sessions ingested from real data.
 - **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend (stdin), prompt builder, pattern merging with Levenshtein dedup, audit log. 19 unit tests.
-- **Phase 3: DONE** — Projection + Apply. `projection/{mod,skill,claude_md,global_agent}.rs`, `retro apply [--dry-run]`, `retro diff`. Two-phase skill gen (draft+validate), CLAUDE.md managed section, global agent generation, projection CRUD, file backups, two-track classification (personal/shared). 45 unit tests.
+- **Phase 3: DONE** — Projection + Apply. `projection/{mod,skill,claude_md,global_agent}.rs`, `util.rs`, `retro apply [--dry-run] [--global]`, `retro diff [--global]`. Two-phase skill gen (draft+validate), CLAUDE.md managed section, global agent generation, projection CRUD, file backups, two-track classification (personal/shared), y/N confirmation before writes. 47 unit tests.
 - **Phase 4: TODO** — Full Apply + Clean + Audit + Git. `git.rs`, `curator.rs`, `retro clean`, `retro audit`, `retro log`, `retro hooks remove`.
 - **Phase 5: TODO** — Hooks + Polish. Git hook installation, `--auto` mode, `--verbose`, colored output polish.
 
