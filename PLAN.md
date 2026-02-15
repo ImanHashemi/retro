@@ -429,7 +429,7 @@
    - Replaced with [REDACTED]
  2. Project exclusion: privacy.exclude_projects in config.toml — skip sensitive repos entirely
  3. Documentation: README clearly states what data leaves the machine (session content → Claude CLI/API)
- 4. retro analyze --dry-run: Shows preview of what would be sent to AI (future enhancement)
+ 4. retro analyze --dry-run: Shows preview of what would be analyzed (session list, message counts, batch estimate) without making AI calls. Implemented.
 
  ---
  CLAUDE.md Protection
