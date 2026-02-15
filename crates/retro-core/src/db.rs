@@ -1,7 +1,8 @@
 use crate::errors::CoreError;
 use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projection, SuggestedTarget};
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+pub use rusqlite::Connection;
+use rusqlite::params;
 use std::path::Path;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -540,6 +541,39 @@ pub fn set_generation_failed(
         params![id, failed as i32],
     )?;
     Ok(())
+}
+
+/// Get all projections for active patterns (for staleness detection).
+pub fn get_projections_for_active_patterns(
+    conn: &Connection,
+) -> Result<Vec<Projection>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.pattern_id, p.target_type, p.target_path, p.content, p.applied_at, p.pr_url
+         FROM projections p
+         INNER JOIN patterns pat ON p.pattern_id = pat.id
+         WHERE pat.status = 'active'",
+    )?;
+
+    let projections = stmt
+        .query_map([], |row| {
+            let applied_at_str: String = row.get(5)?;
+            let applied_at = DateTime::parse_from_rfc3339(&applied_at_str)
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            Ok(Projection {
+                id: row.get(0)?,
+                pattern_id: row.get(1)?,
+                target_type: row.get(2)?,
+                target_path: row.get(3)?,
+                content: row.get(4)?,
+                applied_at,
+                pr_url: row.get(6)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(projections)
 }
 
 /// Update a pattern's last_projected timestamp to now.

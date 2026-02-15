@@ -2,8 +2,15 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
+use retro_core::git;
 
-pub fn run() -> Result<()> {
+use super::git_root_or_cwd;
+
+pub fn run(uninstall: bool, purge: bool) -> Result<()> {
+    if uninstall {
+        return run_uninstall(purge);
+    }
+
     let dir = retro_dir();
 
     // Create ~/.retro/ directory structure
@@ -42,12 +49,88 @@ pub fn run() -> Result<()> {
         );
     }
 
+    // Install git hooks if in a repo
+    if git::is_in_git_repo() {
+        let repo_root = git_root_or_cwd()?;
+        match git::install_hooks(&repo_root) {
+            Ok(installed) => {
+                if installed.is_empty() {
+                    println!("  {} git hooks (already installed)", "Exists".yellow());
+                } else {
+                    for hook in &installed {
+                        println!("  {} git hook: {}", "Installed".green(), hook);
+                    }
+                }
+            }
+            Err(e) => {
+                println!(
+                    "  {} could not install git hooks: {e}",
+                    "Warning".yellow()
+                );
+            }
+        }
+    } else {
+        println!("  {} not in a git repository, skipping hooks", "Note".dimmed());
+    }
+
     println!();
     println!("{}", "retro initialized successfully".green().bold());
     println!(
         "  Run {} to parse Claude Code sessions",
         "retro ingest".cyan()
     );
+
+    Ok(())
+}
+
+fn run_uninstall(purge: bool) -> Result<()> {
+    println!("{}", "Uninstalling retro...".cyan());
+
+    // Remove git hooks from current repo
+    if git::is_in_git_repo() {
+        let repo_root = git_root_or_cwd()?;
+        match git::remove_hooks(&repo_root) {
+            Ok(modified) => {
+                if modified.is_empty() {
+                    println!("  {} no retro hooks found", "Note".dimmed());
+                } else {
+                    for hook in &modified {
+                        println!("  {} hook: {}", "Removed".green(), hook);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("  {} removing hooks: {e}", "Warning".yellow());
+            }
+        }
+    }
+
+    if purge {
+        let dir = retro_dir();
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).context("removing ~/.retro/")?;
+            println!("  {} {}", "Deleted".green(), dir.display());
+        }
+        println!();
+        println!(
+            "{}",
+            "retro fully uninstalled (hooks removed, data purged)."
+                .green()
+                .bold()
+        );
+    } else {
+        println!();
+        println!(
+            "{}",
+            "retro hooks removed. Data preserved in ~/.retro/."
+                .green()
+                .bold()
+        );
+        println!(
+            "  Use {} to also delete all retro data.",
+            "retro init --uninstall --purge".cyan()
+        );
+    }
 
     Ok(())
 }

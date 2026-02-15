@@ -95,6 +95,91 @@ Important:
     prompt
 }
 
+/// Build the context audit prompt for redundancy/contradiction detection.
+pub fn build_audit_prompt(
+    claude_md: Option<&str>,
+    skills: &[(String, String)],
+    memory_md: Option<&str>,
+    agents: &[(String, String)],
+) -> String {
+    let claude_md_section = match claude_md {
+        Some(content) => format!("### CLAUDE.md\n```\n{content}\n```"),
+        None => "### CLAUDE.md\n(not present)".to_string(),
+    };
+
+    let skills_section = if skills.is_empty() {
+        "### Skills\n(none)".to_string()
+    } else {
+        let mut s = "### Skills\n".to_string();
+        for (path, content) in skills {
+            s.push_str(&format!("**{path}**:\n```\n{content}\n```\n\n"));
+        }
+        s
+    };
+
+    let memory_section = match memory_md {
+        Some(content) => format!("### MEMORY.md\n```\n{content}\n```"),
+        None => "### MEMORY.md\n(not present)".to_string(),
+    };
+
+    let agents_section = if agents.is_empty() {
+        "### Global Agents\n(none)".to_string()
+    } else {
+        let mut s = "### Global Agents\n".to_string();
+        for (path, content) in agents {
+            s.push_str(&format!("**{path}**:\n```\n{content}\n```\n\n"));
+        }
+        s
+    };
+
+    format!(
+        r#"You are an expert at reviewing AI coding agent context for quality and consistency.
+
+Review the following context files used by Claude Code. Look for:
+
+1. **Redundant** — Same information appears in multiple places (e.g., a rule in CLAUDE.md and a skill that says the same thing). Suggest consolidation.
+
+2. **Contradictory** — Conflicting instructions across files (e.g., one says "use pip" and another says "use uv"). Flag for review.
+
+3. **Oversized** — CLAUDE.md or skills that are excessively long and should be broken up or consolidated.
+
+4. **Stale** — Rules or skills that reference outdated tools, deprecated patterns, or things that no longer apply.
+
+## Context Files
+
+{claude_md_section}
+
+{skills_section}
+
+{memory_section}
+
+{agents_section}
+
+## Response Format
+
+Return a JSON object with a "findings" array:
+
+```json
+{{
+  "findings": [
+    {{
+      "finding_type": "redundant",
+      "description": "Clear description of what's redundant/contradictory/etc",
+      "affected_items": ["CLAUDE.md", ".claude/skills/some-skill/SKILL.md"],
+      "suggestion": "Specific suggestion for how to fix this"
+    }}
+  ]
+}}
+```
+
+Important:
+- Only report genuine issues, not minor style differences
+- Be specific about which files and which content is affected
+- Return ONLY the JSON object, no other text
+- If no issues found, return {{"findings": []}}"#
+    )
+}
+
 fn to_compact_session(session: &Session) -> CompactSession {
     let user_messages: Vec<CompactUserMessage> = session
         .user_messages
@@ -143,4 +228,45 @@ fn truncate_str(s: &str, max: usize) -> String {
         i -= 1;
     }
     format!("{}...", &s[..i])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_audit_prompt_all_present() {
+        let skills = vec![
+            ("skills/lint/SKILL.md".to_string(), "lint skill content".to_string()),
+        ];
+        let agents = vec![
+            ("agents/helper.md".to_string(), "helper agent content".to_string()),
+        ];
+        let prompt = build_audit_prompt(
+            Some("# CLAUDE.md content"),
+            &skills,
+            Some("# MEMORY.md content"),
+            &agents,
+        );
+        assert!(prompt.contains("# CLAUDE.md content"));
+        assert!(prompt.contains("lint skill content"));
+        assert!(prompt.contains("# MEMORY.md content"));
+        assert!(prompt.contains("helper agent content"));
+        assert!(prompt.contains("\"findings\""));
+    }
+
+    #[test]
+    fn test_build_audit_prompt_none_present() {
+        let prompt = build_audit_prompt(None, &[], None, &[]);
+        assert!(prompt.contains("(not present)"));
+        assert!(prompt.contains("(none)"));
+    }
+
+    #[test]
+    fn test_build_audit_prompt_partial() {
+        let prompt = build_audit_prompt(Some("rules here"), &[], None, &[]);
+        assert!(prompt.contains("rules here"));
+        assert!(prompt.contains("### MEMORY.md\n(not present)"));
+        assert!(prompt.contains("### Skills\n(none)"));
+    }
 }

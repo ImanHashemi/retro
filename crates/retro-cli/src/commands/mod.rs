@@ -1,8 +1,12 @@
 pub mod analyze;
 pub mod apply;
+pub mod audit;
+pub mod clean;
 pub mod diff;
+pub mod hooks;
 pub mod ingest;
 pub mod init;
+pub mod log;
 pub mod patterns;
 pub mod status;
 

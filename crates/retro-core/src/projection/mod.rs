@@ -9,6 +9,7 @@ use crate::errors::CoreError;
 use crate::models::{
     ApplyAction, ApplyPlan, ApplyTrack, Pattern, PatternStatus, Projection, SuggestedTarget,
 };
+use crate::util::backup_file;
 use chrono::Utc;
 use rusqlite::Connection;
 use std::path::Path;
@@ -118,12 +119,15 @@ pub fn build_apply_plan(
     Ok(ApplyPlan { actions })
 }
 
-/// Execute an apply plan: write files, record projections, update pattern status.
+/// Execute actions from an apply plan, optionally filtered by track.
+/// When `track_filter` is Some, only actions matching that track are executed.
+/// When None, all actions are executed.
 pub fn execute_plan(
     conn: &Connection,
     _config: &Config,
     plan: &ApplyPlan,
     _project: Option<&str>,
+    track_filter: Option<&ApplyTrack>,
 ) -> Result<ExecuteResult, CoreError> {
     let mut files_written = 0;
     let mut patterns_activated = 0;
@@ -132,9 +136,17 @@ pub fn execute_plan(
     std::fs::create_dir_all(&backup_dir)
         .map_err(|e| CoreError::Io(format!("creating backup dir: {e}")))?;
 
-    // Collect CLAUDE.md rules and write as a batch
-    let claude_md_actions: Vec<&ApplyAction> = plan
+    let actions: Vec<&ApplyAction> = plan
         .actions
+        .iter()
+        .filter(|a| match track_filter {
+            Some(track) => a.track == *track,
+            None => true,
+        })
+        .collect();
+
+    // Collect CLAUDE.md rules and write as a batch
+    let claude_md_actions: Vec<&&ApplyAction> = actions
         .iter()
         .filter(|a| a.target_type == SuggestedTarget::ClaudeMd)
         .collect();
@@ -156,7 +168,7 @@ pub fn execute_plan(
     }
 
     // Write skills and global agents individually
-    for action in &plan.actions {
+    for action in &actions {
         if action.target_type == SuggestedTarget::ClaudeMd {
             continue; // Already handled above
         }
@@ -243,29 +255,6 @@ fn write_file_with_backup(
 
     std::fs::write(target_path, content)
         .map_err(|e| CoreError::Io(format!("writing {target_path}: {e}")))?;
-
-    Ok(())
-}
-
-/// Backup a file to the backup directory.
-/// Uses a sanitized path to avoid collisions between files with the same name
-/// in different directories (e.g., /proj-a/CLAUDE.md vs /proj-b/CLAUDE.md).
-fn backup_file(path: &str, backup_dir: &Path) -> Result<(), CoreError> {
-    let sanitized = path
-        .replace(['/', '\\'], "_")
-        .trim_start_matches('_')
-        .to_string();
-
-    let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-    let backup_path = backup_dir.join(format!("{sanitized}.{timestamp}.bak"));
-
-    std::fs::copy(path, &backup_path).map_err(|e| {
-        CoreError::Io(format!(
-            "backing up {} to {}: {e}",
-            path,
-            backup_path.display()
-        ))
-    })?;
 
     Ok(())
 }

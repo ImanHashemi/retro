@@ -81,8 +81,8 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working. 18 sessions ingested from real data.
 - **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend (stdin), prompt builder, pattern merging with Levenshtein dedup, audit log. 19 unit tests.
 - **Phase 3: DONE** — Projection + Apply. `projection/{mod,skill,claude_md,global_agent}.rs`, `util.rs`, `retro apply [--dry-run] [--global]`, `retro diff [--global]`. Two-phase skill gen (draft+validate), CLAUDE.md managed section, global agent generation, projection CRUD, file backups, two-track classification (personal/shared), y/N confirmation before writes. 47 unit tests.
-- **Phase 4: TODO** — Full Apply + Clean + Audit + Git. `git.rs`, `curator.rs`, `retro clean`, `retro audit`, `retro log`, `retro hooks remove`.
-- **Phase 5: TODO** — Hooks + Polish. Git hook installation, `--auto` mode, `--verbose`, colored output polish.
+- **Phase 4: DONE** — Full Apply + Clean + Audit + Git. `git.rs` (branch/PR/hook management), `curator.rs` (staleness detection, archiving), `retro clean [--dry-run]`, `retro audit [--dry-run]`, `retro log [--since]`, `retro hooks remove`, `retro init --uninstall [--purge]`. Apply now creates git branch + PR for shared track via `gh`. 51 unit tests.
+- **Phase 5: TODO** — Hooks + Polish. `--auto` mode with lockfile + cooldown, `--verbose`, colored output polish.
 
 ## Full Plan
 

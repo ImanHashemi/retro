@@ -11,8 +11,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize retro: create ~/.retro/, config, and database
-    Init,
+    /// Initialize retro: create ~/.retro/, config, database, and git hooks
+    Init {
+        /// Remove retro hooks from current repo (preserves ~/.retro/ data)
+        #[arg(long)]
+        uninstall: bool,
+        /// When used with --uninstall, also delete ~/.retro/ entirely
+        #[arg(long, requires = "uninstall")]
+        purge: bool,
+    },
     /// Ingest new sessions from Claude Code history (fast, no AI)
     Ingest {
         /// Ingest sessions for all projects, not just the current one
@@ -49,21 +56,56 @@ enum Commands {
         #[arg(long)]
         global: bool,
     },
+    /// Archive stale patterns and remove their projections (fast, no AI)
+    Clean {
+        /// Show what would be archived without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// AI-powered context review for redundancy and contradictions
+    Audit {
+        /// Show findings without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show retro status: session counts, last analysis, patterns
     Status,
+    /// Show audit log entries
+    Log {
+        /// Show entries from the last N days/hours (e.g., "7d", "24h")
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Manage git hooks
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum HooksAction {
+    /// Remove retro git hooks from the current repository
+    Remove,
 }
 
 fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Init => commands::init::run(),
+        Commands::Init { uninstall, purge } => commands::init::run(uninstall, purge),
         Commands::Ingest { global } => commands::ingest::run(global),
         Commands::Analyze { global, since } => commands::analyze::run(global, since),
         Commands::Patterns { status } => commands::patterns::run(status),
         Commands::Apply { global, dry_run } => commands::apply::run(global, dry_run),
         Commands::Diff { global } => commands::diff::run(global),
+        Commands::Clean { dry_run } => commands::clean::run(dry_run),
+        Commands::Audit { dry_run } => commands::audit::run(dry_run),
         Commands::Status => commands::status::run(),
+        Commands::Log { since } => commands::log::run(since),
+        Commands::Hooks { action } => match action {
+            HooksAction::Remove => commands::hooks::run_remove(),
+        },
     };
 
     if let Err(e) = result {

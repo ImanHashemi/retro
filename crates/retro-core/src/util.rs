@@ -1,3 +1,46 @@
+use crate::errors::CoreError;
+use chrono::Utc;
+use std::path::Path;
+
+/// Backup a file to the backup directory.
+/// Uses a sanitized path to avoid collisions between files with the same name
+/// in different directories (e.g., /proj-a/CLAUDE.md vs /proj-b/CLAUDE.md).
+pub fn backup_file(path: &str, backup_dir: &Path) -> Result<(), CoreError> {
+    if !Path::new(path).exists() {
+        return Ok(());
+    }
+
+    let sanitized = path
+        .replace(['/', '\\'], "_")
+        .trim_start_matches('_')
+        .to_string();
+
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+    let backup_path = backup_dir.join(format!("{sanitized}.{timestamp}.bak"));
+
+    std::fs::copy(path, &backup_path).map_err(|e| {
+        CoreError::Io(format!(
+            "backing up {} to {}: {e}",
+            path,
+            backup_path.display()
+        ))
+    })?;
+
+    Ok(())
+}
+
+/// Truncate a string at a valid UTF-8 char boundary. Never panics.
+pub fn truncate_str(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    &s[..i]
+}
+
 /// Strip markdown code fences from an AI response.
 /// Handles ```json, ```yaml, ```markdown, and bare ``` fences.
 /// Returns the inner content if fences are found, otherwise returns the input trimmed.
@@ -63,5 +106,28 @@ mod tests {
     fn test_whitespace_trimmed() {
         let input = "  \n```json\n{}\n```\n  ";
         assert_eq!(strip_code_fences(input), "{}");
+    }
+
+    #[test]
+    fn test_truncate_str_ascii() {
+        assert_eq!(truncate_str("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_str_no_truncation() {
+        assert_eq!(truncate_str("short", 100), "short");
+    }
+
+    #[test]
+    fn test_truncate_str_utf8_boundary() {
+        // "café" is 5 bytes: c(1) a(1) f(1) é(2)
+        let s = "caf\u{00e9}!";
+        // Truncating at byte 4 would land mid-é, should walk back to 3
+        assert_eq!(truncate_str(s, 4), "caf");
+    }
+
+    #[test]
+    fn test_truncate_str_empty() {
+        assert_eq!(truncate_str("", 10), "");
     }
 }

@@ -446,6 +446,7 @@ name = "retro-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "colored",
  "retro-core",
