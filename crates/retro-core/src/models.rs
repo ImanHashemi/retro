@@ -1,5 +1,10 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserialize a String that may be null — converts null to empty string.
+fn null_to_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Option::<String>::deserialize(d).map(|o| o.unwrap_or_default())
+}
 
 // ── Pattern types ──
 
@@ -412,18 +417,21 @@ pub enum PatternUpdate {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewPattern {
     pub pattern_type: PatternType,
+    #[serde(deserialize_with = "null_to_empty")]
     pub description: String,
     pub confidence: f64,
     #[serde(default)]
     pub source_sessions: Vec<String>,
     #[serde(default)]
     pub related_files: Vec<String>,
+    #[serde(default, deserialize_with = "null_to_empty")]
     pub suggested_content: String,
     pub suggested_target: SuggestedTarget,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateExisting {
+    #[serde(deserialize_with = "null_to_empty")]
     pub existing_id: String,
     #[serde(default)]
     pub new_sessions: Vec<String>,

@@ -245,6 +245,31 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_analysis_response_null_fields() {
+        let json = r#"{
+            "patterns": [
+                {
+                    "action": "new",
+                    "pattern_type": "repetitive_instruction",
+                    "description": "Some pattern",
+                    "confidence": 0.8,
+                    "source_sessions": [],
+                    "related_files": [],
+                    "suggested_content": null,
+                    "suggested_target": "claude_md"
+                }
+            ]
+        }"#;
+        let updates = parse_analysis_response(json).unwrap();
+        assert_eq!(updates.len(), 1);
+        if let PatternUpdate::New(ref p) = updates[0] {
+            assert_eq!(p.suggested_content, "");
+        } else {
+            panic!("expected New pattern");
+        }
+    }
+
+    #[test]
     fn test_parse_analysis_response_empty() {
         let json = r#"{"patterns": []}"#;
         let updates = parse_analysis_response(json).unwrap();
