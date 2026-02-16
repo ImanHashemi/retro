@@ -10,6 +10,8 @@ use retro_core::models::{ApplyPlan, ApplyTrack, SuggestedTarget};
 use retro_core::projection;
 use retro_core::projection::claude_md;
 
+use retro_core::util::shorten_path;
+
 use super::git_root_or_cwd;
 
 /// Output mode for displaying the plan.
@@ -353,7 +355,7 @@ fn display_plan(plan: &ApplyPlan, dry_run: bool) {
                 icon.dimmed(),
                 action.pattern_description.white()
             );
-            println!("           \u{2192} {}", action.target_path.dimmed());
+            println!("           \u{2192} {}", shorten_path(&action.target_path).dimmed());
         }
     }
 
@@ -370,7 +372,7 @@ fn display_plan(plan: &ApplyPlan, dry_run: bool) {
                 "+".green(),
                 action.pattern_description.white()
             );
-            println!("           \u{2192} {}", action.target_path.dimmed());
+            println!("           \u{2192} {}", shorten_path(&action.target_path).dimmed());
         }
     }
 }
@@ -388,7 +390,7 @@ fn display_diff(plan: &ApplyPlan) {
     if !claude_md_actions.is_empty() {
         let target_path = &claude_md_actions[0].target_path;
         let rules: Vec<String> = claude_md_actions.iter().map(|a| a.content.clone()).collect();
-        println!("{} {}", "---".dimmed(), target_path.bold());
+        println!("{} {}", "---".dimmed(), shorten_path(target_path).bold());
 
         // Show existing managed section if any
         if let Ok(existing) = std::fs::read_to_string(target_path) {
@@ -412,7 +414,7 @@ fn display_diff(plan: &ApplyPlan) {
             println!(
                 "{} {} {}",
                 "---".dimmed(),
-                action.target_path.bold(),
+                shorten_path(&action.target_path).bold(),
                 "(new)".green()
             );
             for line in action.content.lines() {
@@ -428,7 +430,7 @@ fn display_diff(plan: &ApplyPlan) {
             println!(
                 "{} {} {}",
                 "---".dimmed(),
-                action.target_path.bold(),
+                shorten_path(&action.target_path).bold(),
                 "(new)".green()
             );
             for line in action.content.lines() {

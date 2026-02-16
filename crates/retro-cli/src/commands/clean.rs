@@ -5,6 +5,7 @@ use retro_core::config::{retro_dir, Config};
 use retro_core::curator;
 use retro_core::db;
 use retro_core::lock::LockFile;
+use retro_core::util::shorten_path;
 
 pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     let dir = retro_dir();
@@ -63,7 +64,7 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
             icon.dimmed(),
             item.pattern.description.white()
         );
-        println!("         {} {}", "path:".dimmed(), item.projection.target_path.dimmed());
+        println!("         {} {}", "path:".dimmed(), shorten_path(&item.projection.target_path).dimmed());
         println!("         {} {}", "reason:".dimmed(), item.reason.dimmed());
     }
 

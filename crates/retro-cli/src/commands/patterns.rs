@@ -2,6 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 use retro_core::config::retro_dir;
 use retro_core::db;
+use retro_core::util::shorten_path;
 
 pub fn run(status_filter: Option<String>) -> Result<()> {
     let dir = retro_dir();
@@ -74,7 +75,7 @@ pub fn run(status_filter: Option<String>) -> Result<()> {
         }
 
         if let Some(ref proj) = pattern.project {
-            println!("    project: {}", proj.white());
+            println!("    project: {}", shorten_path(proj).white());
         }
 
         println!();

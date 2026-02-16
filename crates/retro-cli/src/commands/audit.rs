@@ -7,7 +7,7 @@ use retro_core::config::{retro_dir, Config};
 use retro_core::curator::AuditResponse;
 use retro_core::ingest::context::snapshot_context;
 use retro_core::lock::LockFile;
-use retro_core::util::{strip_code_fences, truncate_str};
+use retro_core::util::{shorten_path, strip_code_fences, truncate_str};
 
 use super::git_root_or_cwd;
 
@@ -65,7 +65,7 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
             snapshot.skills.len().to_string().cyan()
         );
         for skill in &snapshot.skills {
-            println!("    {} {} ({} bytes)", "-".dimmed(), skill.path.dimmed(), skill.content.len());
+            println!("    {} {} ({} bytes)", "-".dimmed(), shorten_path(&skill.path).dimmed(), skill.content.len());
         }
 
         match &snapshot.memory_md {
@@ -83,7 +83,7 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
             snapshot.global_agents.len().to_string().cyan()
         );
         for agent in &snapshot.global_agents {
-            println!("    {} {} ({} bytes)", "-".dimmed(), agent.path.dimmed(), agent.content.len());
+            println!("    {} {} ({} bytes)", "-".dimmed(), shorten_path(&agent.path).dimmed(), agent.content.len());
         }
 
         println!();

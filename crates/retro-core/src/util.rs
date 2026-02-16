@@ -41,6 +41,22 @@ pub fn truncate_str(s: &str, max: usize) -> &str {
     &s[..i]
 }
 
+/// Shorten a path for display: replace home directory prefix with `~`.
+pub fn shorten_path(path: &str) -> String {
+    if let Some(home) = std::env::var_os("HOME") {
+        let home_str = home.to_string_lossy();
+        if path.starts_with(home_str.as_ref()) {
+            return format!("~{}", &path[home_str.len()..]);
+        }
+    }
+    path.to_string()
+}
+
+/// Shorten a `Path` for display: replace home directory prefix with `~`.
+pub fn shorten_path_buf(path: &std::path::Path) -> String {
+    shorten_path(&path.display().to_string())
+}
+
 /// Strip markdown code fences from an AI response.
 /// Handles ```json, ```yaml, ```markdown, and bare ``` fences.
 /// Returns the inner content if fences are found, otherwise returns the input trimmed.
@@ -129,5 +145,24 @@ mod tests {
     #[test]
     fn test_truncate_str_empty() {
         assert_eq!(truncate_str("", 10), "");
+    }
+
+    #[test]
+    fn test_shorten_path_replaces_home() {
+        let home = std::env::var("HOME").unwrap();
+        let input = format!("{home}/projects/foo");
+        assert_eq!(shorten_path(&input), "~/projects/foo");
+    }
+
+    #[test]
+    fn test_shorten_path_no_home_prefix() {
+        assert_eq!(shorten_path("/tmp/foo"), "/tmp/foo");
+    }
+
+    #[test]
+    fn test_shorten_path_buf_works() {
+        let home = std::env::var("HOME").unwrap();
+        let p = std::path::PathBuf::from(format!("{home}/.retro/retro.db"));
+        assert_eq!(shorten_path_buf(&p), "~/.retro/retro.db");
     }
 }

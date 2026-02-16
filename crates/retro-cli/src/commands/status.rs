@@ -2,6 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
+use retro_core::util::{shorten_path, shorten_path_buf};
 
 pub fn run() -> Result<()> {
     let dir = retro_dir();
@@ -33,7 +34,7 @@ pub fn run() -> Result<()> {
     println!();
 
     // Database info
-    println!("  {} {}", "Database:".white(), db_path.display());
+    println!("  {} {}", "Database:".white(), shorten_path_buf(&db_path));
     println!(
         "  {} {}",
         "WAL mode:".white(),
@@ -46,7 +47,7 @@ pub fn run() -> Result<()> {
     println!(
         "  {} {}",
         "Config:".white(),
-        config_path.display()
+        shorten_path_buf(&config_path)
     );
     println!();
 
@@ -104,7 +105,7 @@ pub fn run() -> Result<()> {
                 ?;
             println!(
                 "  {} ({} sessions)",
-                project.white(),
+                shorten_path(project).white(),
                 count.to_string().cyan()
             );
         }

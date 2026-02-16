@@ -3,6 +3,7 @@ use colored::Colorize;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
 use retro_core::git;
+use retro_core::util::shorten_path_buf;
 
 use super::git_root_or_cwd;
 
@@ -22,9 +23,9 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
     if !config_path.exists() {
         let config = Config::default();
         config.save(&config_path)?;
-        println!("  {} {}", "Created".green(), config_path.display());
+        println!("  {} {}", "Created".green(), shorten_path_buf(&config_path));
     } else {
-        println!("  {} {}", "Exists".yellow(), config_path.display());
+        println!("  {} {}", "Exists".yellow(), shorten_path_buf(&config_path));
     }
 
     // Initialize database with WAL mode
@@ -44,12 +45,12 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
         label.green()
     };
     if is_wal {
-        println!("  {} {} (WAL mode)", color_label, db_path.display());
+        println!("  {} {} (WAL mode)", color_label, shorten_path_buf(&db_path));
     } else {
         println!(
             "  {} {} (warning: WAL mode not enabled)",
             label.yellow(),
-            db_path.display()
+            shorten_path_buf(&db_path)
         );
     }
 
@@ -113,7 +114,7 @@ fn run_uninstall(purge: bool, _verbose: bool) -> Result<()> {
         let dir = retro_dir();
         if dir.exists() {
             std::fs::remove_dir_all(&dir).context("removing ~/.retro/")?;
-            println!("  {} {}", "Deleted".green(), dir.display());
+            println!("  {} {}", "Deleted".green(), shorten_path_buf(&dir));
         }
         println!();
         println!(
