@@ -97,13 +97,17 @@ impl AnalysisBackend for ClaudeCliBackend {
             )));
         }
 
+        let input_tokens = cli_output.total_input_tokens();
+        let output_tokens = cli_output.total_output_tokens();
+
         let result_text = cli_output
             .result
             .ok_or_else(|| CoreError::Analysis("claude CLI returned empty result".to_string()))?;
 
         Ok(BackendResponse {
             text: result_text,
-            cost_usd: cli_output.cost_usd,
+            input_tokens,
+            output_tokens,
         })
     }
 }

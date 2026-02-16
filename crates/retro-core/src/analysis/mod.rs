@@ -43,7 +43,8 @@ pub fn analyze(
             new_patterns: 0,
             updated_patterns: 0,
             total_patterns: 0,
-            ai_cost: 0.0,
+            input_tokens: 0,
+            output_tokens: 0,
         });
     }
 
@@ -82,14 +83,16 @@ pub fn analyze(
             new_patterns: 0,
             updated_patterns: 0,
             total_patterns: 0,
-            ai_cost: 0.0,
+            input_tokens: 0,
+            output_tokens: 0,
         });
     }
 
     // Create AI backend
     let backend = ClaudeCliBackend::new(&config.ai);
 
-    let mut total_cost = 0.0;
+    let mut total_input_tokens: u64 = 0;
+    let mut total_output_tokens: u64 = 0;
     let mut new_count = 0;
     let mut update_count = 0;
 
@@ -103,7 +106,8 @@ pub fn analyze(
 
         // Call AI backend
         let response = backend.execute(&prompt)?;
-        total_cost += response.cost_usd;
+        total_input_tokens += response.input_tokens;
+        total_output_tokens += response.output_tokens;
 
         // Parse AI response into PatternUpdate objects
         let updates = parse_analysis_response(&response.text)?;
@@ -145,7 +149,8 @@ pub fn analyze(
         new_patterns: new_count,
         updated_patterns: update_count,
         total_patterns: (discovered + active) as usize,
-        ai_cost: total_cost,
+        input_tokens: total_input_tokens,
+        output_tokens: total_output_tokens,
     })
 }
 

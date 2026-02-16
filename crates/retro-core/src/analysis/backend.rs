@@ -4,8 +4,10 @@ use crate::errors::CoreError;
 pub struct BackendResponse {
     /// The AI's response text (inner result extracted from wrapper).
     pub text: String,
-    /// Cost of the API call in USD.
-    pub cost_usd: f64,
+    /// Input tokens consumed.
+    pub input_tokens: u64,
+    /// Output tokens produced.
+    pub output_tokens: u64,
 }
 
 /// Trait for AI analysis backends. Sync only — no async.

@@ -91,7 +91,8 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, ver
                         "new_patterns": result.new_patterns,
                         "updated_patterns": result.updated_patterns,
                         "total_patterns": result.total_patterns,
-                        "ai_cost_usd": result.ai_cost,
+                        "input_tokens": result.input_tokens,
+                        "output_tokens": result.output_tokens,
                         "window_days": window_days,
                         "global": global,
                         "project": project,
@@ -182,7 +183,8 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, ver
         "new_patterns": result.new_patterns,
         "updated_patterns": result.updated_patterns,
         "total_patterns": result.total_patterns,
-        "ai_cost_usd": result.ai_cost,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
         "window_days": window_days,
         "global": global,
         "project": project,
@@ -213,9 +215,10 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, ver
         result.total_patterns.to_string().cyan()
     );
     println!(
-        "  {} ${:.4}",
-        "AI cost:".white(),
-        result.ai_cost
+        "  {} {} in / {} out",
+        "Tokens:".white(),
+        result.input_tokens.to_string().cyan(),
+        result.output_tokens.to_string().cyan()
     );
 
     if result.new_patterns > 0 || result.updated_patterns > 0 {

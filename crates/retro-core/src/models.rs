@@ -444,11 +444,38 @@ pub struct ClaudeCliOutput {
     #[serde(default)]
     pub is_error: bool,
     #[serde(default)]
-    pub cost_usd: f64,
-    #[serde(default)]
     pub duration_ms: u64,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub usage: Option<CliUsage>,
+}
+
+/// Token usage from Claude CLI output (nested inside `usage` field).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliUsage {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+}
+
+impl ClaudeCliOutput {
+    /// Total input tokens (direct + cache creation + cache read).
+    pub fn total_input_tokens(&self) -> u64 {
+        self.usage.as_ref().map_or(0, |u| {
+            u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens
+        })
+    }
+
+    /// Total output tokens.
+    pub fn total_output_tokens(&self) -> u64 {
+        self.usage.as_ref().map_or(0, |u| u.output_tokens)
+    }
 }
 
 /// Audit log entry.
@@ -466,7 +493,8 @@ pub struct AnalyzeResult {
     pub new_patterns: usize,
     pub updated_patterns: usize,
     pub total_patterns: usize,
-    pub ai_cost: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 /// Compact session format for serialization to AI prompts.

@@ -45,7 +45,14 @@ For each pattern found, assess:
 
 ## Existing Patterns
 
-These patterns have already been discovered. If you find NEW evidence supporting an existing pattern, return an "update" action with the existing pattern's ID. Only create "new" patterns for genuinely new findings.
+These patterns have already been discovered. **Before creating any "new" pattern, carefully check each existing pattern below.** If a new finding is about the same topic, behavior, or user preference as an existing pattern — even if the wording is completely different — you MUST use "update" with the existing pattern's ID rather than creating a new pattern.
+
+Examples of patterns that should be merged (same topic, different wording):
+- "User repeatedly asks to update docs after completing each phase" ↔ "After each phase completion, user expects documentation updates"
+- "Always run tests before committing" ↔ "User insists on running the test suite prior to any git commit"
+- "Use uv instead of pip" ↔ "User prefers uv as the Python package manager, not pip"
+
+When in doubt, prefer "update" over "new" — duplicate patterns are worse than missed ones.
 
 ```json
 {patterns_json}
@@ -88,7 +95,7 @@ Important:
 - Only return patterns you're confident about (confidence >= 0.5)
 - Be specific in descriptions — vague patterns are useless
 - For suggested_content, write the actual rule/instruction as it should appear
-- Don't create duplicate patterns — check existing ones first
+- CRITICAL: Do not create duplicate patterns. Two patterns about the same underlying behavior are duplicates even if described differently. Always check existing patterns for semantic overlap, not just textual similarity
 - Return ONLY the JSON object, no other text"#
     );
 

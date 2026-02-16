@@ -27,7 +27,7 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     let _lock = LockFile::acquire(&lock_path)
         .map_err(|e| anyhow::anyhow!("could not acquire lock: {e}"))?;
 
-    if !ClaudeCliBackend::is_available() {
+    if !dry_run && !ClaudeCliBackend::is_available() {
         anyhow::bail!("claude CLI not found on PATH. Required for context audit.");
     }
 
@@ -39,15 +39,62 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
 
     println!(
         "{}",
-        "Auditing context for redundancy and contradictions (AI-powered)...".cyan()
-    );
-    println!(
-        "  {}",
-        "This may take a minute (AI-powered audit)...".dimmed()
+        "Auditing context for redundancy and contradictions...".cyan()
     );
 
     // Snapshot current context
     let snapshot = snapshot_context(&config, &project)?;
+
+    // Dry-run: show context summary and return early (no AI call)
+    if dry_run {
+        println!();
+        println!("{}", "Context to audit:".white().bold());
+
+        match &snapshot.claude_md {
+            Some(content) => println!(
+                "  {} present ({} bytes)",
+                "CLAUDE.md:".white(),
+                content.len().to_string().cyan()
+            ),
+            None => println!("  {} {}", "CLAUDE.md:".white(), "not present".dimmed()),
+        }
+
+        println!(
+            "  {} {}",
+            "Skills:".white(),
+            snapshot.skills.len().to_string().cyan()
+        );
+        for skill in &snapshot.skills {
+            println!("    {} {} ({} bytes)", "-".dimmed(), skill.path.dimmed(), skill.content.len());
+        }
+
+        match &snapshot.memory_md {
+            Some(content) => println!(
+                "  {} present ({} bytes)",
+                "MEMORY.md:".white(),
+                content.len().to_string().cyan()
+            ),
+            None => println!("  {} {}", "MEMORY.md:".white(), "not present".dimmed()),
+        }
+
+        println!(
+            "  {} {}",
+            "Global agents:".white(),
+            snapshot.global_agents.len().to_string().cyan()
+        );
+        for agent in &snapshot.global_agents {
+            println!("    {} {} ({} bytes)", "-".dimmed(), agent.path.dimmed(), agent.content.len());
+        }
+
+        println!();
+        println!("{}", "Dry run — no AI calls made.".yellow().bold());
+        return Ok(());
+    }
+
+    println!(
+        "  {}",
+        "This may take a minute (AI-powered audit)...".dimmed()
+    );
 
     // Build audit prompt
     let skills: Vec<(String, String)> = snapshot
@@ -122,31 +169,22 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
         );
     }
 
-    if dry_run {
-        println!();
-        println!(
-            "{}",
-            "Dry run — showing findings only. Review and address manually."
-                .yellow()
-                .bold()
-        );
-    }
-
     // Audit log
     let audit_details = serde_json::json!({
         "findings_count": audit_response.findings.len(),
         "finding_types": audit_response.findings.iter().map(|f| f.finding_type.as_str()).collect::<Vec<_>>(),
-        "cost_usd": response.cost_usd,
+        "input_tokens": response.input_tokens,
+        "output_tokens": response.output_tokens,
         "project": project,
-        "dry_run": dry_run,
     });
     audit_log::append(&audit_path, "audit", audit_details)?;
 
     println!();
     println!(
-        "  {} ${:.4}",
-        "AI cost:".dimmed(),
-        response.cost_usd
+        "  {} {} in / {} out",
+        "Tokens:".dimmed(),
+        response.input_tokens.to_string().dimmed(),
+        response.output_tokens.to_string().dimmed()
     );
 
     Ok(())
