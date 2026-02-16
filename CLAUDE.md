@@ -25,7 +25,8 @@ Cargo workspace with two crates:
 - **CLAUDE.md protection** — only write within `<!-- retro:managed:start/end -->` delimiters, never touch user content.
 - **MEMORY.md** — read-only input, never write. Claude Code owns it.
 - **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
-- **Pattern merging** — AI-assisted (primary) + Levenshtein similarity > 0.8 safety net.
+- **Pattern merging** — AI-assisted (primary) with strong semantic dedup prompt guidance + Levenshtein similarity > 0.8 safety net.
+- **Token tracking** — `BackendResponse` carries `input_tokens`/`output_tokens` (not dollar cost). `ClaudeCliOutput` extracts from nested `usage` object, summing `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` for total input.
 
 ## Dependencies
 
@@ -78,6 +79,8 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - Git/gh shell-outs use `Command::new().args()` (not shell strings) — each arg passed directly to `execve()`, safe from injection
 - Git hook format: marker comment (`# retro hook - do not remove`) + command on next line; removal is line-pair based
 - Two-phase apply execution: personal actions on current branch, shared actions on a new `retro/updates-{YYYYMMDD-HHMMSS}` branch
+- Claude CLI JSON output nests token counts inside `usage` object — never assume top-level fields exist (use nested struct with `#[serde(default)]`)
+- `--dry-run` on all AI commands must skip AI calls entirely — snapshot context, show summary, return early (not just suppress writes)
 - Test strategy: unit tests with fixtures (no AI), integration tests with `MockBackend`
 
 ## Implementation Status
@@ -87,6 +90,7 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - **Phase 3: DONE** — Projection + Apply. `projection/{mod,skill,claude_md,global_agent}.rs`, `util.rs`, `retro apply [--dry-run] [--global]`, `retro diff [--global]`. Two-phase skill gen (draft+validate), CLAUDE.md managed section, global agent generation, projection CRUD, file backups, two-track classification (personal/shared), y/N confirmation before writes. 47 unit tests.
 - **Phase 4: DONE** — Full Apply + Clean + Audit + Git. `git.rs` (branch/PR/hook management), `curator.rs` (staleness detection, archiving), `retro clean [--dry-run]`, `retro audit [--dry-run]`, `retro log [--since]`, `retro hooks remove`, `retro init --uninstall [--purge]`. Apply now creates git branch + PR for shared track via `gh`. Two-phase apply (personal on current branch, shared on new branch). 63 unit tests.
 - **Phase 5: DONE** — Hooks + Polish. `--auto` mode on `ingest` and `analyze` (lockfile skip, cooldown check, silent operation), `--verbose` global flag, progress indicators for AI calls, `LockFile::try_acquire()`, post-commit hook updated to `retro ingest --auto`. `analyze --dry-run` for previewing AI calls. 63 unit tests.
+- **Post-v0.1 fixes**: Strengthened analysis prompt dedup (semantic merge guidance with examples). Replaced `cost_usd` with `input_tokens`/`output_tokens` across pipeline (extracts from nested `usage` in CLI JSON). `audit --dry-run` now skips AI calls entirely (shows context summary instead).
 
 ## Full Plan
 
