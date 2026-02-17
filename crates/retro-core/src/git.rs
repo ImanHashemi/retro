@@ -129,19 +129,13 @@ pub fn create_pr(title: &str, body: &str) -> Result<String, CoreError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Install retro git hooks (post-commit, post-merge) into the repository.
+/// Install retro git hooks (post-commit only) into the repository.
+/// Also cleans up old post-merge hooks that were retro-managed.
 pub fn install_hooks(repo_root: &str) -> Result<Vec<String>, CoreError> {
     let hooks_dir = Path::new(repo_root).join(".git").join("hooks");
-    if !hooks_dir.exists() {
-        return Err(CoreError::Io(format!(
-            "git hooks directory not found: {}",
-            hooks_dir.display()
-        )));
-    }
-
     let mut installed = Vec::new();
 
-    // post-commit hook: fast ingest
+    // Single post-commit hook: ingest + opportunistic analyze/apply
     let post_commit_path = hooks_dir.join("post-commit");
     if install_hook_lines(
         &post_commit_path,
@@ -150,13 +144,19 @@ pub fn install_hooks(repo_root: &str) -> Result<Vec<String>, CoreError> {
         installed.push("post-commit".to_string());
     }
 
-    // post-merge hook: full analyze
+    // Remove old post-merge hook if it was retro-managed
     let post_merge_path = hooks_dir.join("post-merge");
-    if install_hook_lines(
-        &post_merge_path,
-        &format!("{HOOK_MARKER}\nretro analyze --auto 2>/dev/null &\n"),
-    )? {
-        installed.push("post-merge".to_string());
+    if post_merge_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&post_merge_path) {
+            if content.contains(HOOK_MARKER) {
+                let cleaned = remove_hook_lines(&content);
+                if cleaned.trim() == "#!/bin/sh" || cleaned.trim().is_empty() {
+                    std::fs::remove_file(&post_merge_path).ok();
+                } else {
+                    std::fs::write(&post_merge_path, cleaned).ok();
+                }
+            }
+        }
     }
 
     Ok(installed)
@@ -299,5 +299,57 @@ mod tests {
         let content = "#!/bin/sh\n# retro hook - do not remove\nretro ingest 2>/dev/null &\n# retro hook - do not remove\nretro analyze --auto 2>/dev/null &\n";
         let result = remove_hook_lines(content);
         assert_eq!(result, "#!/bin/sh\n");
+    }
+
+    #[test]
+    fn test_install_hooks_only_post_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks_dir = dir.path().join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+
+        let installed = install_hooks(dir.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(installed, vec!["post-commit".to_string()]);
+
+        let post_commit = std::fs::read_to_string(hooks_dir.join("post-commit")).unwrap();
+        assert!(post_commit.contains("retro ingest --auto"));
+
+        // post-merge should NOT exist
+        assert!(!hooks_dir.join("post-merge").exists());
+    }
+
+    #[test]
+    fn test_install_hooks_removes_old_post_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks_dir = dir.path().join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+
+        // Simulate old retro post-merge hook
+        let old_content =
+            "#!/bin/sh\n# retro hook - do not remove\nretro analyze --auto 2>/dev/null &\n";
+        std::fs::write(hooks_dir.join("post-merge"), old_content).unwrap();
+
+        install_hooks(dir.path().to_str().unwrap()).unwrap();
+
+        // post-merge should be removed (was retro-only)
+        assert!(!hooks_dir.join("post-merge").exists());
+    }
+
+    #[test]
+    fn test_install_hooks_preserves_non_retro_post_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks_dir = dir.path().join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+
+        // post-merge with retro + other content
+        let mixed = "#!/bin/sh\nother-tool run\n# retro hook - do not remove\nretro analyze --auto 2>/dev/null &\n";
+        std::fs::write(hooks_dir.join("post-merge"), mixed).unwrap();
+
+        install_hooks(dir.path().to_str().unwrap()).unwrap();
+
+        // post-merge should still exist with other-tool preserved
+        let content = std::fs::read_to_string(hooks_dir.join("post-merge")).unwrap();
+        assert!(content.contains("other-tool run"));
+        assert!(!content.contains("retro"));
     }
 }
