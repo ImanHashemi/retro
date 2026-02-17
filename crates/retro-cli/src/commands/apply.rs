@@ -12,7 +12,7 @@ use retro_core::projection::claude_md;
 
 use retro_core::util::shorten_path;
 
-use super::git_root_or_cwd;
+use super::{git_root_or_cwd, within_cooldown};
 
 /// Output mode for displaying the plan.
 pub enum DisplayMode {
@@ -23,7 +23,7 @@ pub enum DisplayMode {
 }
 
 /// Shared entry point: build the apply plan and either display or execute it.
-pub fn run_apply(global: bool, dry_run: bool, _auto: bool, display_mode: DisplayMode, verbose: bool) -> Result<()> {
+pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayMode, verbose: bool) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -31,13 +31,122 @@ pub fn run_apply(global: bool, dry_run: bool, _auto: bool, display_mode: Display
     let lock_path = dir.join("retro.lock");
 
     if !db_path.exists() {
+        if auto {
+            return Ok(());
+        }
         anyhow::bail!("retro not initialized. Run `retro init` first.");
     }
 
     let config = Config::load(&config_path)?;
     let conn = db::open_db(&db_path)?;
 
-    // Acquire lockfile
+    // Auto mode: acquire lockfile silently, check cooldown, run without prompts
+    if auto {
+        let _lock = match LockFile::try_acquire(&lock_path) {
+            Some(lock) => lock,
+            None => {
+                if verbose {
+                    eprintln!("[verbose] skipping apply: another process holds the lock");
+                }
+                return Ok(());
+            }
+        };
+
+        // Cooldown check
+        if let Ok(Some(ref last)) = db::last_applied_at(&conn) {
+            if within_cooldown(last, config.hooks.apply_cooldown_minutes) {
+                if verbose {
+                    eprintln!(
+                        "[verbose] skipping apply: within cooldown ({}m)",
+                        config.hooks.apply_cooldown_minutes
+                    );
+                }
+                return Ok(());
+            }
+        }
+
+        // Data gate: any un-projected patterns?
+        if !db::has_unprojected_patterns(&conn)? {
+            if verbose {
+                eprintln!("[verbose] skipping apply: no un-projected patterns");
+            }
+            return Ok(());
+        }
+
+        let project = if global {
+            None
+        } else {
+            Some(git_root_or_cwd()?)
+        };
+
+        // Check claude CLI availability
+        if !ClaudeCliBackend::is_available() {
+            if verbose {
+                eprintln!("[verbose] skipping apply: claude CLI not available");
+            }
+            return Ok(());
+        }
+
+        let backend = ClaudeCliBackend::new(&config.ai);
+
+        // Build and execute plan silently
+        match projection::build_apply_plan(&conn, &config, &backend, project.as_deref()) {
+            Ok(plan) => {
+                if plan.is_empty() {
+                    if verbose {
+                        eprintln!("[verbose] apply: no actions in plan");
+                    }
+                    return Ok(());
+                }
+
+                // Phase 1: Personal actions on current branch
+                if let Err(e) = projection::execute_plan(
+                    &conn,
+                    &config,
+                    &plan,
+                    project.as_deref(),
+                    Some(&ApplyTrack::Personal),
+                ) {
+                    if verbose {
+                        eprintln!("[verbose] apply personal error: {e}");
+                    }
+                }
+
+                // Phase 2: Shared actions on new branch + PR
+                if !plan.shared_actions().is_empty() {
+                    if let Err(e) = execute_shared_with_pr(
+                        &conn, &config, &plan, project.as_deref(), true,
+                    ) {
+                        if verbose {
+                            eprintln!("[verbose] apply shared error: {e}");
+                        }
+                    }
+                }
+
+                // Audit log (best-effort in auto mode)
+                let audit_details = serde_json::json!({
+                    "actions": plan.actions.len(),
+                    "project": project,
+                    "global": global,
+                    "auto": true,
+                });
+                let _ = audit_log::append(&audit_path, "apply", audit_details);
+
+                if verbose {
+                    eprintln!("[verbose] auto-apply complete: {} actions", plan.actions.len());
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("[verbose] apply plan error: {e}");
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
+    // Interactive mode — acquire lockfile (error if locked)
     let _lock = LockFile::acquire(&lock_path)
         .map_err(|e| anyhow::anyhow!("could not acquire lock: {e}"))?;
 
@@ -137,7 +246,7 @@ pub fn run_apply(global: bool, dry_run: bool, _auto: bool, display_mode: Display
     // Phase 2: Shared actions (skills, CLAUDE.md) — on a new branch if in git repo
     let has_shared = !plan.shared_actions().is_empty();
     if has_shared {
-        let shared_result = execute_shared_with_pr(&conn, &config, &plan, project.as_deref())?;
+        let shared_result = execute_shared_with_pr(&conn, &config, &plan, project.as_deref(), false)?;
         total_files += shared_result.files_written;
         total_patterns += shared_result.patterns_activated;
         pr_url = shared_result.pr_url;
@@ -195,11 +304,13 @@ struct SharedResult {
 }
 
 /// Execute shared actions: create branch, write files, commit, create PR, switch back.
+/// When `silent` is true (auto mode), suppress all stdout/stderr output.
 fn execute_shared_with_pr(
     conn: &db::Connection,
     config: &Config,
     plan: &ApplyPlan,
     project: Option<&str>,
+    silent: bool,
 ) -> Result<SharedResult> {
     let in_git = git::is_in_git_repo();
 
@@ -226,10 +337,12 @@ fn execute_shared_with_pr(
 
     // Create branch
     if let Err(e) = git::create_branch(&branch_name) {
-        eprintln!(
-            "  {} creating branch: {e}. Writing files on current branch.",
-            "Warning".yellow()
-        );
+        if !silent {
+            eprintln!(
+                "  {} creating branch: {e}. Writing files on current branch.",
+                "Warning".yellow()
+            );
+        }
         let result = projection::execute_plan(
             conn,
             config,
@@ -266,7 +379,9 @@ fn execute_shared_with_pr(
     );
 
     let pr_url = if let Err(e) = git::commit_files(&shared_files, &commit_msg) {
-        eprintln!("  {} committing: {e}", "Warning".yellow());
+        if !silent {
+            eprintln!("  {} committing: {e}", "Warning".yellow());
+        }
         None
     } else if git::is_gh_available() {
         // Try to create PR
@@ -285,26 +400,30 @@ fn execute_shared_with_pr(
         match git::create_pr(&title, &body) {
             Ok(url) => Some(url),
             Err(e) => {
-                eprintln!("  {} creating PR: {e}", "Warning".yellow());
-                println!(
-                    "  {}",
-                    format!(
-                        "Changes committed to branch `{branch_name}`. Create PR manually."
-                    )
-                    .dimmed()
-                );
+                if !silent {
+                    eprintln!("  {} creating PR: {e}", "Warning".yellow());
+                    println!(
+                        "  {}",
+                        format!(
+                            "Changes committed to branch `{branch_name}`. Create PR manually."
+                        )
+                        .dimmed()
+                    );
+                }
                 None
             }
         }
     } else {
-        println!(
-            "  {}",
-            format!("Changes committed to branch `{branch_name}`.").dimmed()
-        );
-        println!(
-            "  {}",
-            "Install `gh` CLI to auto-create PRs, or create one manually.".dimmed()
-        );
+        if !silent {
+            println!(
+                "  {}",
+                format!("Changes committed to branch `{branch_name}`.").dimmed()
+            );
+            println!(
+                "  {}",
+                "Install `gh` CLI to auto-create PRs, or create one manually.".dimmed()
+            );
+        }
         None
     };
 
