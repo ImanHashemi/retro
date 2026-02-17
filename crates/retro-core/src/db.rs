@@ -1172,4 +1172,54 @@ mod tests {
         let urls = get_unnudged_pr_urls(&conn).unwrap();
         assert!(urls.is_empty());
     }
+
+    #[test]
+    fn test_auto_apply_data_triggers_full_flow() {
+        let conn = test_db();
+
+        // Initially: no data, no triggers
+        assert!(!has_unanalyzed_sessions(&conn).unwrap());
+        assert!(!has_unprojected_patterns(&conn).unwrap());
+        assert!(get_unnudged_pr_urls(&conn).unwrap().is_empty());
+
+        // Step 1: Ingest creates sessions → triggers analyze
+        let session = IngestedSession {
+            session_id: "sess-1".to_string(),
+            project: "/proj".to_string(),
+            session_path: "/path/sess".to_string(),
+            file_size: 100,
+            file_mtime: "2025-01-01T00:00:00Z".to_string(),
+            ingested_at: Utc::now(),
+        };
+        record_ingested_session(&conn, &session).unwrap();
+        assert!(has_unanalyzed_sessions(&conn).unwrap());
+
+        // Step 2: After analysis → sessions marked, patterns created → triggers apply
+        record_analyzed_session(&conn, "sess-1", "/proj").unwrap();
+        assert!(!has_unanalyzed_sessions(&conn).unwrap());
+
+        let p = test_pattern("pat-1", "Always use cargo fmt");
+        insert_pattern(&conn, &p).unwrap();
+        assert!(has_unprojected_patterns(&conn).unwrap());
+
+        // Step 3: After apply → projection created with PR URL → triggers nudge
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "Skill".to_string(),
+            target_path: "/skills/cargo-fmt.md".to_string(),
+            content: "skill content".to_string(),
+            applied_at: Utc::now(),
+            pr_url: Some("https://github.com/test/pull/42".to_string()),
+        };
+        insert_projection(&conn, &proj).unwrap();
+        assert!(!has_unprojected_patterns(&conn).unwrap());
+
+        // Step 4: Nudge shows PR URL, then marks as nudged
+        let urls = get_unnudged_pr_urls(&conn).unwrap();
+        assert_eq!(urls, vec!["https://github.com/test/pull/42"]);
+
+        mark_projections_nudged(&conn).unwrap();
+        assert!(get_unnudged_pr_urls(&conn).unwrap().is_empty());
+    }
 }
