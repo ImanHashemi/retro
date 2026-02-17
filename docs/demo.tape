@@ -10,7 +10,7 @@ Set Width 1000
 Set Height 600
 Set Theme "Catppuccin Mocha"
 Set Padding 20
-Set TypingSpeed 40ms
+Set TypingSpeed 60ms
 
 # Title pause
 Sleep 1s
@@ -23,12 +23,5 @@ Sleep 3s
 # Show discovered patterns
 Type "retro patterns"
 Enter
-Sleep 5s
+Sleep 10s
 
-# Show what retro wants to do about it
-Type "retro apply --dry-run"
-Enter
-Sleep 5s
-
-# Final pause to read
-Sleep 2s
