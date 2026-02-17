@@ -196,6 +196,65 @@ pub fn last_analyzed_at(conn: &Connection) -> Result<Option<String>, CoreError> 
     Ok(result)
 }
 
+/// Get the most recent projection (apply) timestamp.
+pub fn last_applied_at(conn: &Connection) -> Result<Option<String>, CoreError> {
+    let result = conn.query_row(
+        "SELECT MAX(applied_at) FROM projections",
+        [],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+    Ok(result)
+}
+
+/// Check if there are ingested sessions that haven't been analyzed yet.
+pub fn has_unanalyzed_sessions(conn: &Connection) -> Result<bool, CoreError> {
+    let count: u64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingested_sessions i
+         LEFT JOIN analyzed_sessions a ON i.session_id = a.session_id
+         WHERE a.session_id IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Check if there are patterns eligible for projection that haven't been projected yet.
+/// Excludes patterns that have generation_failed=true or suggested_target='db_only'.
+pub fn has_unprojected_patterns(conn: &Connection) -> Result<bool, CoreError> {
+    let count: u64 = conn.query_row(
+        "SELECT COUNT(*) FROM patterns p
+         LEFT JOIN projections pr ON p.id = pr.pattern_id
+         WHERE pr.id IS NULL
+         AND p.status IN ('discovered', 'active')
+         AND p.generation_failed = 0
+         AND p.suggested_target != 'db_only'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Get distinct PR URLs from projections that haven't been nudged yet.
+pub fn get_unnudged_pr_urls(conn: &Connection) -> Result<Vec<String>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT pr_url FROM projections WHERE pr_url IS NOT NULL AND nudged = 0",
+    )?;
+    let urls = stmt
+        .query_map([], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(urls)
+}
+
+/// Mark all projections with PR URLs as nudged.
+pub fn mark_projections_nudged(conn: &Connection) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE projections SET nudged = 1 WHERE pr_url IS NOT NULL AND nudged = 0",
+        [],
+    )?;
+    Ok(())
+}
+
 /// Verify the database is using WAL mode.
 pub fn verify_wal_mode(conn: &Connection) -> Result<bool, CoreError> {
     let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
@@ -890,5 +949,227 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, 2);
+    }
+
+    // ── Tests for auto-apply pipeline DB functions ──
+
+    #[test]
+    fn test_last_applied_at_empty() {
+        let conn = test_db();
+        let result = last_applied_at(&conn).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_last_applied_at_returns_max() {
+        let conn = test_db();
+
+        // Insert two patterns to serve as FK targets
+        let p1 = test_pattern("pat-1", "Pattern one");
+        let p2 = test_pattern("pat-2", "Pattern two");
+        insert_pattern(&conn, &p1).unwrap();
+        insert_pattern(&conn, &p2).unwrap();
+
+        // Insert projections with different timestamps
+        let earlier = chrono::DateTime::parse_from_rfc3339("2026-01-10T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let later = chrono::DateTime::parse_from_rfc3339("2026-02-15T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let proj1 = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "Skill".to_string(),
+            target_path: "/path/a".to_string(),
+            content: "content a".to_string(),
+            applied_at: earlier,
+            pr_url: None,
+        };
+        let proj2 = Projection {
+            id: "proj-2".to_string(),
+            pattern_id: "pat-2".to_string(),
+            target_type: "Skill".to_string(),
+            target_path: "/path/b".to_string(),
+            content: "content b".to_string(),
+            applied_at: later,
+            pr_url: None,
+        };
+        insert_projection(&conn, &proj1).unwrap();
+        insert_projection(&conn, &proj2).unwrap();
+
+        let result = last_applied_at(&conn).unwrap();
+        assert!(result.is_some());
+        // The max should be the later timestamp
+        let max_ts = result.unwrap();
+        assert!(max_ts.contains("2026-02-15"), "Expected later timestamp, got: {}", max_ts);
+    }
+
+    #[test]
+    fn test_has_unanalyzed_sessions_empty() {
+        let conn = test_db();
+        assert!(!has_unanalyzed_sessions(&conn).unwrap());
+    }
+
+    #[test]
+    fn test_has_unanalyzed_sessions_with_new_session() {
+        let conn = test_db();
+
+        let session = IngestedSession {
+            session_id: "sess-1".to_string(),
+            project: "/test".to_string(),
+            session_path: "/tmp/test.jsonl".to_string(),
+            file_size: 100,
+            file_mtime: "2026-01-01T00:00:00Z".to_string(),
+            ingested_at: Utc::now(),
+        };
+        record_ingested_session(&conn, &session).unwrap();
+
+        assert!(has_unanalyzed_sessions(&conn).unwrap());
+    }
+
+    #[test]
+    fn test_has_unanalyzed_sessions_after_analysis() {
+        let conn = test_db();
+
+        let session = IngestedSession {
+            session_id: "sess-1".to_string(),
+            project: "/test".to_string(),
+            session_path: "/tmp/test.jsonl".to_string(),
+            file_size: 100,
+            file_mtime: "2026-01-01T00:00:00Z".to_string(),
+            ingested_at: Utc::now(),
+        };
+        record_ingested_session(&conn, &session).unwrap();
+        record_analyzed_session(&conn, "sess-1", "/test").unwrap();
+
+        assert!(!has_unanalyzed_sessions(&conn).unwrap());
+    }
+
+    #[test]
+    fn test_has_unprojected_patterns_empty() {
+        let conn = test_db();
+        assert!(!has_unprojected_patterns(&conn).unwrap());
+    }
+
+    #[test]
+    fn test_has_unprojected_patterns_with_discovered() {
+        let conn = test_db();
+
+        let pattern = test_pattern("pat-1", "Use uv for Python");
+        insert_pattern(&conn, &pattern).unwrap();
+
+        assert!(has_unprojected_patterns(&conn).unwrap());
+    }
+
+    #[test]
+    fn test_has_unprojected_patterns_after_projection() {
+        let conn = test_db();
+
+        let pattern = test_pattern("pat-1", "Use uv for Python");
+        insert_pattern(&conn, &pattern).unwrap();
+
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "Skill".to_string(),
+            target_path: "/path".to_string(),
+            content: "content".to_string(),
+            applied_at: Utc::now(),
+            pr_url: Some("https://github.com/test/pull/1".to_string()),
+        };
+        insert_projection(&conn, &proj).unwrap();
+
+        assert!(!has_unprojected_patterns(&conn).unwrap());
+    }
+
+    #[test]
+    fn test_has_unprojected_patterns_excludes_generation_failed() {
+        let conn = test_db();
+
+        let pattern = test_pattern("pat-1", "Use uv for Python");
+        insert_pattern(&conn, &pattern).unwrap();
+        set_generation_failed(&conn, "pat-1", true).unwrap();
+
+        assert!(!has_unprojected_patterns(&conn).unwrap());
+    }
+
+    #[test]
+    fn test_has_unprojected_patterns_excludes_dbonly() {
+        let conn = test_db();
+
+        let mut pattern = test_pattern("pat-1", "Internal tracking only");
+        pattern.suggested_target = SuggestedTarget::DbOnly;
+        insert_pattern(&conn, &pattern).unwrap();
+
+        assert!(!has_unprojected_patterns(&conn).unwrap());
+    }
+
+    #[test]
+    fn test_get_unnudged_pr_urls() {
+        let conn = test_db();
+
+        let p1 = test_pattern("pat-1", "Pattern one");
+        let p2 = test_pattern("pat-2", "Pattern two");
+        insert_pattern(&conn, &p1).unwrap();
+        insert_pattern(&conn, &p2).unwrap();
+
+        // Projection with PR URL (unnudged by default)
+        let proj1 = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "Skill".to_string(),
+            target_path: "/path/a".to_string(),
+            content: "content a".to_string(),
+            applied_at: Utc::now(),
+            pr_url: Some("https://github.com/test/pull/1".to_string()),
+        };
+        // Projection without PR URL
+        let proj2 = Projection {
+            id: "proj-2".to_string(),
+            pattern_id: "pat-2".to_string(),
+            target_type: "Skill".to_string(),
+            target_path: "/path/b".to_string(),
+            content: "content b".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+        };
+        insert_projection(&conn, &proj1).unwrap();
+        insert_projection(&conn, &proj2).unwrap();
+
+        let urls = get_unnudged_pr_urls(&conn).unwrap();
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0], "https://github.com/test/pull/1");
+    }
+
+    #[test]
+    fn test_mark_projections_nudged() {
+        let conn = test_db();
+
+        let p1 = test_pattern("pat-1", "Pattern one");
+        insert_pattern(&conn, &p1).unwrap();
+
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "Skill".to_string(),
+            target_path: "/path".to_string(),
+            content: "content".to_string(),
+            applied_at: Utc::now(),
+            pr_url: Some("https://github.com/test/pull/1".to_string()),
+        };
+        insert_projection(&conn, &proj).unwrap();
+
+        // Before nudging: should have unnudged PRs
+        let urls = get_unnudged_pr_urls(&conn).unwrap();
+        assert_eq!(urls.len(), 1);
+
+        // Nudge
+        mark_projections_nudged(&conn).unwrap();
+
+        // After nudging: should be empty
+        let urls = get_unnudged_pr_urls(&conn).unwrap();
+        assert!(urls.is_empty());
     }
 }
