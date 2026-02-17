@@ -8,7 +8,7 @@ Retro is like having a teammate who runs a retrospective on your AI coding sessi
 
 The result: your agent gets better over time, learning from every session, without you having to manually maintain its context. And you stay in control — shared changes come as PRs for you to review.
 
-<!-- TODO: Add hero GIF showing retro analyze → retro apply pipeline -->
+![retro demo](docs/demo.gif)
 
 ## Quick Start
 
