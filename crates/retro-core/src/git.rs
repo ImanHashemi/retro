@@ -109,6 +109,38 @@ pub fn fetch_branch(branch: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Stash uncommitted changes. Returns true if something was stashed.
+pub fn stash_push() -> Result<bool, CoreError> {
+    let output = Command::new("git")
+        .args(["stash", "push", "-m", "retro: temporary stash for branch switch"])
+        .output()
+        .map_err(|e| CoreError::Io(format!("git stash: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CoreError::Io(format!("git stash failed: {stderr}")));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // "No local changes to save" means nothing was stashed
+    Ok(!stdout.contains("No local changes"))
+}
+
+/// Pop the most recent stash entry.
+pub fn stash_pop() -> Result<(), CoreError> {
+    let output = Command::new("git")
+        .args(["stash", "pop"])
+        .output()
+        .map_err(|e| CoreError::Io(format!("git stash pop: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CoreError::Io(format!("git stash pop failed: {stderr}")));
+    }
+
+    Ok(())
+}
+
 /// Push the current branch to origin.
 pub fn push_current_branch() -> Result<(), CoreError> {
     let output = Command::new("git")

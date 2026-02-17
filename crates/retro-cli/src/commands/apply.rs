@@ -362,6 +362,9 @@ fn execute_shared_with_pr(
         }
     }
 
+    // Stash uncommitted changes before switching branches
+    let did_stash = git::stash_push().unwrap_or(false);
+
     let date = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let branch_name = format!("retro/updates-{date}");
     let start_point = format!("origin/{default_branch}");
@@ -373,6 +376,10 @@ fn execute_shared_with_pr(
                 "  {} creating branch: {e}. Writing files on current branch.",
                 "Warning".yellow()
             );
+        }
+        // Restore stash before falling back
+        if did_stash {
+            let _ = git::stash_pop();
         }
         let result = projection::execute_plan(
             conn,
@@ -473,8 +480,11 @@ fn execute_shared_with_pr(
         None
     };
 
-    // Switch back to original branch
+    // Switch back to original branch and restore stashed changes
     let _ = git::checkout_branch(&original_branch);
+    if did_stash {
+        let _ = git::stash_pop();
+    }
 
     Ok(SharedResult {
         files_written: result.files_written,
