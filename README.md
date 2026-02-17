@@ -42,21 +42,21 @@ Retro operates as a three-stage pipeline:
 ```
   ┌─────────────────────────────────────────────┐
   │  INGESTION (pure Rust, no AI)               │
-  │  Reads Claude Code session history           │
-  │  Parses into structured sessions in SQLite   │
+  │  Reads Claude Code session history          │
+  │  Parses into structured sessions in SQLite  │
   └────────────────┬────────────────────────────┘
                    │
   ┌────────────────▼────────────────────────────┐
-  │  ANALYSIS (AI-powered)                       │
-  │  Discovers: repeated instructions,           │
-  │  recurring mistakes, workflow patterns       │
-  │  Stores patterns with confidence scores      │
+  │  ANALYSIS (AI-powered)                      │
+  │  Discovers: repeated instructions,          │
+  │  recurring mistakes, workflow patterns      │
+  │  Stores patterns with confidence scores     │
   └────────────────┬────────────────────────────┘
                    │
   ┌────────────────▼────────────────────────────┐
-  │  PROJECTION (two-track)                      │
-  │  Personal (auto-apply): global agents        │
-  │  Shared (via PR): CLAUDE.md rules, skills    │
+  │  PROJECTION (two-track)                     │
+  │  Personal (auto-apply): global agents       │
+  │  Shared (via PR): CLAUDE.md rules, skills   │
   └─────────────────────────────────────────────┘
 ```
 
