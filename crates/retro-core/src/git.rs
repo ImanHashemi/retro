@@ -54,16 +54,71 @@ pub fn current_branch() -> Result<String, CoreError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Create and checkout a new git branch.
-pub fn create_branch(name: &str) -> Result<(), CoreError> {
+/// Create and checkout a new git branch from a specific start point.
+/// Use `start_point` like `"origin/main"` to branch from the remote default branch.
+pub fn create_branch(name: &str, start_point: Option<&str>) -> Result<(), CoreError> {
+    let mut args = vec!["checkout", "-b", name];
+    if let Some(sp) = start_point {
+        args.push(sp);
+    }
+
     let output = Command::new("git")
-        .args(["checkout", "-b", name])
+        .args(&args)
         .output()
         .map_err(|e| CoreError::Io(format!("creating branch: {e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(CoreError::Io(format!("git checkout -b failed: {stderr}")));
+    }
+
+    Ok(())
+}
+
+/// Detect the repository's default branch name via `gh`.
+pub fn default_branch() -> Result<String, CoreError> {
+    let output = Command::new("gh")
+        .args(["repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"])
+        .output()
+        .map_err(|e| CoreError::Io(format!("gh repo view: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CoreError::Io(format!("failed to detect default branch: {stderr}")));
+    }
+
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() {
+        return Err(CoreError::Io("default branch name is empty".to_string()));
+    }
+    Ok(name)
+}
+
+/// Fetch a specific branch from origin.
+pub fn fetch_branch(branch: &str) -> Result<(), CoreError> {
+    let output = Command::new("git")
+        .args(["fetch", "origin", branch])
+        .output()
+        .map_err(|e| CoreError::Io(format!("git fetch: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CoreError::Io(format!("git fetch origin {branch} failed: {stderr}")));
+    }
+
+    Ok(())
+}
+
+/// Push the current branch to origin.
+pub fn push_current_branch() -> Result<(), CoreError> {
+    let output = Command::new("git")
+        .args(["push", "-u", "origin", "HEAD"])
+        .output()
+        .map_err(|e| CoreError::Io(format!("git push: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CoreError::Io(format!("git push failed: {stderr}")));
     }
 
     Ok(())
@@ -115,9 +170,10 @@ pub fn commit_files(files: &[&str], message: &str) -> Result<(), CoreError> {
 }
 
 /// Create a PR using `gh pr create`. Returns the PR URL on success.
-pub fn create_pr(title: &str, body: &str) -> Result<String, CoreError> {
+/// `base` specifies the target branch for the PR (e.g., "main").
+pub fn create_pr(title: &str, body: &str, base: &str) -> Result<String, CoreError> {
     let output = Command::new("gh")
-        .args(["pr", "create", "--title", title, "--body", body])
+        .args(["pr", "create", "--title", title, "--body", body, "--base", base])
         .output()
         .map_err(|e| CoreError::Io(format!("gh pr create: {e}")))?;
 
