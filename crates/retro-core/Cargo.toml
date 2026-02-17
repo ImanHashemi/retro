@@ -1,7 +1,7 @@
 [package]
 name = "retro-core"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Core library for retro, the active context curator for AI coding agents"
 license = "MIT"
 repository = "https://github.com/ImanHashemi/retro"
