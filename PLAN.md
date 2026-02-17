@@ -205,9 +205,11 @@
  max_budget_per_call = 0.50          # Cost cap per AI invocation
 
  [hooks]
- auto_cooldown_minutes = 60          # Skip auto-analyze if ran within this window
+ ingest_cooldown_minutes = 5         # Minimum time between auto-ingests
+ analyze_cooldown_minutes = 1440     # Minimum time between auto-analyses (24h)
+ apply_cooldown_minutes = 1440       # Minimum time between auto-applies (24h)
+ auto_apply = true                   # Enable full auto pipeline
  post_commit = "ingest"              # "ingest" (fast) | "none"
- post_merge = "analyze"              # "analyze" (full AI) | "ingest" | "none"
 
  [paths]
  claude_dir = "~/.claude"            # Override Claude Code data directory

@@ -5,7 +5,7 @@ pub use rusqlite::Connection;
 use rusqlite::params;
 use std::path::Path;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 1;
 
 /// Open (or create) the retro database with WAL mode enabled.
 pub fn open_db(path: &Path) -> Result<Connection, CoreError> {
@@ -51,7 +51,8 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
                 target_path TEXT NOT NULL,
                 content TEXT NOT NULL,
                 applied_at TEXT NOT NULL,
-                pr_url TEXT
+                pr_url TEXT,
+                nudged INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS analyzed_sessions (
@@ -75,14 +76,6 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
             CREATE INDEX IF NOT EXISTS idx_patterns_project ON patterns(project);
             CREATE INDEX IF NOT EXISTS idx_projections_pattern ON projections(pattern_id);
             ",
-        )?;
-
-        conn.pragma_update(None, "user_version", 1u32)?;
-    }
-
-    if current_version < 2 {
-        conn.execute_batch(
-            "ALTER TABLE projections ADD COLUMN nudged INTEGER NOT NULL DEFAULT 0;",
         )?;
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -827,19 +820,11 @@ mod tests {
     }
 
     #[test]
-    fn test_projections_nudged_column_exists_with_default_zero() {
+    fn test_projections_nudged_column_defaults_to_zero() {
         let conn = test_db();
 
-        // Verify the nudged column exists with DEFAULT 0
-        let nudged_default: i64 = conn
-            .query_row(
-                "SELECT nudged FROM projections LIMIT 0",
-                [],
-                |row| row.get(0),
-            )
-            // No rows is fine — we just need the query to not fail (column exists)
-            .unwrap_or(0);
-        assert_eq!(nudged_default, 0);
+        // Verify the nudged column exists by preparing a statement that references it
+        conn.prepare("SELECT nudged FROM projections").unwrap();
 
         // Insert a projection without specifying nudged — should default to 0
         let pattern = test_pattern("pat-1", "Test pattern");
@@ -864,91 +849,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(nudged, 0, "nudged column should default to 0");
-    }
-
-    #[test]
-    fn test_migration_v1_to_v2_adds_nudged() {
-        // Simulate a v1 database (without nudged column) and verify migration adds it
-        let conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
-
-        // Manually create v1 schema
-        conn.execute_batch(
-            "
-            CREATE TABLE patterns (
-                id TEXT PRIMARY KEY,
-                pattern_type TEXT NOT NULL,
-                description TEXT NOT NULL,
-                confidence REAL NOT NULL,
-                times_seen INTEGER NOT NULL DEFAULT 1,
-                first_seen TEXT NOT NULL,
-                last_seen TEXT NOT NULL,
-                last_projected TEXT,
-                status TEXT NOT NULL DEFAULT 'discovered',
-                source_sessions TEXT NOT NULL,
-                related_files TEXT NOT NULL,
-                suggested_content TEXT NOT NULL,
-                suggested_target TEXT NOT NULL,
-                project TEXT,
-                generation_failed INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE projections (
-                id TEXT PRIMARY KEY,
-                pattern_id TEXT NOT NULL REFERENCES patterns(id),
-                target_type TEXT NOT NULL,
-                target_path TEXT NOT NULL,
-                content TEXT NOT NULL,
-                applied_at TEXT NOT NULL,
-                pr_url TEXT
-            );
-            CREATE TABLE analyzed_sessions (
-                session_id TEXT PRIMARY KEY,
-                project TEXT NOT NULL,
-                analyzed_at TEXT NOT NULL
-            );
-            CREATE TABLE ingested_sessions (
-                session_id TEXT PRIMARY KEY,
-                project TEXT NOT NULL,
-                session_path TEXT NOT NULL,
-                file_size INTEGER NOT NULL,
-                file_mtime TEXT NOT NULL,
-                ingested_at TEXT NOT NULL
-            );
-            PRAGMA user_version = 1;
-            ",
-        )
-        .unwrap();
-
-        // Insert a projection before migration (no nudged column)
-        conn.execute(
-            "INSERT INTO patterns (id, pattern_type, description, confidence, first_seen, last_seen, status, source_sessions, related_files, suggested_content, suggested_target)
-             VALUES ('pat-1', 'repetitive_instruction', 'test', 0.9, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'discovered', '[]', '[]', 'content', 'claude_md')",
-            [],
-        ).unwrap();
-        conn.execute(
-            "INSERT INTO projections (id, pattern_id, target_type, target_path, content, applied_at)
-             VALUES ('proj-1', 'pat-1', 'claude_md', '/test', 'content', '2026-01-01T00:00:00Z')",
-            [],
-        ).unwrap();
-
-        // Run migration
-        migrate(&conn).unwrap();
-
-        // Verify nudged column now exists and pre-existing row has default 0
-        let nudged: i64 = conn
-            .query_row(
-                "SELECT nudged FROM projections WHERE id = 'proj-1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(nudged, 0, "existing projections should have nudged = 0 after migration");
-
-        // Verify schema version is now 2
-        let version: u32 = conn
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, 2);
     }
 
     // ── Tests for auto-apply pipeline DB functions ──

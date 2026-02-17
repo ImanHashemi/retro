@@ -79,11 +79,37 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
                     }
                 }
             }
-        } // _lock dropped here — released before orchestration
+        } // _lock dropped here — released after ingest
 
         // --- Orchestration: chain analyze and apply if auto_apply enabled ---
         if config.hooks.auto_apply {
+            // Re-acquire lock for the orchestration phase (analyze + apply).
+            // This prevents concurrent orchestration from two rapid commits.
+            let _orch_lock = match LockFile::try_acquire(&lock_path) {
+                Some(lock) => lock,
+                None => {
+                    if verbose {
+                        eprintln!("[verbose] orchestrator: another process holds the lock, skipping");
+                    }
+                    return Ok(());
+                }
+            };
+
             let audit_path = dir.join("audit.jsonl");
+
+            let project = if global {
+                None
+            } else {
+                match git_root_or_cwd() {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        if verbose {
+                            eprintln!("[verbose] orchestrator: could not resolve project path: {e}");
+                        }
+                        return Ok(());
+                    }
+                }
+            };
 
             // Check analyze conditions: un-analyzed sessions + cooldown elapsed
             let should_analyze = db::has_unanalyzed_sessions(&conn).unwrap_or(false)
@@ -99,12 +125,6 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
                 if verbose {
                     eprintln!("[verbose] orchestrator: running analyze");
                 }
-
-                let project = if global {
-                    None
-                } else {
-                    Some(git_root_or_cwd().unwrap_or_default())
-                };
 
                 let window_days = config.analysis.window_days;
 
@@ -127,7 +147,7 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
                                 "output_tokens": result.output_tokens,
                                 "window_days": window_days,
                                 "global": global,
-                                "project": project,
+                                "project": &project,
                                 "auto": true,
                                 "orchestrated": true,
                             });
@@ -158,8 +178,9 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
                 if verbose {
                     eprintln!("[verbose] orchestrator: running apply");
                 }
-                // Delegate to apply's run_apply with auto=true.
-                // This will acquire its own lock (ingest lock already released above).
+                // Drop orchestration lock before calling apply (which acquires its own lock)
+                drop(_orch_lock);
+
                 match super::apply::run_apply(
                     global,
                     false,

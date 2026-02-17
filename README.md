@@ -112,7 +112,10 @@ model = "sonnet"           # AI model for analysis (sonnet, opus, haiku)
 rolling_window_days = 14   # How far back to analyze
 
 [hooks]
-auto_cooldown_minutes = 60 # Minimum time between auto-runs
+ingest_cooldown_minutes = 5    # Minimum time between auto-ingests
+analyze_cooldown_minutes = 1440 # Minimum time between auto-analyses (24h)
+apply_cooldown_minutes = 1440   # Minimum time between auto-applies (24h)
+auto_apply = true               # Enable full auto pipeline
 
 [curator]
 staleness_days = 30        # When to consider patterns stale
