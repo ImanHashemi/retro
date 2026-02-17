@@ -8,7 +8,7 @@ Retro is like having a teammate who runs a retrospective on your AI coding sessi
 
 The result: your agent gets better over time, learning from every session, without you having to manually maintain its context. And you stay in control — shared changes come as PRs for you to review.
 
-<!-- TODO: Add hero GIF showing retro analyze → retro apply pipeline -->
+![retro demo](docs/demo.gif)
 
 ## Quick Start
 
@@ -42,21 +42,21 @@ Retro operates as a three-stage pipeline:
 ```
   ┌─────────────────────────────────────────────┐
   │  INGESTION (pure Rust, no AI)               │
-  │  Reads Claude Code session history           │
-  │  Parses into structured sessions in SQLite   │
+  │  Reads Claude Code session history          │
+  │  Parses into structured sessions in SQLite  │
   └────────────────┬────────────────────────────┘
                    │
   ┌────────────────▼────────────────────────────┐
-  │  ANALYSIS (AI-powered)                       │
-  │  Discovers: repeated instructions,           │
-  │  recurring mistakes, workflow patterns       │
-  │  Stores patterns with confidence scores      │
+  │  ANALYSIS (AI-powered)                      │
+  │  Discovers: repeated instructions,          │
+  │  recurring mistakes, workflow patterns      │
+  │  Stores patterns with confidence scores     │
   └────────────────┬────────────────────────────┘
                    │
   ┌────────────────▼────────────────────────────┐
-  │  PROJECTION (two-track)                      │
-  │  Personal (auto-apply): global agents        │
-  │  Shared (via PR): CLAUDE.md rules, skills    │
+  │  PROJECTION (two-track)                     │
+  │  Personal (auto-apply): global agents       │
+  │  Shared (via PR): CLAUDE.md rules, skills   │
   └─────────────────────────────────────────────┘
 ```
 
