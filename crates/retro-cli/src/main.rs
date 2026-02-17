@@ -109,6 +109,17 @@ fn main() {
     let cli = Cli::parse();
     let verbose = cli.verbose;
 
+    // Show nudge for interactive commands (not auto mode)
+    let is_auto = matches!(
+        &cli.command,
+        Commands::Ingest { auto: true, .. }
+            | Commands::Analyze { auto: true, .. }
+            | Commands::Apply { auto: true, .. }
+    );
+    if !is_auto {
+        commands::check_and_display_nudge();
+    }
+
     let result = match cli.command {
         Commands::Init { uninstall, purge } => commands::init::run(uninstall, purge, verbose),
         Commands::Ingest { global, auto } => commands::ingest::run(global, auto, verbose),

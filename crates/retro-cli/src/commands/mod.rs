@@ -31,6 +31,43 @@ pub fn git_root_or_cwd() -> Result<String> {
     }
 }
 
+/// Check for auto-created PRs and display a one-time nudge.
+/// Silently does nothing if DB doesn't exist or any error occurs.
+pub fn check_and_display_nudge() {
+    let dir = retro_core::config::retro_dir();
+    let db_path = dir.join("retro.db");
+    if !db_path.exists() {
+        return;
+    }
+
+    let conn = match retro_core::db::open_db(&db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let urls = match retro_core::db::get_unnudged_pr_urls(&conn) {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+
+    if urls.is_empty() {
+        return;
+    }
+
+    use colored::Colorize;
+    for url in &urls {
+        println!(
+            "  {} {}",
+            "retro auto-created a PR:".yellow(),
+            url.cyan().underline()
+        );
+    }
+    println!();
+
+    // Mark as nudged so we don't show again
+    let _ = retro_core::db::mark_projections_nudged(&conn);
+}
+
 /// Check if a timestamp (RFC 3339) is within the cooldown window.
 /// Returns true if the action should be skipped (i.e., within cooldown).
 pub fn within_cooldown(last_rfc3339: &str, cooldown_minutes: u32) -> bool {
