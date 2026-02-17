@@ -38,13 +38,13 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
             }
         };
 
-        // Check cooldown: skip if ingested within auto_cooldown_minutes
+        // Check cooldown: skip if ingested within ingest_cooldown_minutes
         if let Ok(Some(ref last)) = db::last_ingested_at(&conn) {
-            if within_cooldown(last, config.hooks.auto_cooldown_minutes) {
+            if within_cooldown(last, config.hooks.ingest_cooldown_minutes) {
                 if verbose {
                     eprintln!(
                         "[verbose] skipping ingest: within cooldown ({}m)",
-                        config.hooks.auto_cooldown_minutes
+                        config.hooks.ingest_cooldown_minutes
                     );
                 }
                 return Ok(());

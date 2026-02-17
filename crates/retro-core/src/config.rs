@@ -50,8 +50,17 @@ pub struct AiConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HooksConfig {
-    #[serde(default = "default_cooldown")]
+    /// Backwards-compat: old single cooldown field. Mapped to ingest_cooldown_minutes.
+    #[serde(default = "default_ingest_cooldown")]
     pub auto_cooldown_minutes: u32,
+    #[serde(default = "default_ingest_cooldown")]
+    pub ingest_cooldown_minutes: u32,
+    #[serde(default = "default_analyze_cooldown")]
+    pub analyze_cooldown_minutes: u32,
+    #[serde(default = "default_apply_cooldown")]
+    pub apply_cooldown_minutes: u32,
+    #[serde(default = "default_auto_apply")]
+    pub auto_apply: bool,
     #[serde(default = "default_post_commit")]
     pub post_commit: String,
     #[serde(default = "default_post_merge")]
@@ -90,7 +99,11 @@ fn default_ai() -> AiConfig {
 
 fn default_hooks() -> HooksConfig {
     HooksConfig {
-        auto_cooldown_minutes: default_cooldown(),
+        auto_cooldown_minutes: default_ingest_cooldown(),
+        ingest_cooldown_minutes: default_ingest_cooldown(),
+        analyze_cooldown_minutes: default_analyze_cooldown(),
+        apply_cooldown_minutes: default_apply_cooldown(),
+        auto_apply: default_auto_apply(),
         post_commit: default_post_commit(),
         post_merge: default_post_merge(),
     }
@@ -127,8 +140,17 @@ fn default_model() -> String {
 fn default_max_budget() -> f64 {
     0.50
 }
-fn default_cooldown() -> u32 {
-    60
+fn default_ingest_cooldown() -> u32 {
+    5
+}
+fn default_analyze_cooldown() -> u32 {
+    1440
+}
+fn default_apply_cooldown() -> u32 {
+    1440
+}
+fn default_auto_apply() -> bool {
+    true
 }
 fn default_post_commit() -> String {
     "ingest".to_string()
@@ -149,8 +171,17 @@ impl Config {
         if path.exists() {
             let contents = std::fs::read_to_string(path)
                 .map_err(|e| CoreError::Io(format!("reading config: {e}")))?;
-            let config: Config =
+            let mut config: Config =
                 toml::from_str(&contents).map_err(|e| CoreError::Config(e.to_string()))?;
+
+            // Backwards compatibility: if old config only has auto_cooldown_minutes,
+            // map it to ingest_cooldown_minutes
+            if config.hooks.auto_cooldown_minutes != default_ingest_cooldown()
+                && config.hooks.ingest_cooldown_minutes == default_ingest_cooldown()
+            {
+                config.hooks.ingest_cooldown_minutes = config.hooks.auto_cooldown_minutes;
+            }
+
             Ok(config)
         } else {
             Ok(Config::default())
@@ -192,5 +223,77 @@ pub fn expand_tilde(path: &str) -> PathBuf {
         PathBuf::from(home)
     } else {
         PathBuf::from(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hooks_config_defaults() {
+        let config = default_hooks();
+        assert_eq!(config.ingest_cooldown_minutes, 5);
+        assert_eq!(config.analyze_cooldown_minutes, 1440);
+        assert_eq!(config.apply_cooldown_minutes, 1440);
+        assert!(config.auto_apply);
+    }
+
+    #[test]
+    fn test_hooks_config_new_fields_deserialize() {
+        let toml_str = r#"
+[hooks]
+ingest_cooldown_minutes = 10
+analyze_cooldown_minutes = 720
+apply_cooldown_minutes = 2880
+auto_apply = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hooks.ingest_cooldown_minutes, 10);
+        assert_eq!(config.hooks.analyze_cooldown_minutes, 720);
+        assert_eq!(config.hooks.apply_cooldown_minutes, 2880);
+        assert!(!config.hooks.auto_apply);
+    }
+
+    #[test]
+    fn test_hooks_config_backwards_compat() {
+        // Old config with only auto_cooldown_minutes should map to ingest_cooldown_minutes
+        let toml_str = r#"
+[hooks]
+auto_cooldown_minutes = 30
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        // auto_cooldown_minutes is 30 (not default 5), ingest_cooldown_minutes would be default 5
+        // Config::load() would map it, but toml::from_str doesn't call load()
+        // Verify raw deserialization first
+        assert_eq!(config.hooks.auto_cooldown_minutes, 30);
+        assert_eq!(config.hooks.ingest_cooldown_minutes, 5); // serde default
+
+        // Now test via Config::load() which does the backwards-compat mapping
+        let dir = std::env::temp_dir().join("retro_config_test_compat");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, toml_str).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.hooks.ingest_cooldown_minutes, 30); // mapped from auto_cooldown_minutes
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_hooks_config_no_compat_when_both_set() {
+        // When both auto_cooldown_minutes and ingest_cooldown_minutes are explicitly set,
+        // don't override ingest_cooldown_minutes
+        let toml_str = r#"
+[hooks]
+auto_cooldown_minutes = 30
+ingest_cooldown_minutes = 15
+"#;
+        let dir = std::env::temp_dir().join("retro_config_test_both");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, toml_str).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.hooks.ingest_cooldown_minutes, 15); // not overridden
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
