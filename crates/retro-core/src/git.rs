@@ -146,16 +146,15 @@ pub fn install_hooks(repo_root: &str) -> Result<Vec<String>, CoreError> {
 
     // Remove old post-merge hook if it was retro-managed
     let post_merge_path = hooks_dir.join("post-merge");
-    if post_merge_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&post_merge_path) {
-            if content.contains(HOOK_MARKER) {
-                let cleaned = remove_hook_lines(&content);
-                if cleaned.trim() == "#!/bin/sh" || cleaned.trim().is_empty() {
-                    std::fs::remove_file(&post_merge_path).ok();
-                } else {
-                    std::fs::write(&post_merge_path, cleaned).ok();
-                }
-            }
+    if post_merge_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&post_merge_path)
+        && content.contains(HOOK_MARKER)
+    {
+        let cleaned = remove_hook_lines(&content);
+        if cleaned.trim() == "#!/bin/sh" || cleaned.trim().is_empty() {
+            std::fs::remove_file(&post_merge_path).ok();
+        } else {
+            std::fs::write(&post_merge_path, cleaned).ok();
         }
     }
 

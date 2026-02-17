@@ -53,16 +53,16 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
         };
 
         // Cooldown check
-        if let Ok(Some(ref last)) = db::last_applied_at(&conn) {
-            if within_cooldown(last, config.hooks.apply_cooldown_minutes) {
-                if verbose {
-                    eprintln!(
-                        "[verbose] skipping apply: within cooldown ({}m)",
-                        config.hooks.apply_cooldown_minutes
-                    );
-                }
-                return Ok(());
+        if let Ok(Some(ref last)) = db::last_applied_at(&conn)
+            && within_cooldown(last, config.hooks.apply_cooldown_minutes)
+        {
+            if verbose {
+                eprintln!(
+                    "[verbose] skipping apply: within cooldown ({}m)",
+                    config.hooks.apply_cooldown_minutes
+                );
             }
+            return Ok(());
         }
 
         // Data gate: any un-projected patterns?
@@ -106,21 +106,20 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
                     &plan,
                     project.as_deref(),
                     Some(&ApplyTrack::Personal),
-                ) {
-                    if verbose {
-                        eprintln!("[verbose] apply personal error: {e}");
-                    }
+                )
+                    && verbose
+                {
+                    eprintln!("[verbose] apply personal error: {e}");
                 }
 
                 // Phase 2: Shared actions on new branch + PR
-                if !plan.shared_actions().is_empty() {
-                    if let Err(e) = execute_shared_with_pr(
+                if !plan.shared_actions().is_empty()
+                    && let Err(e) = execute_shared_with_pr(
                         &conn, &config, &plan, project.as_deref(), true,
-                    ) {
-                        if verbose {
-                            eprintln!("[verbose] apply shared error: {e}");
-                        }
-                    }
+                    )
+                    && verbose
+                {
+                    eprintln!("[verbose] apply shared error: {e}");
                 }
 
                 // Audit log (best-effort in auto mode)
