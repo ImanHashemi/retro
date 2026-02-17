@@ -2,13 +2,18 @@
 name = "retro-cli"
 version = "0.1.0"
 edition = "2021"
+description = "Active context curator for AI coding agents — analyzes Claude Code sessions and generates skills and rules"
+license = "MIT"
+repository = "https://github.com/ImanHashemi/retro"
+keywords = ["claude", "ai", "coding-agent", "context", "automation"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "retro"
 path = "src/main.rs"
 
 [dependencies]
-retro-core = { path = "../retro-core" }
+retro-core = { version = "0.1.0", path = "../retro-core" }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
