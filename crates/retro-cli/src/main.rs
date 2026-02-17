@@ -62,6 +62,9 @@ enum Commands {
         /// Apply patterns for all projects, not just the current one
         #[arg(long)]
         global: bool,
+        /// Silent mode for git hooks: skip if locked, check cooldown, suppress output
+        #[arg(long)]
+        auto: bool,
     },
     /// Show pending changes in diff format (alias for apply --dry-run)
     Diff {
@@ -116,7 +119,7 @@ fn main() {
             dry_run,
         } => commands::analyze::run(global, since, auto, dry_run, verbose),
         Commands::Patterns { status } => commands::patterns::run(status),
-        Commands::Apply { global, dry_run } => commands::apply::run(global, dry_run, verbose),
+        Commands::Apply { global, dry_run, auto } => commands::apply::run(global, dry_run, auto, verbose),
         Commands::Diff { global } => commands::diff::run(global, verbose),
         Commands::Clean { dry_run } => commands::clean::run(dry_run, verbose),
         Commands::Audit { dry_run } => commands::audit::run(dry_run, verbose),

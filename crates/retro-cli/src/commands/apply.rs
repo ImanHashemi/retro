@@ -23,7 +23,7 @@ pub enum DisplayMode {
 }
 
 /// Shared entry point: build the apply plan and either display or execute it.
-pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode, verbose: bool) -> Result<()> {
+pub fn run_apply(global: bool, dry_run: bool, _auto: bool, display_mode: DisplayMode, verbose: bool) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -319,8 +319,11 @@ fn execute_shared_with_pr(
 }
 
 /// CLI entry point for `retro apply`.
-pub fn run(global: bool, dry_run: bool, verbose: bool) -> Result<()> {
-    run_apply(global, dry_run, DisplayMode::Plan { dry_run }, verbose)
+pub fn run(global: bool, dry_run: bool, auto: bool, verbose: bool) -> Result<()> {
+    if dry_run && auto {
+        anyhow::bail!("--dry-run and --auto are mutually exclusive");
+    }
+    run_apply(global, dry_run, auto, DisplayMode::Plan { dry_run }, verbose)
 }
 
 fn display_plan(plan: &ApplyPlan, dry_run: bool) {
