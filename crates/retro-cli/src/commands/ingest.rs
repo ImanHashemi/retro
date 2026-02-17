@@ -1,5 +1,7 @@
 use anyhow::Result;
 use colored::Colorize;
+use retro_core::analysis;
+use retro_core::audit_log;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
 use retro_core::ingest;
@@ -28,51 +30,155 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
 
     // In auto mode: acquire lockfile silently, check cooldown
     if auto {
-        let _lock = match LockFile::try_acquire(&lock_path) {
-            Some(lock) => lock,
-            None => {
-                if verbose {
-                    eprintln!("[verbose] skipping ingest: another process holds the lock");
+        // Scope the lock so it's released after ingest completes,
+        // before orchestrating analyze and apply (which acquire their own locks).
+        {
+            let _lock = match LockFile::try_acquire(&lock_path) {
+                Some(lock) => lock,
+                None => {
+                    if verbose {
+                        eprintln!("[verbose] skipping ingest: another process holds the lock");
+                    }
+                    return Ok(());
                 }
-                return Ok(());
-            }
-        };
+            };
 
-        // Check cooldown: skip if ingested within ingest_cooldown_minutes
-        if let Ok(Some(ref last)) = db::last_ingested_at(&conn) {
-            if within_cooldown(last, config.hooks.ingest_cooldown_minutes) {
-                if verbose {
-                    eprintln!(
-                        "[verbose] skipping ingest: within cooldown ({}m)",
-                        config.hooks.ingest_cooldown_minutes
-                    );
+            // Check cooldown: skip if ingested within ingest_cooldown_minutes
+            if let Ok(Some(ref last)) = db::last_ingested_at(&conn) {
+                if within_cooldown(last, config.hooks.ingest_cooldown_minutes) {
+                    if verbose {
+                        eprintln!(
+                            "[verbose] skipping ingest: within cooldown ({}m)",
+                            config.hooks.ingest_cooldown_minutes
+                        );
+                    }
+                    return Ok(());
                 }
-                return Ok(());
             }
-        }
 
-        // Run ingestion silently — any error exits quietly
-        let result = if global {
-            ingest::ingest_all_projects(&conn, &config)
-        } else {
-            let project_path = git_root_or_cwd()?;
-            ingest::ingest_project(&conn, &config, &project_path)
-        };
+            // Run ingestion silently — any error exits quietly
+            let result = if global {
+                ingest::ingest_all_projects(&conn, &config)
+            } else {
+                let project_path = git_root_or_cwd()?;
+                ingest::ingest_project(&conn, &config, &project_path)
+            };
 
-        match result {
-            Ok(r) => {
-                if verbose {
-                    eprintln!(
-                        "[verbose] ingested {} sessions ({} skipped)",
-                        r.sessions_ingested, r.sessions_skipped
-                    );
+            match result {
+                Ok(r) => {
+                    if verbose {
+                        eprintln!(
+                            "[verbose] ingested {} sessions ({} skipped)",
+                            r.sessions_ingested, r.sessions_skipped
+                        );
+                    }
+                }
+                Err(e) => {
+                    if verbose {
+                        eprintln!("[verbose] ingest error: {e}");
+                    }
                 }
             }
-            Err(e) => {
+        } // _lock dropped here — released before orchestration
+
+        // --- Orchestration: chain analyze and apply if auto_apply enabled ---
+        if config.hooks.auto_apply {
+            let audit_path = dir.join("audit.jsonl");
+
+            // Check analyze conditions: un-analyzed sessions + cooldown elapsed
+            let should_analyze = db::has_unanalyzed_sessions(&conn).unwrap_or(false)
+                && match db::last_analyzed_at(&conn) {
+                    Ok(Some(ref last)) => {
+                        !within_cooldown(last, config.hooks.analyze_cooldown_minutes)
+                    }
+                    Ok(None) => true, // never analyzed before
+                    Err(_) => false,
+                };
+
+            if should_analyze {
                 if verbose {
-                    eprintln!("[verbose] ingest error: {e}");
+                    eprintln!("[verbose] orchestrator: running analyze");
                 }
+
+                let project = if global {
+                    None
+                } else {
+                    Some(git_root_or_cwd().unwrap_or_default())
+                };
+
+                let window_days = config.analysis.window_days;
+
+                match analysis::analyze(&conn, &config, project.as_deref(), window_days) {
+                    Ok(result) => {
+                        if verbose {
+                            eprintln!(
+                                "[verbose] analyze complete: {} patterns ({} new, {} updated)",
+                                result.total_patterns, result.new_patterns, result.updated_patterns
+                            );
+                        }
+                        // Record audit log for analyze (best-effort)
+                        if result.sessions_analyzed > 0 {
+                            let audit_details = serde_json::json!({
+                                "sessions_analyzed": result.sessions_analyzed,
+                                "new_patterns": result.new_patterns,
+                                "updated_patterns": result.updated_patterns,
+                                "total_patterns": result.total_patterns,
+                                "input_tokens": result.input_tokens,
+                                "output_tokens": result.output_tokens,
+                                "window_days": window_days,
+                                "global": global,
+                                "project": project,
+                                "auto": true,
+                                "orchestrated": true,
+                            });
+                            let _ = audit_log::append(&audit_path, "analyze", audit_details);
+                        }
+                    }
+                    Err(e) => {
+                        if verbose {
+                            eprintln!("[verbose] analyze error: {e}");
+                        }
+                    }
+                }
+            } else if verbose {
+                eprintln!("[verbose] orchestrator: skipping analyze (no unanalyzed sessions or within cooldown)");
             }
+
+            // Check apply conditions: un-projected patterns + cooldown elapsed
+            let should_apply = db::has_unprojected_patterns(&conn).unwrap_or(false)
+                && match db::last_applied_at(&conn) {
+                    Ok(Some(ref last)) => {
+                        !within_cooldown(last, config.hooks.apply_cooldown_minutes)
+                    }
+                    Ok(None) => true, // never applied before
+                    Err(_) => false,
+                };
+
+            if should_apply {
+                if verbose {
+                    eprintln!("[verbose] orchestrator: running apply");
+                }
+                // Delegate to apply's run_apply with auto=true.
+                // This will acquire its own lock (ingest lock already released above).
+                match super::apply::run_apply(
+                    global,
+                    false,
+                    true,
+                    super::apply::DisplayMode::Plan { dry_run: false },
+                    verbose,
+                ) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        if verbose {
+                            eprintln!("[verbose] apply error: {e}");
+                        }
+                    }
+                }
+            } else if verbose {
+                eprintln!("[verbose] orchestrator: skipping apply (no unprojected patterns or within cooldown)");
+            }
+        } else if verbose {
+            eprintln!("[verbose] orchestrator: auto_apply not enabled");
         }
 
         return Ok(());
