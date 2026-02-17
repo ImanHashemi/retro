@@ -87,6 +87,9 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - Auto-mode orchestration: `ingest --auto` chains analyze and apply when `auto_apply=true` and data triggers + cooldowns are satisfied
 - Terminal nudge: `check_and_display_nudge()` runs before interactive commands, queries `projections.nudged=0`, marks after display
 - Per-stage cooldowns: `ingest_cooldown_minutes` (5), `analyze_cooldown_minutes` (1440), `apply_cooldown_minutes` (1440) — each stage has its own cooldown matching cost profile
+- PR creation flow: detect default branch via `gh repo view` → `git fetch origin <default>` → `git checkout -b retro/... origin/<default>` → write/commit → `git push -u origin HEAD` → `gh pr create --base <default>`
+- Always push before `gh pr create` — the remote branch must exist
+- `stash_push()`/`stash_pop()` around branch switches in apply — `git checkout -b` fails if tracked files differ between branches when working tree is dirty
 
 ## Implementation Status
 

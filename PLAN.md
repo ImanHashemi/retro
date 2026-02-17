@@ -182,7 +182,7 @@
  ├────────────────────┼────────────────────────────────────────────────────┤
  │ colored            │ Terminal output                                    │
  ├────────────────────┼────────────────────────────────────────────────────┤
- │ dialoguer          │ Confirmation dialogs                               │
+ │ (removed)          │ Confirmation uses stdin y/N pattern (not dialoguer) │
  ├────────────────────┼────────────────────────────────────────────────────┤
  │ regex              │ Sensitive data scrubbing                           │
  └────────────────────┴────────────────────────────────────────────────────┘
@@ -596,8 +596,8 @@
 
  Phase 5: Hooks + Polish (DONE)
 
- - Git hook installation in retro init (post-commit: ingest --auto, post-merge: analyze --auto)
- - --auto mode on ingest and analyze: LockFile::try_acquire() (skip if locked), cooldown check against config.hooks.auto_cooldown_minutes, suppress all output, exit silently on errors
+ - Git hook installation in retro init (single post-commit hook: ingest --auto, chains analyze + apply when auto_apply=true)
+ - --auto mode on ingest, analyze, and apply: LockFile::try_acquire() (skip if locked), per-stage cooldowns (ingest: 5m, analyze: 24h, apply: 24h), suppress all output, exit silently on errors
  - --verbose global flag: threads through all commands, [verbose] debug output to stderr
  - Progress indicators: "This may take a minute..." messages before AI calls in analyze, apply, audit
  - Colored terminal output: consistency pass on all commands
