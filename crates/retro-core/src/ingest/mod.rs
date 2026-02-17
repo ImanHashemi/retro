@@ -251,16 +251,16 @@ mod tests {
     #[test]
     fn test_encode_project_path() {
         assert_eq!(
-            encode_project_path("/home/claude/repositories/retro"),
-            "-home-claude-repositories-retro"
+            encode_project_path("/home/user/projects/myapp"),
+            "-home-user-projects-myapp"
         );
     }
 
     #[test]
     fn test_naive_decode_project_path() {
         assert_eq!(
-            naive_decode_project_path("-home-claude-repositories-retro"),
-            "/home/claude/repositories/retro"
+            naive_decode_project_path("-home-user-projects-myapp"),
+            "/home/user/projects/myapp"
         );
     }
 }
