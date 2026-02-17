@@ -60,10 +60,10 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
         match git::install_hooks(&repo_root) {
             Ok(installed) => {
                 if installed.is_empty() {
-                    println!("  {} git hooks (already installed)", "Exists".yellow());
+                    println!("  {} git hook (already installed)", "Exists".yellow());
                 } else {
                     for hook in &installed {
-                        println!("  {} git hook: {}", "Installed".green(), hook);
+                        println!("  {} git hook: {} (ingest → analyze → apply)", "Installed".green(), hook);
                     }
                 }
             }
