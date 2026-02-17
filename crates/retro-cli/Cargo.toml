@@ -2,7 +2,7 @@
 name = "retro-cli"
 version = "0.1.0"
 edition = "2024"
-description = "Active context curator for AI coding agents — analyzes Claude Code sessions and generates skills and rules"
+description = "Active context curator for AI coding agents: analyzes Claude Code sessions and generates skills and rules"
 license = "MIT"
 repository = "https://github.com/ImanHashemi/retro"
 keywords = ["claude", "ai", "coding-agent", "context", "automation"]

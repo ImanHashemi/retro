@@ -6,7 +6,7 @@ description = "Core library for retro, the active context curator for AI coding 
 license = "MIT"
 repository = "https://github.com/ImanHashemi/retro"
 keywords = ["claude", "ai", "coding-agent", "context", "automation"]
-categories = ["command-line-utilities", "development-tools"]
+categories = ["development-tools"]
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
