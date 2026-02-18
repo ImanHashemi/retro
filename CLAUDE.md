@@ -27,7 +27,8 @@ Cargo workspace with two crates:
 - **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
 - **Pattern merging** — AI-assisted (primary) with strong semantic dedup prompt guidance + Levenshtein similarity > 0.8 safety net.
 - **Token tracking** — `BackendResponse` carries `input_tokens`/`output_tokens` (not dollar cost). `ClaudeCliOutput` extracts from nested `usage` object, summing `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` for total input.
-- **Auto-apply pipeline** — single post-commit hook orchestrates ingest → analyze → apply. Per-stage cooldowns (5m/24h/24h). Data triggers prevent unnecessary runs. Terminal nudge for auto-created PRs.
+- **Auto-apply pipeline** — single post-commit hook orchestrates ingest → analyze → apply. Per-stage cooldowns (5m/24h/24h). Data triggers prevent unnecessary runs. Session cap (`auto_analyze_max_sessions`, default 15) skips auto-analyze when backlog is too large. Hook stderr redirected to `~/.retro/hook-stderr.log`.
+- **Observability** — every auto-mode decision gets a structured audit entry (ingest/analyze/apply success/skip/error). Enhanced nudge reads audit entries since `last_nudge_at` (stored in `metadata` table), groups within 60s as one run, displays colored multi-line status block on next interactive command.
 
 ## Dependencies
 
@@ -79,13 +80,16 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - Batch DB queries into HashSets when filtering (avoid N+1 queries in loops)
 - Re-export internal types from retro-core when CLI crate needs them (e.g., `pub use rusqlite::Connection` in `db.rs`) — avoid adding transitive deps to retro-cli
 - Git/gh shell-outs use `Command::new().args()` (not shell strings) — each arg passed directly to `execve()`, safe from injection
-- Git hook format: marker comment (`# retro hook - do not remove`) + command on next line; removal is line-pair based
+- Git hook format: marker comment (`# retro hook - do not remove`) + command on next line; removal is line-pair based; `install_hook_lines` returns `HookInstallResult` (Installed/Updated/UpToDate)
+- Hook stderr: `2>>~/.retro/hook-stderr.log` (not `/dev/null`) — captures parse warnings, panics. `retro init` truncates it. `retro init` also updates existing hooks to new redirect format (remove+re-add)
 - Two-phase apply execution: personal actions on current branch, shared actions on a new `retro/updates-{YYYYMMDD-HHMMSS}` branch
 - Claude CLI JSON output nests token counts inside `usage` object — never assume top-level fields exist (use nested struct with `#[serde(default)]`)
 - `--dry-run` on all AI commands must skip AI calls entirely — snapshot context, show summary, return early (not just suppress writes)
 - Test strategy: unit tests with fixtures (no AI), integration tests with `MockBackend`
 - Auto-mode orchestration: `ingest --auto` chains analyze and apply when `auto_apply=true` and data triggers + cooldowns are satisfied
-- Terminal nudge: `check_and_display_nudge()` runs before interactive commands, queries `projections.nudged=0`, marks after display
+- Terminal nudge: `check_and_display_nudge()` runs before interactive commands, reads audit entries since `last_nudge_at` from metadata table, aggregates into `AutoRunSummary` structs (60s window grouping), displays colored status block, updates `last_nudge_at`
+- Session cap: `auto_analyze_max_sessions` (default 15) — `unanalyzed_session_count()` checked before auto-analyze; if exceeded, writes `analyze_skipped` audit entry with `reason: "session_cap"` and skips AI call
+- Audit coverage: every auto-mode decision gets an entry — `ingest` (success), `analyze_skipped` (session_cap or cooldown_or_no_data), `analyze_error`, `apply_skipped` (no_qualifying_patterns), `apply_error`, enriched `apply` (with `pr_url`)
 - Per-stage cooldowns: `ingest_cooldown_minutes` (5), `analyze_cooldown_minutes` (1440), `apply_cooldown_minutes` (1440) — each stage has its own cooldown matching cost profile
 - PR creation flow: detect default branch via `gh repo view` → `git fetch origin <default>` → `git checkout -b retro/... origin/<default>` → write/commit → `git push -u origin HEAD` → `gh pr create --base <default>`
 - Always push before `gh pr create` — the remote branch must exist
@@ -99,7 +103,8 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - **Phase 4: DONE** — Full Apply + Clean + Audit + Git. `git.rs` (branch/PR/hook management), `curator.rs` (staleness detection, archiving), `retro clean [--dry-run]`, `retro audit [--dry-run]`, `retro log [--since]`, `retro hooks remove`, `retro init --uninstall [--purge]`. Apply now creates git branch + PR for shared track via `gh`. Two-phase apply (personal on current branch, shared on new branch). 63 unit tests.
 - **Phase 5: DONE** — Hooks + Polish. `--auto` mode on `ingest` and `analyze` (lockfile skip, cooldown check, silent operation), `--verbose` global flag, progress indicators for AI calls, `LockFile::try_acquire()`, post-commit hook updated to `retro ingest --auto`. `analyze --dry-run` for previewing AI calls. 63 unit tests.
 - **Post-v0.1 fixes**: Strengthened analysis prompt dedup (semantic merge guidance with examples). Replaced `cost_usd` with `input_tokens`/`output_tokens` across pipeline (extracts from nested `usage` in CLI JSON). `audit --dry-run` now skips AI calls entirely (shows context summary instead).
-- **Phase 6: DONE** — Auto-Apply Pipeline. Single post-commit hook orchestrates full pipeline (`ingest --auto` chains analyze + apply). Per-stage cooldowns (`ingest_cooldown_minutes=5`, `analyze_cooldown_minutes=1440`, `apply_cooldown_minutes=1440`). `auto_apply` config (on by default). `apply --auto` with lockfile, cooldown, and data gate. Terminal nudge for auto-created PRs (`projections.nudged` column). Old post-merge hook cleanup on `retro init`. Orchestration lock prevents concurrent analyze. 87 unit tests.
+- **Phase 6: DONE** — Auto-Apply Pipeline. Single post-commit hook orchestrates full pipeline (`ingest --auto` chains analyze + apply). Per-stage cooldowns (`ingest_cooldown_minutes=5`, `analyze_cooldown_minutes=1440`, `apply_cooldown_minutes=1440`). `auto_apply` config (on by default). `apply --auto` with lockfile, cooldown, and data gate. Old post-merge hook cleanup on `retro init`. Orchestration lock prevents concurrent analyze. 87 unit tests.
+- **Auto-mode observability: DONE** — `auto_analyze_max_sessions` config (default 15) skips auto-analyze when backlog exceeds cap. DB schema v2 adds `metadata` table for `last_nudge_at`. `unanalyzed_session_count()` for cap check. Comprehensive audit logging for every auto-mode decision (ingest success, analyze skip/error, apply skip/error, enriched apply with `pr_url`). Enhanced nudge system reads audit entries since last nudge, groups by 60s window, displays multi-line colored status block. Hook stderr redirected to `~/.retro/hook-stderr.log`. `retro init` updates existing hooks to new format (`HookInstallResult` enum: Installed/Updated/UpToDate). Old `get_unnudged_pr_urls`/`mark_projections_nudged` removed (replaced by audit-based nudge). 93 unit tests, 9 scenario tests.
 
 ## Full Plan
 
