@@ -212,16 +212,18 @@ pub fn has_unanalyzed_sessions(conn: &Connection) -> Result<bool, CoreError> {
 }
 
 /// Check if there are patterns eligible for projection that haven't been projected yet.
-/// Excludes patterns that have generation_failed=true or suggested_target='db_only'.
-pub fn has_unprojected_patterns(conn: &Connection) -> Result<bool, CoreError> {
+/// Excludes patterns that have generation_failed=true, suggested_target='db_only',
+/// or confidence below the given threshold.
+pub fn has_unprojected_patterns(conn: &Connection, confidence_threshold: f64) -> Result<bool, CoreError> {
     let count: u64 = conn.query_row(
         "SELECT COUNT(*) FROM patterns p
          LEFT JOIN projections pr ON p.id = pr.pattern_id
          WHERE pr.id IS NULL
          AND p.status IN ('discovered', 'active')
          AND p.generation_failed = 0
-         AND p.suggested_target != 'db_only'",
-        [],
+         AND p.suggested_target != 'db_only'
+         AND p.confidence >= ?1",
+        [confidence_threshold],
         |row| row.get(0),
     )?;
     Ok(count > 0)
@@ -950,7 +952,7 @@ mod tests {
     #[test]
     fn test_has_unprojected_patterns_empty() {
         let conn = test_db();
-        assert!(!has_unprojected_patterns(&conn).unwrap());
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
     }
 
     #[test]
@@ -960,7 +962,7 @@ mod tests {
         let pattern = test_pattern("pat-1", "Use uv for Python");
         insert_pattern(&conn, &pattern).unwrap();
 
-        assert!(has_unprojected_patterns(&conn).unwrap());
+        assert!(has_unprojected_patterns(&conn, 0.0).unwrap());
     }
 
     #[test]
@@ -981,7 +983,7 @@ mod tests {
         };
         insert_projection(&conn, &proj).unwrap();
 
-        assert!(!has_unprojected_patterns(&conn).unwrap());
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
     }
 
     #[test]
@@ -992,7 +994,7 @@ mod tests {
         insert_pattern(&conn, &pattern).unwrap();
         set_generation_failed(&conn, "pat-1", true).unwrap();
 
-        assert!(!has_unprojected_patterns(&conn).unwrap());
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
     }
 
     #[test]
@@ -1003,7 +1005,7 @@ mod tests {
         pattern.suggested_target = SuggestedTarget::DbOnly;
         insert_pattern(&conn, &pattern).unwrap();
 
-        assert!(!has_unprojected_patterns(&conn).unwrap());
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
     }
 
     #[test]
@@ -1079,7 +1081,7 @@ mod tests {
 
         // Initially: no data, no triggers
         assert!(!has_unanalyzed_sessions(&conn).unwrap());
-        assert!(!has_unprojected_patterns(&conn).unwrap());
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
         assert!(get_unnudged_pr_urls(&conn).unwrap().is_empty());
 
         // Step 1: Ingest creates sessions → triggers analyze
@@ -1100,7 +1102,7 @@ mod tests {
 
         let p = test_pattern("pat-1", "Always use cargo fmt");
         insert_pattern(&conn, &p).unwrap();
-        assert!(has_unprojected_patterns(&conn).unwrap());
+        assert!(has_unprojected_patterns(&conn, 0.0).unwrap());
 
         // Step 3: After apply → projection created with PR URL → triggers nudge
         let proj = Projection {
@@ -1113,7 +1115,7 @@ mod tests {
             pr_url: Some("https://github.com/test/pull/42".to_string()),
         };
         insert_projection(&conn, &proj).unwrap();
-        assert!(!has_unprojected_patterns(&conn).unwrap());
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
 
         // Step 4: Nudge shows PR URL, then marks as nudged
         let urls = get_unnudged_pr_urls(&conn).unwrap();

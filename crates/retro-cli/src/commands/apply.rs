@@ -66,7 +66,7 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
         }
 
         // Data gate: any un-projected patterns?
-        if !db::has_unprojected_patterns(&conn)? {
+        if !db::has_unprojected_patterns(&conn, config.analysis.confidence_threshold)? {
             if verbose {
                 eprintln!("[verbose] skipping apply: no un-projected patterns");
             }

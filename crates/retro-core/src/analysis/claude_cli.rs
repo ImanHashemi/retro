@@ -23,6 +23,7 @@ impl ClaudeCliBackend {
     pub fn is_available() -> bool {
         Command::new("claude")
             .arg("--version")
+            .env_remove("CLAUDECODE")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -49,6 +50,9 @@ impl AnalysisBackend for ClaudeCliBackend {
                 "--max-budget-usd",
                 &budget_str,
             ])
+            // Clear CLAUDECODE to avoid nested-session rejection when retro
+            // is invoked from a post-commit hook inside a Claude Code session.
+            .env_remove("CLAUDECODE")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
