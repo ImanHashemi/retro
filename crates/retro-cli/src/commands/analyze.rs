@@ -48,13 +48,13 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, ver
             }
         };
 
-        // Check cooldown: skip if analyzed within auto_cooldown_minutes
+        // Check cooldown: skip if analyzed within analyze_cooldown_minutes
         if let Ok(Some(ref last)) = db::last_analyzed_at(&conn) {
-            if within_cooldown(last, config.hooks.auto_cooldown_minutes) {
+            if within_cooldown(last, config.hooks.analyze_cooldown_minutes) {
                 if verbose {
                     eprintln!(
                         "[verbose] skipping analyze: within cooldown ({}m)",
-                        config.hooks.auto_cooldown_minutes
+                        config.hooks.analyze_cooldown_minutes
                     );
                 }
                 return Ok(());

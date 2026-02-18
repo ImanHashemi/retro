@@ -12,7 +12,7 @@ use retro_core::projection::claude_md;
 
 use retro_core::util::shorten_path;
 
-use super::git_root_or_cwd;
+use super::{git_root_or_cwd, within_cooldown};
 
 /// Output mode for displaying the plan.
 pub enum DisplayMode {
@@ -23,7 +23,7 @@ pub enum DisplayMode {
 }
 
 /// Shared entry point: build the apply plan and either display or execute it.
-pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode, verbose: bool) -> Result<()> {
+pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayMode, verbose: bool) -> Result<()> {
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");
@@ -31,13 +31,121 @@ pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode, verbose
     let lock_path = dir.join("retro.lock");
 
     if !db_path.exists() {
+        if auto {
+            return Ok(());
+        }
         anyhow::bail!("retro not initialized. Run `retro init` first.");
     }
 
     let config = Config::load(&config_path)?;
     let conn = db::open_db(&db_path)?;
 
-    // Acquire lockfile
+    // Auto mode: acquire lockfile silently, check cooldown, run without prompts
+    if auto {
+        let _lock = match LockFile::try_acquire(&lock_path) {
+            Some(lock) => lock,
+            None => {
+                if verbose {
+                    eprintln!("[verbose] skipping apply: another process holds the lock");
+                }
+                return Ok(());
+            }
+        };
+
+        // Cooldown check
+        if let Ok(Some(ref last)) = db::last_applied_at(&conn)
+            && within_cooldown(last, config.hooks.apply_cooldown_minutes)
+        {
+            if verbose {
+                eprintln!(
+                    "[verbose] skipping apply: within cooldown ({}m)",
+                    config.hooks.apply_cooldown_minutes
+                );
+            }
+            return Ok(());
+        }
+
+        // Data gate: any un-projected patterns?
+        if !db::has_unprojected_patterns(&conn)? {
+            if verbose {
+                eprintln!("[verbose] skipping apply: no un-projected patterns");
+            }
+            return Ok(());
+        }
+
+        let project = if global {
+            None
+        } else {
+            Some(git_root_or_cwd()?)
+        };
+
+        // Check claude CLI availability
+        if !ClaudeCliBackend::is_available() {
+            if verbose {
+                eprintln!("[verbose] skipping apply: claude CLI not available");
+            }
+            return Ok(());
+        }
+
+        let backend = ClaudeCliBackend::new(&config.ai);
+
+        // Build and execute plan silently
+        match projection::build_apply_plan(&conn, &config, &backend, project.as_deref()) {
+            Ok(plan) => {
+                if plan.is_empty() {
+                    if verbose {
+                        eprintln!("[verbose] apply: no actions in plan");
+                    }
+                    return Ok(());
+                }
+
+                // Phase 1: Personal actions on current branch
+                if let Err(e) = projection::execute_plan(
+                    &conn,
+                    &config,
+                    &plan,
+                    project.as_deref(),
+                    Some(&ApplyTrack::Personal),
+                )
+                    && verbose
+                {
+                    eprintln!("[verbose] apply personal error: {e}");
+                }
+
+                // Phase 2: Shared actions on new branch + PR
+                if !plan.shared_actions().is_empty()
+                    && let Err(e) = execute_shared_with_pr(
+                        &conn, &config, &plan, project.as_deref(), true,
+                    )
+                    && verbose
+                {
+                    eprintln!("[verbose] apply shared error: {e}");
+                }
+
+                // Audit log (best-effort in auto mode)
+                let audit_details = serde_json::json!({
+                    "actions": plan.actions.len(),
+                    "project": project,
+                    "global": global,
+                    "auto": true,
+                });
+                let _ = audit_log::append(&audit_path, "apply", audit_details);
+
+                if verbose {
+                    eprintln!("[verbose] auto-apply complete: {} actions", plan.actions.len());
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("[verbose] apply plan error: {e}");
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
+    // Interactive mode — acquire lockfile (error if locked)
     let _lock = LockFile::acquire(&lock_path)
         .map_err(|e| anyhow::anyhow!("could not acquire lock: {e}"))?;
 
@@ -137,7 +245,7 @@ pub fn run_apply(global: bool, dry_run: bool, display_mode: DisplayMode, verbose
     // Phase 2: Shared actions (skills, CLAUDE.md) — on a new branch if in git repo
     let has_shared = !plan.shared_actions().is_empty();
     if has_shared {
-        let shared_result = execute_shared_with_pr(&conn, &config, &plan, project.as_deref())?;
+        let shared_result = execute_shared_with_pr(&conn, &config, &plan, project.as_deref(), false)?;
         total_files += shared_result.files_written;
         total_patterns += shared_result.patterns_activated;
         pr_url = shared_result.pr_url;
@@ -194,12 +302,14 @@ struct SharedResult {
     pr_url: Option<String>,
 }
 
-/// Execute shared actions: create branch, write files, commit, create PR, switch back.
+/// Execute shared actions: create branch from default branch, write files, commit, push, create PR, switch back.
+/// When `silent` is true (auto mode), suppress all stdout/stderr output.
 fn execute_shared_with_pr(
     conn: &db::Connection,
     config: &Config,
     plan: &ApplyPlan,
     project: Option<&str>,
+    silent: bool,
 ) -> Result<SharedResult> {
     let in_git = git::is_in_git_repo();
 
@@ -221,15 +331,56 @@ fn execute_shared_with_pr(
 
     let original_branch = git::current_branch()?;
 
+    // Detect default branch and fetch latest
+    let default_branch = match git::default_branch() {
+        Ok(b) => b,
+        Err(e) => {
+            if !silent {
+                eprintln!(
+                    "  {} detecting default branch: {e}. Writing files on current branch.",
+                    "Warning".yellow()
+                );
+            }
+            let result = projection::execute_plan(
+                conn,
+                config,
+                plan,
+                project,
+                Some(&ApplyTrack::Shared),
+            )?;
+            return Ok(SharedResult {
+                files_written: result.files_written,
+                patterns_activated: result.patterns_activated,
+                pr_url: None,
+            });
+        }
+    };
+
+    if let Err(e) = git::fetch_branch(&default_branch) {
+        if !silent {
+            eprintln!("  {} fetching {}: {e}", "Warning".yellow(), default_branch);
+        }
+    }
+
+    // Stash uncommitted changes before switching branches
+    let did_stash = git::stash_push().unwrap_or(false);
+
     let date = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let branch_name = format!("retro/updates-{date}");
+    let start_point = format!("origin/{default_branch}");
 
-    // Create branch
-    if let Err(e) = git::create_branch(&branch_name) {
-        eprintln!(
-            "  {} creating branch: {e}. Writing files on current branch.",
-            "Warning".yellow()
-        );
+    // Create branch from origin/<default>
+    if let Err(e) = git::create_branch(&branch_name, Some(&start_point)) {
+        if !silent {
+            eprintln!(
+                "  {} creating branch: {e}. Writing files on current branch.",
+                "Warning".yellow()
+            );
+        }
+        // Restore stash before falling back
+        if did_stash {
+            let _ = git::stash_pop();
+        }
         let result = projection::execute_plan(
             conn,
             config,
@@ -266,50 +417,74 @@ fn execute_shared_with_pr(
     );
 
     let pr_url = if let Err(e) = git::commit_files(&shared_files, &commit_msg) {
-        eprintln!("  {} committing: {e}", "Warning".yellow());
+        if !silent {
+            eprintln!("  {} committing: {e}", "Warning".yellow());
+        }
         None
     } else if git::is_gh_available() {
-        // Try to create PR
-        let title = format!("retro: update {} context items", shared_files.len());
-        let mut body = "## Retro Auto-Generated Updates\n\n".to_string();
-        for action in &plan.shared_actions() {
-            let icon = match action.target_type {
-                SuggestedTarget::Skill => "skill",
-                SuggestedTarget::ClaudeMd => "rule",
-                _ => "item",
-            };
-            body.push_str(&format!("- **[{icon}]** {}\n", action.pattern_description));
-        }
-        body.push_str("\n---\nGenerated by `retro apply`.");
-
-        match git::create_pr(&title, &body) {
-            Ok(url) => Some(url),
-            Err(e) => {
-                eprintln!("  {} creating PR: {e}", "Warning".yellow());
+        // Push branch to origin before creating PR
+        if let Err(e) = git::push_current_branch() {
+            if !silent {
+                eprintln!("  {} pushing branch: {e}", "Warning".yellow());
                 println!(
                     "  {}",
                     format!(
-                        "Changes committed to branch `{branch_name}`. Create PR manually."
+                        "Changes committed to branch `{branch_name}`. Push and create PR manually."
                     )
                     .dimmed()
                 );
-                None
+            }
+            None
+        } else {
+            // Create PR targeting the default branch
+            let title = format!("retro: update {} context items", shared_files.len());
+            let mut body = "## Retro Auto-Generated Updates\n\n".to_string();
+            for action in &plan.shared_actions() {
+                let icon = match action.target_type {
+                    SuggestedTarget::Skill => "skill",
+                    SuggestedTarget::ClaudeMd => "rule",
+                    _ => "item",
+                };
+                body.push_str(&format!("- **[{icon}]** {}\n", action.pattern_description));
+            }
+            body.push_str("\n---\nGenerated by `retro apply`.");
+
+            match git::create_pr(&title, &body, &default_branch) {
+                Ok(url) => Some(url),
+                Err(e) => {
+                    if !silent {
+                        eprintln!("  {} creating PR: {e}", "Warning".yellow());
+                        println!(
+                            "  {}",
+                            format!(
+                                "Changes committed to branch `{branch_name}`. Create PR manually."
+                            )
+                            .dimmed()
+                        );
+                    }
+                    None
+                }
             }
         }
     } else {
-        println!(
-            "  {}",
-            format!("Changes committed to branch `{branch_name}`.").dimmed()
-        );
-        println!(
-            "  {}",
-            "Install `gh` CLI to auto-create PRs, or create one manually.".dimmed()
-        );
+        if !silent {
+            println!(
+                "  {}",
+                format!("Changes committed to branch `{branch_name}`.").dimmed()
+            );
+            println!(
+                "  {}",
+                "Install `gh` CLI to auto-create PRs, or create one manually.".dimmed()
+            );
+        }
         None
     };
 
-    // Switch back to original branch
+    // Switch back to original branch and restore stashed changes
     let _ = git::checkout_branch(&original_branch);
+    if did_stash {
+        let _ = git::stash_pop();
+    }
 
     Ok(SharedResult {
         files_written: result.files_written,
@@ -319,8 +494,11 @@ fn execute_shared_with_pr(
 }
 
 /// CLI entry point for `retro apply`.
-pub fn run(global: bool, dry_run: bool, verbose: bool) -> Result<()> {
-    run_apply(global, dry_run, DisplayMode::Plan { dry_run }, verbose)
+pub fn run(global: bool, dry_run: bool, auto: bool, verbose: bool) -> Result<()> {
+    if dry_run && auto {
+        anyhow::bail!("--dry-run and --auto are mutually exclusive");
+    }
+    run_apply(global, dry_run, auto, DisplayMode::Plan { dry_run }, verbose)
 }
 
 fn display_plan(plan: &ApplyPlan, dry_run: bool) {

@@ -62,6 +62,9 @@ enum Commands {
         /// Apply patterns for all projects, not just the current one
         #[arg(long)]
         global: bool,
+        /// Silent mode for git hooks: skip if locked, check cooldown, suppress output
+        #[arg(long)]
+        auto: bool,
     },
     /// Show pending changes in diff format (alias for apply --dry-run)
     Diff {
@@ -106,6 +109,17 @@ fn main() {
     let cli = Cli::parse();
     let verbose = cli.verbose;
 
+    // Show nudge for interactive commands (not auto mode)
+    let is_auto = matches!(
+        &cli.command,
+        Commands::Ingest { auto: true, .. }
+            | Commands::Analyze { auto: true, .. }
+            | Commands::Apply { auto: true, .. }
+    );
+    if !is_auto {
+        commands::check_and_display_nudge();
+    }
+
     let result = match cli.command {
         Commands::Init { uninstall, purge } => commands::init::run(uninstall, purge, verbose),
         Commands::Ingest { global, auto } => commands::ingest::run(global, auto, verbose),
@@ -116,7 +130,7 @@ fn main() {
             dry_run,
         } => commands::analyze::run(global, since, auto, dry_run, verbose),
         Commands::Patterns { status } => commands::patterns::run(status),
-        Commands::Apply { global, dry_run } => commands::apply::run(global, dry_run, verbose),
+        Commands::Apply { global, dry_run, auto } => commands::apply::run(global, dry_run, auto, verbose),
         Commands::Diff { global } => commands::diff::run(global, verbose),
         Commands::Clean { dry_run } => commands::clean::run(dry_run, verbose),
         Commands::Audit { dry_run } => commands::audit::run(dry_run, verbose),

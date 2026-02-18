@@ -33,7 +33,7 @@ retro diff
 retro apply
 ```
 
-After `retro init`, git hooks handle ingestion and analysis in the background. `retro ingest` runs on every commit, `retro analyze` runs on every merge. Run `retro apply` whenever you want to act on discovered patterns.
+After `retro init`, a single post-commit hook orchestrates the full pipeline in the background: ingest → analyze → apply, each with its own cooldown. Shared changes (CLAUDE.md rules, skills) are proposed via PR for your review.
 
 ## How It Works
 
@@ -93,14 +93,15 @@ Most commands are project-scoped by default. Use `--global` to operate across al
 
 ## Automatic Mode
 
-After `retro init`, git hooks run retro in the background:
+After `retro init`, a single **post-commit** hook runs `retro ingest --auto` in the background. When `auto_apply = true` (the default), this chains through the full pipeline:
 
-- **post-commit**: `retro ingest --auto` parses new sessions silently
-- **post-merge**: `retro analyze --auto` discovers patterns silently
+1. **Ingest** — parse new sessions (cooldown: 5 minutes)
+2. **Analyze** — discover patterns via AI (cooldown: 24 hours)
+3. **Apply** — generate skills, CLAUDE.md rules, and agents (cooldown: 24 hours)
 
-In `--auto` mode, retro skips if another instance is running, respects a cooldown period, and never produces output. It quietly keeps your pattern database up to date.
+Each stage has its own cooldown and data trigger — no unnecessary AI calls. In `--auto` mode, retro skips if another instance is running and never produces output.
 
-Run `retro apply` when you're ready to act on what it found.
+When auto-apply creates a PR, you'll see a terminal nudge the next time you run any retro command interactively.
 
 ## Configuration
 
@@ -112,7 +113,10 @@ model = "sonnet"           # AI model for analysis (sonnet, opus, haiku)
 rolling_window_days = 14   # How far back to analyze
 
 [hooks]
-auto_cooldown_minutes = 60 # Minimum time between auto-runs
+ingest_cooldown_minutes = 5    # Minimum time between auto-ingests
+analyze_cooldown_minutes = 1440 # Minimum time between auto-analyses (24h)
+apply_cooldown_minutes = 1440   # Minimum time between auto-applies (24h)
+auto_apply = true               # Enable full auto pipeline
 
 [curator]
 staleness_days = 30        # When to consider patterns stale
@@ -142,7 +146,7 @@ Retro is v0.1. The core pipeline works and has been tested on real Claude Code s
 - Session ingestion and pattern discovery across projects
 - CLAUDE.md rule generation with managed sections (never touches your content)
 - Skill and global agent generation
-- Automatic git hook integration (ingest on commit, analyze on merge)
+- Automatic pipeline via git hooks (ingest → analyze → apply, per-stage cooldowns)
 - Context auditing for redundancy and contradictions
 - Dry-run mode on all AI-powered commands
 

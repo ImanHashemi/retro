@@ -50,8 +50,14 @@ pub struct AiConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HooksConfig {
-    #[serde(default = "default_cooldown")]
-    pub auto_cooldown_minutes: u32,
+    #[serde(default = "default_ingest_cooldown")]
+    pub ingest_cooldown_minutes: u32,
+    #[serde(default = "default_analyze_cooldown")]
+    pub analyze_cooldown_minutes: u32,
+    #[serde(default = "default_apply_cooldown")]
+    pub apply_cooldown_minutes: u32,
+    #[serde(default = "default_auto_apply")]
+    pub auto_apply: bool,
     #[serde(default = "default_post_commit")]
     pub post_commit: String,
     #[serde(default = "default_post_merge")]
@@ -90,7 +96,10 @@ fn default_ai() -> AiConfig {
 
 fn default_hooks() -> HooksConfig {
     HooksConfig {
-        auto_cooldown_minutes: default_cooldown(),
+        ingest_cooldown_minutes: default_ingest_cooldown(),
+        analyze_cooldown_minutes: default_analyze_cooldown(),
+        apply_cooldown_minutes: default_apply_cooldown(),
+        auto_apply: default_auto_apply(),
         post_commit: default_post_commit(),
         post_merge: default_post_merge(),
     }
@@ -127,8 +136,17 @@ fn default_model() -> String {
 fn default_max_budget() -> f64 {
     0.50
 }
-fn default_cooldown() -> u32 {
-    60
+fn default_ingest_cooldown() -> u32 {
+    5
+}
+fn default_analyze_cooldown() -> u32 {
+    1440
+}
+fn default_apply_cooldown() -> u32 {
+    1440
+}
+fn default_auto_apply() -> bool {
+    true
 }
 fn default_post_commit() -> String {
     "ingest".to_string()
@@ -151,6 +169,7 @@ impl Config {
                 .map_err(|e| CoreError::Io(format!("reading config: {e}")))?;
             let config: Config =
                 toml::from_str(&contents).map_err(|e| CoreError::Config(e.to_string()))?;
+
             Ok(config)
         } else {
             Ok(Config::default())
@@ -192,5 +211,50 @@ pub fn expand_tilde(path: &str) -> PathBuf {
         PathBuf::from(home)
     } else {
         PathBuf::from(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hooks_config_defaults() {
+        let config = default_hooks();
+        assert_eq!(config.ingest_cooldown_minutes, 5);
+        assert_eq!(config.analyze_cooldown_minutes, 1440);
+        assert_eq!(config.apply_cooldown_minutes, 1440);
+        assert!(config.auto_apply);
+    }
+
+    #[test]
+    fn test_hooks_config_new_fields_deserialize() {
+        let toml_str = r#"
+[hooks]
+ingest_cooldown_minutes = 10
+analyze_cooldown_minutes = 720
+apply_cooldown_minutes = 2880
+auto_apply = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hooks.ingest_cooldown_minutes, 10);
+        assert_eq!(config.hooks.analyze_cooldown_minutes, 720);
+        assert_eq!(config.hooks.apply_cooldown_minutes, 2880);
+        assert!(!config.hooks.auto_apply);
+    }
+
+    #[test]
+    fn test_hooks_config_partial_deserialize() {
+        // Config with only some fields should fill defaults for the rest
+        let toml_str = r#"
+[hooks]
+ingest_cooldown_minutes = 10
+auto_apply = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hooks.ingest_cooldown_minutes, 10);
+        assert_eq!(config.hooks.analyze_cooldown_minutes, 1440); // default
+        assert_eq!(config.hooks.apply_cooldown_minutes, 1440); // default
+        assert!(!config.hooks.auto_apply);
     }
 }
