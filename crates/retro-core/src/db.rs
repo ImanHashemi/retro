@@ -3,9 +3,10 @@ use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projec
 use chrono::{DateTime, Utc};
 pub use rusqlite::Connection;
 use rusqlite::params;
+use rusqlite::OptionalExtension;
 use std::path::Path;
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Open (or create) the retro database with WAL mode enabled.
 pub fn open_db(path: &Path) -> Result<Connection, CoreError> {
@@ -78,6 +79,18 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
             ",
         )?;
 
+        conn.pragma_update(None, "user_version", 1)?;
+    }
+
+    if current_version < 2 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            ",
+        )?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
@@ -211,6 +224,18 @@ pub fn has_unanalyzed_sessions(conn: &Connection) -> Result<bool, CoreError> {
     Ok(count > 0)
 }
 
+/// Count ingested sessions that haven't been analyzed yet.
+pub fn unanalyzed_session_count(conn: &Connection) -> Result<u64, CoreError> {
+    let count: u64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingested_sessions i
+         LEFT JOIN analyzed_sessions a ON i.session_id = a.session_id
+         WHERE a.session_id IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
 /// Check if there are patterns eligible for projection that haven't been projected yet.
 /// Excludes patterns that have generation_failed=true, suggested_target='db_only',
 /// or confidence below the given threshold.
@@ -229,23 +254,30 @@ pub fn has_unprojected_patterns(conn: &Connection, confidence_threshold: f64) ->
     Ok(count > 0)
 }
 
-/// Get distinct PR URLs from projections that haven't been nudged yet.
-pub fn get_unnudged_pr_urls(conn: &Connection) -> Result<Vec<String>, CoreError> {
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT pr_url FROM projections WHERE pr_url IS NOT NULL AND nudged = 0",
-    )?;
-    let urls = stmt
-        .query_map([], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(urls)
+/// Get the last nudge timestamp from metadata.
+pub fn get_last_nudge_at(conn: &Connection) -> Result<Option<DateTime<Utc>>, CoreError> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM metadata WHERE key = 'last_nudge_at'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    match result {
+        Some(s) => match DateTime::parse_from_rfc3339(&s) {
+            Ok(dt) => Ok(Some(dt.with_timezone(&Utc))),
+            Err(_) => Ok(None),
+        },
+        None => Ok(None),
+    }
 }
 
-/// Mark all projections with PR URLs as nudged.
-pub fn mark_projections_nudged(conn: &Connection) -> Result<(), CoreError> {
+/// Set the last nudge timestamp in metadata.
+pub fn set_last_nudge_at(conn: &Connection, timestamp: &DateTime<Utc>) -> Result<(), CoreError> {
     conn.execute(
-        "UPDATE projections SET nudged = 1 WHERE pr_url IS NOT NULL AND nudged = 0",
-        [],
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_nudge_at', ?1)",
+        params![timestamp.to_rfc3339()],
     )?;
     Ok(())
 }
@@ -1009,80 +1041,12 @@ mod tests {
     }
 
     #[test]
-    fn test_get_unnudged_pr_urls() {
-        let conn = test_db();
-
-        let p1 = test_pattern("pat-1", "Pattern one");
-        let p2 = test_pattern("pat-2", "Pattern two");
-        insert_pattern(&conn, &p1).unwrap();
-        insert_pattern(&conn, &p2).unwrap();
-
-        // Projection with PR URL (unnudged by default)
-        let proj1 = Projection {
-            id: "proj-1".to_string(),
-            pattern_id: "pat-1".to_string(),
-            target_type: "Skill".to_string(),
-            target_path: "/path/a".to_string(),
-            content: "content a".to_string(),
-            applied_at: Utc::now(),
-            pr_url: Some("https://github.com/test/pull/1".to_string()),
-        };
-        // Projection without PR URL
-        let proj2 = Projection {
-            id: "proj-2".to_string(),
-            pattern_id: "pat-2".to_string(),
-            target_type: "Skill".to_string(),
-            target_path: "/path/b".to_string(),
-            content: "content b".to_string(),
-            applied_at: Utc::now(),
-            pr_url: None,
-        };
-        insert_projection(&conn, &proj1).unwrap();
-        insert_projection(&conn, &proj2).unwrap();
-
-        let urls = get_unnudged_pr_urls(&conn).unwrap();
-        assert_eq!(urls.len(), 1);
-        assert_eq!(urls[0], "https://github.com/test/pull/1");
-    }
-
-    #[test]
-    fn test_mark_projections_nudged() {
-        let conn = test_db();
-
-        let p1 = test_pattern("pat-1", "Pattern one");
-        insert_pattern(&conn, &p1).unwrap();
-
-        let proj = Projection {
-            id: "proj-1".to_string(),
-            pattern_id: "pat-1".to_string(),
-            target_type: "Skill".to_string(),
-            target_path: "/path".to_string(),
-            content: "content".to_string(),
-            applied_at: Utc::now(),
-            pr_url: Some("https://github.com/test/pull/1".to_string()),
-        };
-        insert_projection(&conn, &proj).unwrap();
-
-        // Before nudging: should have unnudged PRs
-        let urls = get_unnudged_pr_urls(&conn).unwrap();
-        assert_eq!(urls.len(), 1);
-
-        // Nudge
-        mark_projections_nudged(&conn).unwrap();
-
-        // After nudging: should be empty
-        let urls = get_unnudged_pr_urls(&conn).unwrap();
-        assert!(urls.is_empty());
-    }
-
-    #[test]
     fn test_auto_apply_data_triggers_full_flow() {
         let conn = test_db();
 
         // Initially: no data, no triggers
         assert!(!has_unanalyzed_sessions(&conn).unwrap());
         assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
-        assert!(get_unnudged_pr_urls(&conn).unwrap().is_empty());
 
         // Step 1: Ingest creates sessions → triggers analyze
         let session = IngestedSession {
@@ -1104,7 +1068,7 @@ mod tests {
         insert_pattern(&conn, &p).unwrap();
         assert!(has_unprojected_patterns(&conn, 0.0).unwrap());
 
-        // Step 3: After apply → projection created with PR URL → triggers nudge
+        // Step 3: After apply → projection created with PR URL
         let proj = Projection {
             id: "proj-1".to_string(),
             pattern_id: "pat-1".to_string(),
@@ -1116,12 +1080,48 @@ mod tests {
         };
         insert_projection(&conn, &proj).unwrap();
         assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
+    }
 
-        // Step 4: Nudge shows PR URL, then marks as nudged
-        let urls = get_unnudged_pr_urls(&conn).unwrap();
-        assert_eq!(urls, vec!["https://github.com/test/pull/42"]);
+    #[test]
+    fn test_get_last_nudge_at_empty() {
+        let conn = test_db();
+        assert!(get_last_nudge_at(&conn).unwrap().is_none());
+    }
 
-        mark_projections_nudged(&conn).unwrap();
-        assert!(get_unnudged_pr_urls(&conn).unwrap().is_empty());
+    #[test]
+    fn test_unanalyzed_session_count() {
+        let conn = test_db();
+        assert_eq!(unanalyzed_session_count(&conn).unwrap(), 0);
+
+        // Add 3 sessions
+        for i in 1..=3 {
+            let session = IngestedSession {
+                session_id: format!("sess-{i}"),
+                project: "/proj".to_string(),
+                session_path: format!("/path/sess-{i}"),
+                file_size: 100,
+                file_mtime: "2025-01-01T00:00:00Z".to_string(),
+                ingested_at: Utc::now(),
+            };
+            record_ingested_session(&conn, &session).unwrap();
+        }
+        assert_eq!(unanalyzed_session_count(&conn).unwrap(), 3);
+
+        // Analyze one
+        record_analyzed_session(&conn, "sess-1", "/proj").unwrap();
+        assert_eq!(unanalyzed_session_count(&conn).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_set_and_get_last_nudge_at() {
+        let conn = test_db();
+        let now = Utc::now();
+        set_last_nudge_at(&conn, &now).unwrap();
+        let result = get_last_nudge_at(&conn).unwrap().unwrap();
+        // Compare to second precision (DB stores RFC 3339)
+        assert_eq!(
+            result.format("%Y-%m-%dT%H:%M:%S").to_string(),
+            now.format("%Y-%m-%dT%H:%M:%S").to_string()
+        );
     }
 }

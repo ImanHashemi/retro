@@ -62,6 +62,8 @@ pub struct HooksConfig {
     pub post_commit: String,
     #[serde(default = "default_post_merge")]
     pub post_merge: String,
+    #[serde(default = "default_auto_analyze_max_sessions")]
+    pub auto_analyze_max_sessions: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +104,7 @@ fn default_hooks() -> HooksConfig {
         auto_apply: default_auto_apply(),
         post_commit: default_post_commit(),
         post_merge: default_post_merge(),
+        auto_analyze_max_sessions: default_auto_analyze_max_sessions(),
     }
 }
 
@@ -153,6 +156,9 @@ fn default_post_commit() -> String {
 }
 fn default_post_merge() -> String {
     "analyze".to_string()
+}
+fn default_auto_analyze_max_sessions() -> u32 {
+    15
 }
 fn default_claude_dir() -> String {
     "~/.claude".to_string()
@@ -256,5 +262,21 @@ auto_apply = false
         assert_eq!(config.hooks.analyze_cooldown_minutes, 1440); // default
         assert_eq!(config.hooks.apply_cooldown_minutes, 1440); // default
         assert!(!config.hooks.auto_apply);
+    }
+
+    #[test]
+    fn test_hooks_config_max_sessions_default() {
+        let config = Config::default();
+        assert_eq!(config.hooks.auto_analyze_max_sessions, 15);
+    }
+
+    #[test]
+    fn test_hooks_config_max_sessions_custom() {
+        let toml_str = r#"
+[hooks]
+auto_analyze_max_sessions = 5
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hooks.auto_analyze_max_sessions, 5);
     }
 }

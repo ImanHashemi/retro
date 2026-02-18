@@ -3,6 +3,7 @@ use colored::Colorize;
 use retro_core::config::{retro_dir, Config};
 use retro_core::db;
 use retro_core::git;
+use retro_core::git::HookInstallResult;
 use retro_core::util::shorten_path_buf;
 
 use super::git_root_or_cwd;
@@ -17,6 +18,12 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
     // Create ~/.retro/ directory structure
     std::fs::create_dir_all(&dir).context("creating ~/.retro/")?;
     std::fs::create_dir_all(dir.join("backups")).context("creating ~/.retro/backups/")?;
+
+    // Truncate hook stderr log on fresh init
+    let hook_stderr_path = dir.join("hook-stderr.log");
+    if hook_stderr_path.exists() {
+        let _ = std::fs::write(&hook_stderr_path, "");
+    }
 
     // Create config.toml if it doesn't exist
     let config_path = dir.join("config.toml");
@@ -58,12 +65,18 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
     if git::is_in_git_repo() {
         let repo_root = git_root_or_cwd()?;
         match git::install_hooks(&repo_root) {
-            Ok(installed) => {
-                if installed.is_empty() {
-                    println!("  {} git hook (already installed)", "Exists".yellow());
-                } else {
-                    for hook in &installed {
-                        println!("  {} git hook: {} (ingest → analyze → apply)", "Installed".green(), hook);
+            Ok(results) => {
+                for (hook, result) in &results {
+                    match result {
+                        HookInstallResult::Installed => {
+                            println!("  {} git hook: {} (ingest → analyze → apply)", "Installed".green(), hook);
+                        }
+                        HookInstallResult::Updated => {
+                            println!("  {} git hook: {} (ingest → analyze → apply)", "Updated".green(), hook);
+                        }
+                        HookInstallResult::UpToDate => {
+                            println!("  {} git hook: {} (already up to date)", "Exists".yellow(), hook);
+                        }
                     }
                 }
             }

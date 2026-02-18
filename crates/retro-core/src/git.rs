@@ -217,20 +217,28 @@ pub fn create_pr(title: &str, body: &str, base: &str) -> Result<String, CoreErro
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Result of installing hook lines into a file.
+#[derive(Debug, PartialEq)]
+pub enum HookInstallResult {
+    /// Hook was freshly installed (no retro marker existed before).
+    Installed,
+    /// Hook was updated (old retro lines replaced with new ones).
+    Updated,
+    /// Hook already had the exact same lines — no change needed.
+    UpToDate,
+}
+
 /// Install retro git hooks (post-commit only) into the repository.
 /// Also cleans up old post-merge hooks that were retro-managed.
-pub fn install_hooks(repo_root: &str) -> Result<Vec<String>, CoreError> {
+pub fn install_hooks(repo_root: &str) -> Result<Vec<(String, HookInstallResult)>, CoreError> {
     let hooks_dir = Path::new(repo_root).join(".git").join("hooks");
-    let mut installed = Vec::new();
+    let mut results = Vec::new();
 
     // Single post-commit hook: ingest + opportunistic analyze/apply
     let post_commit_path = hooks_dir.join("post-commit");
-    if install_hook_lines(
-        &post_commit_path,
-        &format!("{HOOK_MARKER}\nretro ingest --auto 2>/dev/null &\n"),
-    )? {
-        installed.push("post-commit".to_string());
-    }
+    let hook_lines = format!("{HOOK_MARKER}\nretro ingest --auto 2>>~/.retro/hook-stderr.log &\n");
+    let result = install_hook_lines(&post_commit_path, &hook_lines)?;
+    results.push(("post-commit".to_string(), result));
 
     // Remove old post-merge hook if it was retro-managed
     let post_merge_path = hooks_dir.join("post-merge");
@@ -246,11 +254,13 @@ pub fn install_hooks(repo_root: &str) -> Result<Vec<String>, CoreError> {
         }
     }
 
-    Ok(installed)
+    Ok(results)
 }
 
-/// Install hook lines into a hook file. Returns true if lines were added.
-fn install_hook_lines(hook_path: &Path, lines: &str) -> Result<bool, CoreError> {
+/// Install hook lines into a hook file.
+/// If retro lines already exist, removes them first and re-adds the new lines.
+/// Returns the install result (Installed, Updated, or UpToDate).
+fn install_hook_lines(hook_path: &Path, lines: &str) -> Result<HookInstallResult, CoreError> {
     let existing = if hook_path.exists() {
         std::fs::read_to_string(hook_path)
             .map_err(|e| CoreError::Io(format!("reading hook {}: {e}", hook_path.display())))?
@@ -258,15 +268,21 @@ fn install_hook_lines(hook_path: &Path, lines: &str) -> Result<bool, CoreError> 
         String::new()
     };
 
-    // Already installed
-    if existing.contains(HOOK_MARKER) {
-        return Ok(false);
-    }
+    let (base_content, was_present) = if existing.contains(HOOK_MARKER) {
+        // Check if the existing lines are already exactly what we want
+        if existing.contains(lines.trim()) {
+            return Ok(HookInstallResult::UpToDate);
+        }
+        // Remove old retro lines so we can add the new ones
+        (remove_hook_lines(&existing), true)
+    } else {
+        (existing, false)
+    };
 
-    let mut content = if existing.is_empty() {
+    let mut content = if base_content.is_empty() {
         "#!/bin/sh\n".to_string()
     } else {
-        let mut s = existing;
+        let mut s = base_content;
         if !s.ends_with('\n') {
             s.push('\n');
         }
@@ -287,7 +303,11 @@ fn install_hook_lines(hook_path: &Path, lines: &str) -> Result<bool, CoreError> 
             .map_err(|e| CoreError::Io(format!("chmod hook: {e}")))?;
     }
 
-    Ok(true)
+    Ok(if was_present {
+        HookInstallResult::Updated
+    } else {
+        HookInstallResult::Installed
+    })
 }
 
 /// Remove retro hook lines from git hooks in the given repository.
@@ -394,9 +414,11 @@ mod tests {
         let hooks_dir = dir.path().join(".git").join("hooks");
         std::fs::create_dir_all(&hooks_dir).unwrap();
 
-        let installed = install_hooks(dir.path().to_str().unwrap()).unwrap();
+        let results = install_hooks(dir.path().to_str().unwrap()).unwrap();
 
-        assert_eq!(installed, vec!["post-commit".to_string()]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "post-commit");
+        assert_eq!(results[0].1, HookInstallResult::Installed);
 
         let post_commit = std::fs::read_to_string(hooks_dir.join("post-commit")).unwrap();
         assert!(post_commit.contains("retro ingest --auto"));
@@ -438,5 +460,63 @@ mod tests {
         let content = std::fs::read_to_string(hooks_dir.join("post-merge")).unwrap();
         assert!(content.contains("other-tool run"));
         assert!(!content.contains("retro"));
+    }
+
+    #[test]
+    fn test_install_hooks_updates_old_redirect() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks_dir = dir.path().join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+
+        // Simulate old hook with 2>/dev/null redirect
+        let old_content =
+            "#!/bin/sh\n# retro hook - do not remove\nretro ingest --auto 2>/dev/null &\n";
+        std::fs::write(hooks_dir.join("post-commit"), old_content).unwrap();
+
+        let results = install_hooks(dir.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "post-commit");
+        assert_eq!(results[0].1, HookInstallResult::Updated);
+
+        // Verify new redirect is in place
+        let content = std::fs::read_to_string(hooks_dir.join("post-commit")).unwrap();
+        assert!(content.contains("2>>~/.retro/hook-stderr.log"));
+        assert!(!content.contains("2>/dev/null"));
+    }
+
+    #[test]
+    fn test_install_hooks_up_to_date() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks_dir = dir.path().join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+
+        // First install
+        let results = install_hooks(dir.path().to_str().unwrap()).unwrap();
+        assert_eq!(results[0].1, HookInstallResult::Installed);
+
+        // Second install — should be up to date
+        let results = install_hooks(dir.path().to_str().unwrap()).unwrap();
+        assert_eq!(results[0].1, HookInstallResult::UpToDate);
+    }
+
+    #[test]
+    fn test_install_hooks_updates_preserves_other_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks_dir = dir.path().join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+
+        // Simulate old hook with other tool + old retro redirect
+        let old_content = "#!/bin/sh\nother-tool run\n# retro hook - do not remove\nretro ingest --auto 2>/dev/null &\n";
+        std::fs::write(hooks_dir.join("post-commit"), old_content).unwrap();
+
+        let results = install_hooks(dir.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(results[0].1, HookInstallResult::Updated);
+
+        let content = std::fs::read_to_string(hooks_dir.join("post-commit")).unwrap();
+        assert!(content.contains("other-tool run"));
+        assert!(content.contains("2>>~/.retro/hook-stderr.log"));
+        assert!(!content.contains("2>/dev/null"));
     }
 }
