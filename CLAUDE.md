@@ -109,3 +109,11 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 ## Full Plan
 
 See `PLAN.md` for the complete implementation plan with database schema, CLI commands, session JSONL format details, prompt strategy, and phased implementation steps.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- When designing AI-powered features: prioritize output quality over cost optimization. Generate one high-quality artifact per AI call rather than batching multiple items. The user explicitly values quality over token cost savings.
+- After implementing significant changes (especially to hooks, auto-mode, or core workflows): proactively suggest doing a clean install test to verify the changes work end-to-end. Command sequence: `retro init --uninstall --purge`, rebuild from source, `retro init`, test the changed functionality. Don't assume changes work without integration testing.
+
+<!-- retro:managed:end -->
