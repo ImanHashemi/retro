@@ -99,6 +99,8 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
                     return Ok(());
                 }
 
+                let mut pr_url: Option<String> = None;
+
                 // Phase 1: Personal actions on current branch
                 if let Err(e) = projection::execute_plan(
                     &conn,
@@ -106,20 +108,42 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
                     &plan,
                     project.as_deref(),
                     Some(&ApplyTrack::Personal),
-                )
-                    && verbose
-                {
-                    eprintln!("[verbose] apply personal error: {e}");
+                ) {
+                    if verbose {
+                        eprintln!("[verbose] apply personal error: {e}");
+                    }
+                    let _ = audit_log::append(
+                        &audit_path,
+                        "apply_error",
+                        serde_json::json!({
+                            "error": format!("personal: {e}"),
+                            "auto": true,
+                        }),
+                    );
                 }
 
                 // Phase 2: Shared actions on new branch + PR
-                if !plan.shared_actions().is_empty()
-                    && let Err(e) = execute_shared_with_pr(
+                if !plan.shared_actions().is_empty() {
+                    match execute_shared_with_pr(
                         &conn, &config, &plan, project.as_deref(), true,
-                    )
-                    && verbose
-                {
-                    eprintln!("[verbose] apply shared error: {e}");
+                    ) {
+                        Ok(shared_result) => {
+                            pr_url = shared_result.pr_url;
+                        }
+                        Err(e) => {
+                            if verbose {
+                                eprintln!("[verbose] apply shared error: {e}");
+                            }
+                            let _ = audit_log::append(
+                                &audit_path,
+                                "apply_error",
+                                serde_json::json!({
+                                    "error": format!("shared: {e}"),
+                                    "auto": true,
+                                }),
+                            );
+                        }
+                    }
                 }
 
                 // Audit log (best-effort in auto mode)
@@ -128,6 +152,7 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
                     "project": project,
                     "global": global,
                     "auto": true,
+                    "pr_url": pr_url,
                 });
                 let _ = audit_log::append(&audit_path, "apply", audit_details);
 
@@ -139,6 +164,14 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
                 if verbose {
                     eprintln!("[verbose] apply plan error: {e}");
                 }
+                let _ = audit_log::append(
+                    &audit_path,
+                    "apply_error",
+                    serde_json::json!({
+                        "error": e.to_string(),
+                        "auto": true,
+                    }),
+                );
             }
         }
 

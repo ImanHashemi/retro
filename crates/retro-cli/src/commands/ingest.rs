@@ -30,6 +30,8 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
 
     // In auto mode: acquire lockfile silently, check cooldown
     if auto {
+        let audit_path = dir.join("audit.jsonl");
+
         // Scope the lock so it's released after ingest completes,
         // before orchestrating analyze and apply (which acquire their own locks).
         {
@@ -72,6 +74,16 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
                             r.sessions_ingested, r.sessions_skipped
                         );
                     }
+                    // Audit: ingest success
+                    let _ = audit_log::append(
+                        &audit_path,
+                        "ingest",
+                        serde_json::json!({
+                            "sessions_ingested": r.sessions_ingested,
+                            "sessions_skipped": r.sessions_skipped,
+                            "auto": true,
+                        }),
+                    );
                 }
                 Err(e) => {
                     if verbose {
@@ -94,8 +106,6 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
                     return Ok(());
                 }
             };
-
-            let audit_path = dir.join("audit.jsonl");
 
             let project = if global {
                 None
@@ -122,46 +132,87 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
                 };
 
             if should_analyze {
-                if verbose {
-                    eprintln!("[verbose] orchestrator: running analyze");
-                }
+                // Check session cap for auto mode
+                let unanalyzed_count = db::unanalyzed_session_count(&conn).unwrap_or(0);
+                let cap = config.hooks.auto_analyze_max_sessions;
 
-                let window_days = config.analysis.window_days;
+                if unanalyzed_count > cap as u64 {
+                    if verbose {
+                        eprintln!(
+                            "[verbose] orchestrator: skipping analyze — {} unanalyzed sessions exceeds auto limit ({})",
+                            unanalyzed_count, cap
+                        );
+                    }
+                    let _ = audit_log::append(
+                        &audit_path,
+                        "analyze_skipped",
+                        serde_json::json!({
+                            "reason": "session_cap",
+                            "unanalyzed_count": unanalyzed_count,
+                            "cap": cap,
+                            "auto": true,
+                        }),
+                    );
+                } else {
+                    if verbose {
+                        eprintln!("[verbose] orchestrator: running analyze");
+                    }
 
-                match analysis::analyze(&conn, &config, project.as_deref(), window_days) {
-                    Ok(result) => {
-                        if verbose {
-                            eprintln!(
-                                "[verbose] analyze complete: {} patterns ({} new, {} updated)",
-                                result.total_patterns, result.new_patterns, result.updated_patterns
+                    let window_days = config.analysis.window_days;
+
+                    match analysis::analyze(&conn, &config, project.as_deref(), window_days) {
+                        Ok(result) => {
+                            if verbose {
+                                eprintln!(
+                                    "[verbose] analyze complete: {} patterns ({} new, {} updated)",
+                                    result.total_patterns, result.new_patterns, result.updated_patterns
+                                );
+                            }
+                            // Record audit log for analyze (best-effort)
+                            if result.sessions_analyzed > 0 {
+                                let audit_details = serde_json::json!({
+                                    "sessions_analyzed": result.sessions_analyzed,
+                                    "new_patterns": result.new_patterns,
+                                    "updated_patterns": result.updated_patterns,
+                                    "total_patterns": result.total_patterns,
+                                    "input_tokens": result.input_tokens,
+                                    "output_tokens": result.output_tokens,
+                                    "window_days": window_days,
+                                    "global": global,
+                                    "project": &project,
+                                    "auto": true,
+                                    "orchestrated": true,
+                                });
+                                let _ = audit_log::append(&audit_path, "analyze", audit_details);
+                            }
+                        }
+                        Err(e) => {
+                            if verbose {
+                                eprintln!("[verbose] analyze error: {e}");
+                            }
+                            let _ = audit_log::append(
+                                &audit_path,
+                                "analyze_error",
+                                serde_json::json!({
+                                    "error": e.to_string(),
+                                    "auto": true,
+                                }),
                             );
                         }
-                        // Record audit log for analyze (best-effort)
-                        if result.sessions_analyzed > 0 {
-                            let audit_details = serde_json::json!({
-                                "sessions_analyzed": result.sessions_analyzed,
-                                "new_patterns": result.new_patterns,
-                                "updated_patterns": result.updated_patterns,
-                                "total_patterns": result.total_patterns,
-                                "input_tokens": result.input_tokens,
-                                "output_tokens": result.output_tokens,
-                                "window_days": window_days,
-                                "global": global,
-                                "project": &project,
-                                "auto": true,
-                                "orchestrated": true,
-                            });
-                            let _ = audit_log::append(&audit_path, "analyze", audit_details);
-                        }
-                    }
-                    Err(e) => {
-                        if verbose {
-                            eprintln!("[verbose] analyze error: {e}");
-                        }
                     }
                 }
-            } else if verbose {
-                eprintln!("[verbose] orchestrator: skipping analyze (no unanalyzed sessions or within cooldown)");
+            } else {
+                if verbose {
+                    eprintln!("[verbose] orchestrator: skipping analyze (no unanalyzed sessions or within cooldown)");
+                }
+                let _ = audit_log::append(
+                    &audit_path,
+                    "analyze_skipped",
+                    serde_json::json!({
+                        "reason": "cooldown_or_no_data",
+                        "auto": true,
+                    }),
+                );
             }
 
             // Check apply conditions: un-projected patterns + cooldown elapsed
@@ -195,8 +246,18 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
                         }
                     }
                 }
-            } else if verbose {
-                eprintln!("[verbose] orchestrator: skipping apply (no unprojected patterns or within cooldown)");
+            } else {
+                if verbose {
+                    eprintln!("[verbose] orchestrator: skipping apply (no unprojected patterns or within cooldown)");
+                }
+                let _ = audit_log::append(
+                    &audit_path,
+                    "apply_skipped",
+                    serde_json::json!({
+                        "reason": "no_qualifying_patterns",
+                        "auto": true,
+                    }),
+                );
             }
         } else if verbose {
             eprintln!("[verbose] orchestrator: auto_apply not enabled");
