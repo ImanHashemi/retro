@@ -104,3 +104,13 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 ## Full Plan
 
 See `PLAN.md` for the complete implementation plan with database schema, CLI commands, session JSONL format details, prompt strategy, and phased implementation steps.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- Generate skills one at a time per AI call. Do not batch multiple skill generations together — quality is more important than cost efficiency.
+- In auto-mode, all errors must be captured and logged. Never silently discard errors to /dev/null. Use audit.jsonl for operational errors and a separate error log for hook-level failures, panics, or unexpected issues.
+- When encountering bugs or unexpected behavior (hooks not firing, auto-mode not working, etc.), always invoke the systematic-debugging skill before proposing solutions. Gather evidence first: check status, inspect config, review logs, verify processes.
+- For any design or feature planning work, invoke the brainstorming skill first to explore requirements, approaches, and trade-offs before proposing implementation.
+
+<!-- retro:managed:end -->
