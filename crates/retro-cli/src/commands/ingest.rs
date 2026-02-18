@@ -165,7 +165,7 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
             }
 
             // Check apply conditions: un-projected patterns + cooldown elapsed
-            let should_apply = db::has_unprojected_patterns(&conn).unwrap_or(false)
+            let should_apply = db::has_unprojected_patterns(&conn, config.analysis.confidence_threshold).unwrap_or(false)
                 && match db::last_applied_at(&conn) {
                     Ok(Some(ref last)) => {
                         !within_cooldown(last, config.hooks.apply_cooldown_minutes)
