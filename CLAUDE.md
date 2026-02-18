@@ -104,3 +104,10 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 ## Full Plan
 
 See `PLAN.md` for the complete implementation plan with database schema, CLI commands, session JSONL format details, prompt strategy, and phased implementation steps.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- Always run tests before committing changes
+
+<!-- retro:managed:end -->
