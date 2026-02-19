@@ -176,6 +176,8 @@ pub struct UserMessage {
 pub enum MessageContent {
     Text(String),
     Blocks(Vec<ContentBlock>),
+    /// Catch-all for newer content formats we don't handle yet.
+    Other(serde_json::Value),
 }
 
 impl MessageContent {
@@ -198,12 +200,18 @@ impl MessageContent {
                 }
                 parts.join("\n")
             }
+            MessageContent::Other(_) => String::new(),
         }
     }
 
     /// Returns true if this is a tool_result message (not a user prompt).
     pub fn is_tool_result(&self) -> bool {
         matches!(self, MessageContent::Blocks(blocks) if blocks.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. })))
+    }
+
+    /// Returns true if this content is an unknown format we can't parse.
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, MessageContent::Other(_))
     }
 }
 
@@ -231,6 +239,9 @@ pub enum ContentBlock {
         #[serde(default)]
         content: Option<ToolResultContent>,
     },
+    /// Catch-all for new block types from future Claude versions.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Tool result content can be a string or an array of content blocks.
@@ -301,6 +312,7 @@ pub struct Usage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SummaryEntry {
+    #[serde(default)]
     pub uuid: String,
     #[serde(default)]
     pub parent_uuid: Option<String>,
@@ -371,11 +383,20 @@ pub struct HistoryEntry {
 // ── Context snapshot ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSkillSummary {
+    pub plugin_name: String,
+    pub skill_name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextSnapshot {
     pub claude_md: Option<String>,
     pub skills: Vec<SkillFile>,
     pub memory_md: Option<String>,
     pub global_agents: Vec<AgentFile>,
+    #[serde(default)]
+    pub plugin_skills: Vec<PluginSkillSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

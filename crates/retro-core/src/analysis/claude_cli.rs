@@ -106,7 +106,16 @@ impl AnalysisBackend for ClaudeCliBackend {
 
         let result_text = cli_output
             .result
-            .ok_or_else(|| CoreError::Analysis("claude CLI returned empty result".to_string()))?;
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                CoreError::Analysis(format!(
+                    "claude CLI returned empty result (is_error={}, duration_ms={}, tokens_in={}, tokens_out={})",
+                    cli_output.is_error,
+                    cli_output.duration_ms,
+                    input_tokens,
+                    output_tokens,
+                ))
+            })?;
 
         Ok(BackendResponse {
             text: result_text,
