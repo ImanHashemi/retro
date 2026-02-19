@@ -172,8 +172,38 @@ pub fn checkout_branch(name: &str) -> Result<(), CoreError> {
 }
 
 /// Stage specific files and commit.
+/// Retries once on commit failure to handle pre-commit hooks that auto-fix files
+/// (e.g., end-of-file-fixer, trailing-whitespace) — these hooks modify files and
+/// return exit code 1, expecting a re-stage + re-commit.
 pub fn commit_files(files: &[&str], message: &str) -> Result<(), CoreError> {
-    // Stage files
+    stage_files(files)?;
+
+    let output = Command::new("git")
+        .args(["commit", "-m", message])
+        .output()
+        .map_err(|e| CoreError::Io(format!("git commit: {e}")))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    // Pre-commit hooks may have auto-fixed files. Re-stage and retry once.
+    stage_files(files)?;
+
+    let output = Command::new("git")
+        .args(["commit", "-m", message])
+        .output()
+        .map_err(|e| CoreError::Io(format!("git commit (retry): {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CoreError::Io(format!("git commit failed: {stderr}")));
+    }
+
+    Ok(())
+}
+
+fn stage_files(files: &[&str]) -> Result<(), CoreError> {
     let mut args = vec!["add", "--"];
     args.extend(files);
 
@@ -185,17 +215,6 @@ pub fn commit_files(files: &[&str], message: &str) -> Result<(), CoreError> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(CoreError::Io(format!("git add failed: {stderr}")));
-    }
-
-    // Commit
-    let output = Command::new("git")
-        .args(["commit", "-m", message])
-        .output()
-        .map_err(|e| CoreError::Io(format!("git commit: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CoreError::Io(format!("git commit failed: {stderr}")));
     }
 
     Ok(())
