@@ -1,5 +1,7 @@
 use crate::errors::CoreError;
 use chrono::Utc;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::Path;
 
 /// Backup a file to the backup directory.
@@ -55,6 +57,16 @@ pub fn shorten_path(path: &str) -> String {
 /// Shorten a `Path` for display: replace home directory prefix with `~`.
 pub fn shorten_path_buf(path: &std::path::Path) -> String {
     shorten_path(&path.display().to_string())
+}
+
+/// Log a parse warning to ~/.retro/warnings.log instead of stderr.
+/// Best-effort: silently drops the message if the file can't be opened.
+pub fn log_parse_warning(msg: &str) {
+    let log_path = crate::config::retro_dir().join("warnings.log");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+        let ts = Utc::now().format("%Y-%m-%dT%H:%M:%S");
+        let _ = writeln!(file, "[{ts}] {msg}");
+    }
 }
 
 /// Strip markdown code fences from an AI response.

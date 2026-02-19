@@ -1,5 +1,6 @@
 use crate::errors::CoreError;
 use crate::models::*;
+use crate::util::log_parse_warning;
 use std::io::BufRead;
 use std::path::Path;
 
@@ -39,10 +40,10 @@ pub fn parse_subagent_dir(
         match parse_session_file(&path, &sub_id, project) {
             Ok(session) => sessions.push(session),
             Err(e) => {
-                eprintln!(
-                    "warning: subagent {}: parse error: {e}",
+                log_parse_warning(&format!(
+                    "subagent {}: parse error: {e}",
                     path.display()
-                );
+                ));
             }
         }
     }
@@ -67,11 +68,11 @@ fn parse_jsonl_entries(path: &Path) -> Result<Vec<SessionEntry>, CoreError> {
         let line = match line {
             Ok(l) => l,
             Err(e) => {
-                eprintln!(
-                    "warning: {}: line {}: read error: {e}",
+                log_parse_warning(&format!(
+                    "{}: line {}: read error: {e}",
                     path.display(),
                     line_num + 1
-                );
+                ));
                 continue;
             }
         };
@@ -97,12 +98,12 @@ fn parse_jsonl_entries(path: &Path) -> Result<Vec<SessionEntry>, CoreError> {
             Err(e) => {
                 // Log parse errors for known types — these indicate real problems
                 if let Some(t) = &entry_type {
-                    eprintln!(
-                        "warning: {}: line {} (type={}): parse error: {e}",
+                    log_parse_warning(&format!(
+                        "{}: line {} (type={}): parse error: {e}",
                         path.display(),
                         line_num + 1,
                         t
-                    );
+                    ));
                 }
             }
         }
@@ -183,6 +184,7 @@ fn build_session(
                                 }
                             }
                         }
+                        ContentBlock::Unknown => {}
                     }
                 }
 
