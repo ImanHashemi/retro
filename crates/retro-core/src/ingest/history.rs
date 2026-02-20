@@ -1,5 +1,6 @@
 use crate::errors::CoreError;
 use crate::models::HistoryEntry;
+use crate::util::log_parse_warning;
 use std::io::BufRead;
 use std::path::Path;
 
@@ -24,7 +25,7 @@ pub fn parse_history(
         let line = match line {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("warning: history.jsonl line {}: read error: {e}", line_num + 1);
+                log_parse_warning(&format!("history.jsonl line {}: read error: {e}", line_num + 1));
                 continue;
             }
         };
@@ -55,10 +56,10 @@ pub fn parse_history(
                 entries.push(entry);
             }
             Err(e) => {
-                eprintln!(
-                    "warning: history.jsonl line {}: parse error: {e}",
+                log_parse_warning(&format!(
+                    "history.jsonl line {}: parse error: {e}",
                     line_num + 1
-                );
+                ));
             }
         }
     }

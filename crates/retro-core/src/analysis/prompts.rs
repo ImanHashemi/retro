@@ -1,20 +1,117 @@
 use crate::models::{
-    CompactPattern, CompactSession, CompactUserMessage, Pattern, Session,
+    CompactPattern, CompactSession, CompactUserMessage, ContextSnapshot, Pattern, Session,
 };
 
 const MAX_USER_MSG_LEN: usize = 200;
 const MAX_PROMPT_CHARS: usize = 150_000;
+const MAX_CONTEXT_SUMMARY_CHARS: usize = 5_000;
+
+/// Build a compact summary of installed context for the analysis prompt.
+/// Includes project skills, plugin skills, retro-managed CLAUDE.md rules, and global agents.
+/// Sections are omitted if empty. Capped at 5K chars.
+pub fn build_context_summary(snapshot: &ContextSnapshot) -> String {
+    let mut sections: Vec<String> = Vec::new();
+
+    // Project skills (name + description from frontmatter)
+    let project_skills: Vec<(String, String)> = snapshot
+        .skills
+        .iter()
+        .filter_map(|s| crate::ingest::context::parse_skill_frontmatter(&s.content))
+        .collect();
+
+    if !project_skills.is_empty() {
+        let mut section = "### Project Skills\n".to_string();
+        for (name, desc) in &project_skills {
+            section.push_str(&format!("- {name}: {desc}\n"));
+        }
+        sections.push(section);
+    }
+
+    // Plugin skills
+    if !snapshot.plugin_skills.is_empty() {
+        let mut section = "### Plugin Skills\n".to_string();
+        for ps in &snapshot.plugin_skills {
+            section.push_str(&format!("- [{}] {}: {}\n", ps.plugin_name, ps.skill_name, ps.description));
+        }
+        sections.push(section);
+    }
+
+    // Existing retro-managed CLAUDE.md rules
+    if let Some(ref claude_md) = snapshot.claude_md {
+        if let Some(rules) = crate::projection::claude_md::read_managed_section(claude_md) {
+            if !rules.is_empty() {
+                let mut section = "### Existing CLAUDE.md Rules (retro-managed)\n".to_string();
+                for rule in &rules {
+                    section.push_str(&format!("- {rule}\n"));
+                }
+                sections.push(section);
+            }
+        }
+    }
+
+    // Global agents
+    if !snapshot.global_agents.is_empty() {
+        let mut section = "### Global Agents\n".to_string();
+        for agent in &snapshot.global_agents {
+            // Extract just the filename without extension
+            let name = std::path::Path::new(&agent.path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| agent.path.clone());
+            section.push_str(&format!("- {name}\n"));
+        }
+        sections.push(section);
+    }
+
+    let mut result = sections.join("\n");
+
+    // Cap at budget — truncate plugin skills section first if over
+    if result.len() > MAX_CONTEXT_SUMMARY_CHARS {
+        // Try without plugin skills
+        sections.retain(|s| !s.starts_with("### Plugin Skills"));
+        result = sections.join("\n");
+    }
+
+    if result.len() > MAX_CONTEXT_SUMMARY_CHARS {
+        // Hard truncate at char boundary
+        let mut i = MAX_CONTEXT_SUMMARY_CHARS;
+        while i > 0 && !result.is_char_boundary(i) {
+            i -= 1;
+        }
+        result.truncate(i);
+    }
+
+    result
+}
 
 /// Build the pattern discovery prompt for a batch of sessions.
-pub fn build_analysis_prompt(sessions: &[Session], existing_patterns: &[Pattern]) -> String {
+pub fn build_analysis_prompt(
+    sessions: &[Session],
+    existing_patterns: &[Pattern],
+    context_summary: Option<&str>,
+) -> String {
     let mut compact_sessions: Vec<CompactSession> = sessions.iter().map(to_compact_session).collect();
     let compact_patterns = existing_patterns.iter().map(to_compact_pattern).collect::<Vec<_>>();
 
     let patterns_json =
         serde_json::to_string_pretty(&compact_patterns).unwrap_or_else(|_| "[]".to_string());
 
-    // Estimate base prompt size (template + patterns), then fit as many sessions as possible
-    let base_size = 3000 + patterns_json.len(); // ~3K for template text
+    let context_section = match context_summary {
+        Some(summary) if !summary.is_empty() => format!(
+            r#"
+
+## Installed Context
+
+The following skills, rules, and agents are already installed. Before creating a new pattern, check whether existing tooling already covers the behavior. If it does, skip the pattern entirely or mark it `db_only`.
+
+{summary}
+"#
+        ),
+        _ => String::new(),
+    };
+
+    // Estimate base prompt size (template + patterns + context), then fit as many sessions as possible
+    let base_size = 3000 + patterns_json.len() + context_section.len();
     let budget = MAX_PROMPT_CHARS.saturating_sub(base_size);
 
     // Progressively drop sessions from the end until we fit
@@ -41,7 +138,7 @@ For each pattern found, assess:
   - "claude_md" — Simple rules ("always do X", "never do Y")
   - "skill" — Multi-step procedures or complex workflows
   - "global_agent" — Cross-project personal preferences
-  - "db_only" — Interesting but not actionable yet
+  - "db_only" — Interesting but not actionable yet, OR already covered by an installed skill/plugin
 
 ## Existing Patterns
 
@@ -57,7 +154,7 @@ When in doubt, prefer "update" over "new" — duplicate patterns are worse than 
 ```json
 {patterns_json}
 ```
-
+{context_section}
 ## Session Data
 
 ```json
@@ -96,6 +193,7 @@ Important:
 - Be specific in descriptions — vague patterns are useless
 - For suggested_content, write the actual rule/instruction as it should appear
 - CRITICAL: Do not create duplicate patterns. Two patterns about the same underlying behavior are duplicates even if described differently. Always check existing patterns for semantic overlap, not just textual similarity
+- Do not suggest skills or rules that duplicate installed plugin functionality
 - Return ONLY the JSON object, no other text"#
     );
 
@@ -240,6 +338,7 @@ fn truncate_str(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{AgentFile, PluginSkillSummary, SkillFile};
 
     #[test]
     fn test_build_audit_prompt_all_present() {
@@ -275,5 +374,146 @@ mod tests {
         assert!(prompt.contains("rules here"));
         assert!(prompt.contains("### MEMORY.md\n(not present)"));
         assert!(prompt.contains("### Skills\n(none)"));
+    }
+
+    fn empty_snapshot() -> ContextSnapshot {
+        ContextSnapshot {
+            claude_md: None,
+            skills: Vec::new(),
+            memory_md: None,
+            global_agents: Vec::new(),
+            plugin_skills: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_build_context_summary_empty() {
+        let snapshot = empty_snapshot();
+        let summary = build_context_summary(&snapshot);
+        assert!(summary.is_empty());
+    }
+
+    #[test]
+    fn test_build_context_summary_full() {
+        let snapshot = ContextSnapshot {
+            claude_md: Some("before\n<!-- retro:managed:start -->\n- Always use uv\n- Run cargo test\n<!-- retro:managed:end -->\nafter".to_string()),
+            skills: vec![SkillFile {
+                path: "skills/tdd/SKILL.md".to_string(),
+                content: "---\nname: tdd\ndescription: Test-driven development workflow\n---\nbody".to_string(),
+            }],
+            memory_md: None,
+            global_agents: vec![AgentFile {
+                path: "/home/user/.claude/agents/code-reviewer.md".to_string(),
+                content: "reviewer content".to_string(),
+            }],
+            plugin_skills: vec![PluginSkillSummary {
+                plugin_name: "superpowers".to_string(),
+                skill_name: "brainstorming".to_string(),
+                description: "Explores user intent".to_string(),
+            }],
+        };
+        let summary = build_context_summary(&snapshot);
+        assert!(summary.contains("### Project Skills"));
+        assert!(summary.contains("- tdd: Test-driven development workflow"));
+        assert!(summary.contains("### Plugin Skills"));
+        assert!(summary.contains("[superpowers] brainstorming: Explores user intent"));
+        assert!(summary.contains("### Existing CLAUDE.md Rules (retro-managed)"));
+        assert!(summary.contains("- Always use uv"));
+        assert!(summary.contains("- Run cargo test"));
+        assert!(summary.contains("### Global Agents"));
+        assert!(summary.contains("- code-reviewer"));
+    }
+
+    #[test]
+    fn test_build_context_summary_no_managed_section() {
+        let snapshot = ContextSnapshot {
+            claude_md: Some("# My CLAUDE.md\nNo managed section here.".to_string()),
+            skills: Vec::new(),
+            memory_md: None,
+            global_agents: Vec::new(),
+            plugin_skills: Vec::new(),
+        };
+        let summary = build_context_summary(&snapshot);
+        // No sections should appear
+        assert!(summary.is_empty());
+    }
+
+    #[test]
+    fn test_build_context_summary_budget_cap() {
+        // Create a snapshot with many plugin skills to exceed the 5K cap
+        let mut plugin_skills = Vec::new();
+        for i in 0..200 {
+            plugin_skills.push(PluginSkillSummary {
+                plugin_name: format!("plugin-{i}"),
+                skill_name: format!("skill-with-a-long-name-{i}"),
+                description: format!("A fairly long description for skill number {i} that takes up space"),
+            });
+        }
+        let snapshot = ContextSnapshot {
+            claude_md: None,
+            skills: vec![SkillFile {
+                path: "skills/my-skill/SKILL.md".to_string(),
+                content: "---\nname: my-skill\ndescription: A project skill\n---\nbody".to_string(),
+            }],
+            memory_md: None,
+            global_agents: Vec::new(),
+            plugin_skills,
+        };
+        let summary = build_context_summary(&snapshot);
+        assert!(summary.len() <= 5000);
+        // Plugin skills should have been dropped, but project skills retained
+        assert!(summary.contains("### Project Skills"));
+        assert!(!summary.contains("### Plugin Skills"));
+    }
+
+    #[test]
+    fn test_build_analysis_prompt_with_context() {
+        let sessions = vec![Session {
+            session_id: "sess-1".to_string(),
+            project: "/test".to_string(),
+            session_path: "/test/session.jsonl".to_string(),
+            user_messages: vec![],
+            assistant_messages: vec![],
+            summaries: vec![],
+            tools_used: vec![],
+            errors: vec![],
+            metadata: crate::models::SessionMetadata {
+                cwd: None,
+                version: None,
+                git_branch: None,
+                model: None,
+            },
+        }];
+        let context = "### Plugin Skills\n- [superpowers] brainstorming: Explores intent\n";
+        let prompt = build_analysis_prompt(&sessions, &[], Some(context));
+        assert!(prompt.contains("## Installed Context"));
+        assert!(prompt.contains("[superpowers] brainstorming"));
+        assert!(prompt.contains("already covered by an installed skill/plugin"));
+        assert!(prompt.contains("Do not suggest skills or rules that duplicate installed plugin functionality"));
+    }
+
+    #[test]
+    fn test_build_analysis_prompt_without_context() {
+        let sessions = vec![Session {
+            session_id: "sess-1".to_string(),
+            project: "/test".to_string(),
+            session_path: "/test/session.jsonl".to_string(),
+            user_messages: vec![],
+            assistant_messages: vec![],
+            summaries: vec![],
+            tools_used: vec![],
+            errors: vec![],
+            metadata: crate::models::SessionMetadata {
+                cwd: None,
+                version: None,
+                git_branch: None,
+                model: None,
+            },
+        }];
+        let prompt = build_analysis_prompt(&sessions, &[], None);
+        assert!(!prompt.contains("## Installed Context"));
+        // Core prompt structure should still be there
+        assert!(prompt.contains("## Existing Patterns"));
+        assert!(prompt.contains("## Session Data"));
     }
 }

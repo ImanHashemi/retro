@@ -6,7 +6,7 @@ pub mod prompts;
 use crate::config::Config;
 use crate::db;
 use crate::errors::CoreError;
-use crate::ingest::session;
+use crate::ingest::{context, session};
 use crate::models::{AnalysisResponse, AnalyzeResult, PatternUpdate};
 use crate::scrub;
 use chrono::{Duration, Utc};
@@ -88,6 +88,15 @@ pub fn analyze(
         });
     }
 
+    // Load context summary (best-effort — analysis proceeds without it)
+    let context_summary = match project {
+        Some(project_path) => context::snapshot_context(config, project_path)
+            .ok()
+            .map(|s| prompts::build_context_summary(&s))
+            .filter(|s| !s.is_empty()),
+        None => None,
+    };
+
     // Create AI backend
     let backend = ClaudeCliBackend::new(&config.ai);
 
@@ -102,7 +111,7 @@ pub fn analyze(
         let existing = db::get_patterns(conn, &["discovered", "active"], project)?;
 
         // Build prompt
-        let prompt = prompts::build_analysis_prompt(batch, &existing);
+        let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref());
 
         // Call AI backend
         let response = backend.execute(&prompt)?;
