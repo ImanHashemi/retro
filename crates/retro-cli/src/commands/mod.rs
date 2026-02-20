@@ -45,6 +45,7 @@ struct AutoRunSummary {
     analyze_skipped_reason: Option<String>,
     unanalyzed_count: Option<u64>,
     session_cap: Option<u64>,
+    patterns_generated: Option<u64>,
     errors: Vec<String>,
 }
 
@@ -76,6 +77,7 @@ fn aggregate_auto_runs(entries: &[retro_core::models::AuditEntry]) -> Vec<AutoRu
         analyze_skipped_reason: None,
         unanalyzed_count: None,
         session_cap: None,
+        patterns_generated: None,
         errors: Vec::new(),
     };
     let mut current_start = auto_entries[0].timestamp;
@@ -95,6 +97,7 @@ fn aggregate_auto_runs(entries: &[retro_core::models::AuditEntry]) -> Vec<AutoRu
                 analyze_skipped_reason: None,
                 unanalyzed_count: None,
                 session_cap: None,
+                patterns_generated: None,
                 errors: Vec::new(),
             };
             current_start = entry.timestamp;
@@ -142,6 +145,12 @@ fn aggregate_auto_runs(entries: &[retro_core::models::AuditEntry]) -> Vec<AutoRu
                 current.session_cap =
                     entry.details.get("cap").and_then(|v| v.as_u64());
             }
+            "apply_generated" => {
+                current.patterns_generated = entry
+                    .details
+                    .get("patterns_generated")
+                    .and_then(|v| v.as_u64());
+            }
             "analyze_error" | "apply_error" => {
                 if let Some(err) = entry.details.get("error").and_then(|v| v.as_str()) {
                     current.errors.push(format!("{}: {}", entry.action, err));
@@ -158,6 +167,7 @@ fn aggregate_auto_runs(entries: &[retro_core::models::AuditEntry]) -> Vec<AutoRu
             r.sessions_ingested.is_some()
                 || r.sessions_analyzed.is_some()
                 || r.actions_applied.is_some()
+                || r.patterns_generated.is_some()
                 || r.analyze_skipped_reason.is_some()
                 || !r.errors.is_empty()
         })
@@ -218,6 +228,16 @@ fn display_auto_run(run: &AutoRunSummary) {
         }
     }
 
+    if let Some(n) = run.patterns_generated {
+        if n > 0 {
+            println!(
+                "  {} {} items pending review",
+                "Generated:".white(),
+                n.to_string().yellow()
+            );
+        }
+    }
+
     if let Some(n) = run.actions_applied {
         if n > 0 {
             println!(
@@ -269,12 +289,33 @@ pub fn check_and_display_nudge() {
     };
 
     let runs = aggregate_auto_runs(&entries);
-    if runs.is_empty() {
-        return;
-    }
 
+    let has_auto_runs = !runs.is_empty();
     for run in &runs {
         display_auto_run(run);
+    }
+
+    // Check for pending review items
+    let has_pending = if let Ok(pending) = retro_core::db::get_pending_review_projections(&conn) {
+        if !pending.is_empty() {
+            use colored::Colorize;
+            println!(
+                "  {} {} — run {}",
+                "retro:".dimmed(),
+                format!("{} items pending review", pending.len()).yellow(),
+                "`retro review`".cyan()
+            );
+            println!();
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    if !has_auto_runs && !has_pending {
+        return;
     }
 
     // Update last nudge timestamp
