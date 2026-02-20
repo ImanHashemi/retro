@@ -7,8 +7,9 @@ const MAX_PROMPT_CHARS: usize = 150_000;
 const MAX_CONTEXT_SUMMARY_CHARS: usize = 5_000;
 
 /// Build a compact summary of installed context for the analysis prompt.
-/// Includes project skills, plugin skills, retro-managed CLAUDE.md rules, and global agents.
-/// Sections are omitted if empty. Capped at 5K chars.
+/// Includes project skills, plugin skills, retro-managed CLAUDE.md rules, global agents,
+/// and MEMORY.md notes (personal, informational only). Sections are omitted if empty.
+/// Capped at 5K chars.
 pub fn build_context_summary(snapshot: &ContextSnapshot) -> String {
     let mut sections: Vec<String> = Vec::new();
 
@@ -63,6 +64,16 @@ pub fn build_context_summary(snapshot: &ContextSnapshot) -> String {
         sections.push(section);
     }
 
+    // MEMORY.md (personal notes Claude Code wrote for itself)
+    if let Some(ref memory) = snapshot.memory_md {
+        if !memory.trim().is_empty() {
+            let mut section = "### MEMORY.md (personal, not shared with team)\n".to_string();
+            section.push_str(memory);
+            section.push('\n');
+            sections.push(section);
+        }
+    }
+
     let mut result = sections.join("\n");
 
     // Cap at budget — truncate plugin skills section first if over
@@ -102,7 +113,9 @@ pub fn build_analysis_prompt(
 
 ## Installed Context
 
-The following skills, rules, and agents are already installed. Before creating a new pattern, check whether existing tooling already covers the behavior. If it does, skip the pattern entirely or mark it `db_only`.
+The following context is already installed for this project.
+
+**Important:** MEMORY.md contains personal notes that Claude Code wrote for itself — these are NOT shared with the team. If a pattern overlaps with MEMORY.md content but would benefit the team as a shared rule or skill, **still create it** (do not mark as `db_only`). MEMORY.md overlap only justifies `db_only` for patterns targeting `global_agent`. For all other installed context (skills, CLAUDE.md rules, agents), overlap means the pattern is already covered — skip it or mark `db_only`.
 
 {summary}
 "#
