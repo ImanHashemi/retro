@@ -92,6 +92,8 @@ enum Commands {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Sync PR status: reset patterns from closed PRs back to discoverable
+    Sync,
     /// Manage git hooks
     Hooks {
         #[command(subcommand)]
@@ -136,6 +138,7 @@ fn main() {
         Commands::Audit { dry_run } => commands::audit::run(dry_run, verbose),
         Commands::Status => commands::status::run(),
         Commands::Log { since } => commands::log::run(since),
+        Commands::Sync => commands::sync::run(verbose),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),
         },

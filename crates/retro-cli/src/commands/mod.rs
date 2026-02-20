@@ -9,6 +9,7 @@ pub mod init;
 pub mod log;
 pub mod patterns;
 pub mod status;
+pub mod sync;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
