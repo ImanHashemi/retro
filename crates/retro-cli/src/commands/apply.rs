@@ -39,6 +39,9 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
     let config = Config::load(&config_path)?;
     let conn = db::open_db(&db_path)?;
 
+    // Sync PR status before generating new content
+    let _ = super::sync::run_sync(&conn, &audit_path, verbose);
+
     // Auto mode: acquire lockfile silently, check cooldown, run without prompts
     if auto {
         let _lock = match LockFile::try_acquire(&lock_path) {
