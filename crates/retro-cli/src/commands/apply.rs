@@ -9,7 +9,6 @@ use retro_core::lock::LockFile;
 use retro_core::models::{ApplyPlan, ApplyTrack, SuggestedTarget};
 use retro_core::projection;
 use retro_core::projection::claude_md;
-
 use retro_core::util::shorten_path;
 
 use super::{git_root_or_cwd, within_cooldown};
@@ -89,7 +88,7 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
 
         let backend = ClaudeCliBackend::new(&config.ai);
 
-        // Build and execute plan silently
+        // Build plan and save for review
         match projection::build_apply_plan(&conn, &config, &backend, project.as_deref()) {
             Ok(plan) => {
                 if plan.is_empty() {
@@ -99,65 +98,34 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
                     return Ok(());
                 }
 
-                let mut pr_url: Option<String> = None;
-
-                // Phase 1: Personal actions on current branch
-                if let Err(e) = projection::execute_plan(
-                    &conn,
-                    &config,
-                    &plan,
-                    project.as_deref(),
-                    Some(&ApplyTrack::Personal),
-                ) {
-                    if verbose {
-                        eprintln!("[verbose] apply personal error: {e}");
-                    }
-                    let _ = audit_log::append(
-                        &audit_path,
-                        "apply_error",
-                        serde_json::json!({
-                            "error": format!("personal: {e}"),
+                match projection::save_plan_for_review(&conn, &plan, project.as_deref()) {
+                    Ok(saved) => {
+                        let audit_details = serde_json::json!({
+                            "action": "apply_generated",
+                            "patterns_generated": saved,
+                            "project": project,
+                            "global": global,
                             "auto": true,
-                        }),
-                    );
-                }
+                        });
+                        let _ = audit_log::append(&audit_path, "apply_generated", audit_details);
 
-                // Phase 2: Shared actions on new branch + PR
-                if !plan.shared_actions().is_empty() {
-                    match execute_shared_with_pr(
-                        &conn, &config, &plan, project.as_deref(), true,
-                    ) {
-                        Ok(shared_result) => {
-                            pr_url = shared_result.pr_url;
-                        }
-                        Err(e) => {
-                            if verbose {
-                                eprintln!("[verbose] apply shared error: {e}");
-                            }
-                            let _ = audit_log::append(
-                                &audit_path,
-                                "apply_error",
-                                serde_json::json!({
-                                    "error": format!("shared: {e}"),
-                                    "auto": true,
-                                }),
-                            );
+                        if verbose {
+                            eprintln!("[verbose] auto-apply: queued {} items for review", saved);
                         }
                     }
-                }
-
-                // Audit log (best-effort in auto mode)
-                let audit_details = serde_json::json!({
-                    "actions": plan.actions.len(),
-                    "project": project,
-                    "global": global,
-                    "auto": true,
-                    "pr_url": pr_url,
-                });
-                let _ = audit_log::append(&audit_path, "apply", audit_details);
-
-                if verbose {
-                    eprintln!("[verbose] auto-apply complete: {} actions", plan.actions.len());
+                    Err(e) => {
+                        if verbose {
+                            eprintln!("[verbose] apply save error: {e}");
+                        }
+                        let _ = audit_log::append(
+                            &audit_path,
+                            "apply_error",
+                            serde_json::json!({
+                                "error": e.to_string(),
+                                "auto": true,
+                            }),
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -230,114 +198,50 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
         println!();
         println!(
             "{}",
-            "Dry run \u{2014} no files were modified. Run `retro apply` to apply changes."
+            "Dry run \u{2014} no files were modified. Run `retro apply` to generate content."
                 .yellow()
                 .bold()
         );
         return Ok(());
     }
 
-    // Confirm before writing
-    println!();
-    print!(
-        "{} ",
-        format!("Apply {} changes? [y/N]", plan.actions.len())
-            .yellow()
-            .bold()
-    );
-    use std::io::Write;
-    std::io::stdout().flush()?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    if !input.trim().eq_ignore_ascii_case("y") {
-        println!("{}", "Aborted.".dimmed());
-        return Ok(());
-    }
-
-    // Execute in two phases: personal first (current branch), then shared (new branch)
-    println!("{}", "Applying changes...".cyan());
-
-    let mut total_files = 0;
-    let mut total_patterns = 0;
-    let mut pr_url: Option<String> = None;
-
-    // Phase 1: Personal actions (global agents) — write on current branch
-    let has_personal = !plan.personal_actions().is_empty();
-    if has_personal {
-        let result = projection::execute_plan(
-            &conn,
-            &config,
-            &plan,
-            project.as_deref(),
-            Some(&ApplyTrack::Personal),
-        )?;
-        total_files += result.files_written;
-        total_patterns += result.patterns_activated;
-    }
-
-    // Phase 2: Shared actions (skills, CLAUDE.md) — on a new branch if in git repo
-    let has_shared = !plan.shared_actions().is_empty();
-    if has_shared {
-        let shared_result = execute_shared_with_pr(&conn, &config, &plan, project.as_deref(), false)?;
-        total_files += shared_result.files_written;
-        total_patterns += shared_result.patterns_activated;
-        pr_url = shared_result.pr_url;
-    }
+    // Save generated content for review
+    let saved = projection::save_plan_for_review(&conn, &plan, project.as_deref())?;
 
     // Audit log
     let audit_details = serde_json::json!({
-        "files_written": total_files,
-        "patterns_activated": total_patterns,
+        "action": "apply_generated",
+        "patterns_generated": saved,
         "project": project,
         "global": global,
-        "pr_url": pr_url,
     });
-    audit_log::append(&audit_path, "apply", audit_details)?;
+    audit_log::append(&audit_path, "apply_generated", audit_details)?;
 
-    // Summary
     println!();
-    println!("{}", "Apply complete!".green().bold());
+    println!("{}", "Content generated!".green().bold());
     println!(
         "  {} {}",
-        "Files written:".white(),
-        total_files.to_string().green()
+        "Items queued for review:".white(),
+        saved.to_string().green()
     );
+    println!();
     println!(
-        "  {} {}",
-        "Patterns activated:".white(),
-        total_patterns.to_string().green()
+        "  {}",
+        "Run `retro review` to approve, skip, or dismiss items.".cyan()
     );
-
-    if has_shared {
-        println!();
-        if let Some(url) = &pr_url {
-            println!("  {} {}", "Pull request created:".white(), url.cyan());
-        } else if !git::is_in_git_repo() {
-            println!(
-                "  {}",
-                "Not in a git repo \u{2014} shared changes written to disk only.".dimmed()
-            );
-        } else if !git::is_gh_available() {
-            println!(
-                "  {}",
-                "gh CLI not available \u{2014} create a PR manually from the retro branch."
-                    .dimmed()
-            );
-        }
-    }
 
     Ok(())
 }
 
-struct SharedResult {
-    files_written: usize,
-    patterns_activated: usize,
-    pr_url: Option<String>,
+pub struct SharedResult {
+    pub files_written: usize,
+    pub patterns_activated: usize,
+    pub pr_url: Option<String>,
 }
 
 /// Execute shared actions: create branch from default branch, write files, commit, push, create PR, switch back.
 /// When `silent` is true (auto mode), suppress all stdout/stderr output.
-fn execute_shared_with_pr(
+pub fn execute_shared_with_pr(
     conn: &db::Connection,
     config: &Config,
     plan: &ApplyPlan,

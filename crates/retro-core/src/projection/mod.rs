@@ -188,6 +188,42 @@ pub fn execute_plan(
     })
 }
 
+/// Save an apply plan's actions as pending_review projections in the database.
+/// Does NOT write files or create PRs — just records the generated content for later review.
+pub fn save_plan_for_review(
+    conn: &Connection,
+    plan: &ApplyPlan,
+    project: Option<&str>,
+) -> Result<usize, CoreError> {
+    let mut saved = 0;
+
+    for action in &plan.actions {
+        let target_path = if action.target_type == SuggestedTarget::ClaudeMd {
+            match project {
+                Some(proj) => format!("{proj}/CLAUDE.md"),
+                None => "CLAUDE.md".to_string(),
+            }
+        } else {
+            action.target_path.clone()
+        };
+
+        let proj = Projection {
+            id: uuid::Uuid::new_v4().to_string(),
+            pattern_id: action.pattern_id.clone(),
+            target_type: action.target_type.to_string(),
+            target_path,
+            content: action.content.clone(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        db::insert_projection(conn, &proj)?;
+        saved += 1;
+    }
+
+    Ok(saved)
+}
+
 /// Result of executing an apply plan.
 pub struct ExecuteResult {
     pub files_written: usize,
