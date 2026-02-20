@@ -92,6 +92,15 @@ enum Commands {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Review pending suggestions: approve, skip, or dismiss generated items
+    Review {
+        /// Review items for all projects, not just the current one
+        #[arg(long)]
+        global: bool,
+        /// Show pending items without prompting for action
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Sync PR status: reset patterns from closed PRs back to discoverable
     Sync,
     /// Manage git hooks
@@ -138,6 +147,7 @@ fn main() {
         Commands::Audit { dry_run } => commands::audit::run(dry_run, verbose),
         Commands::Status => commands::status::run(),
         Commands::Log { since } => commands::log::run(since),
+        Commands::Review { global, dry_run } => commands::review::run(global, dry_run, verbose),
         Commands::Sync => commands::sync::run(verbose),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),

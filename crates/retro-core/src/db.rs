@@ -802,6 +802,19 @@ pub fn get_projected_pattern_ids_by_status(
     Ok(ids)
 }
 
+/// Update a projection's PR URL.
+pub fn update_projection_pr_url(
+    conn: &Connection,
+    projection_id: &str,
+    pr_url: &str,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE projections SET pr_url = ?2 WHERE id = ?1",
+        params![projection_id, pr_url],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
