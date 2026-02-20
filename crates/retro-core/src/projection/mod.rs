@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::db;
 use crate::errors::CoreError;
 use crate::models::{
-    ApplyAction, ApplyPlan, ApplyTrack, Pattern, PatternStatus, Projection, SuggestedTarget,
+    ApplyAction, ApplyPlan, ApplyTrack, Pattern, PatternStatus, Projection, ProjectionStatus, SuggestedTarget,
 };
 use crate::util::backup_file;
 use chrono::Utc;
@@ -201,7 +201,10 @@ fn get_qualifying_patterns(
     project: Option<&str>,
 ) -> Result<Vec<Pattern>, CoreError> {
     let patterns = db::get_patterns(conn, &["discovered", "active"], project)?;
-    let projected_ids = db::get_projected_pattern_ids(conn)?;
+    let projected_ids = db::get_projected_pattern_ids_by_status(
+        conn,
+        &[ProjectionStatus::Applied, ProjectionStatus::PendingReview],
+    )?;
     Ok(patterns
         .into_iter()
         .filter(|p| p.confidence >= config.analysis.confidence_threshold)

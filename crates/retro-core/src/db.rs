@@ -1493,4 +1493,39 @@ mod tests {
         assert_eq!(ids_applied_only.len(), 1);
         assert!(ids_applied_only.contains("pat-1"));
     }
+
+    #[test]
+    fn test_has_unprojected_patterns_excludes_dismissed() {
+        let conn = test_db();
+
+        let mut pattern = test_pattern("pat-1", "Dismissed pattern");
+        pattern.status = PatternStatus::Dismissed;
+        insert_pattern(&conn, &pattern).unwrap();
+
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
+    }
+
+    #[test]
+    fn test_has_unprojected_patterns_excludes_pending_review() {
+        let conn = test_db();
+
+        let pattern = test_pattern("pat-1", "Pattern with pending review");
+        insert_pattern(&conn, &pattern).unwrap();
+
+        // Create a pending_review projection
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/test.md".to_string(),
+            content: "content".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        insert_projection(&conn, &proj).unwrap();
+
+        // Pattern already has a pending_review projection — should NOT be "unprojected"
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
+    }
 }
