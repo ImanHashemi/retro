@@ -54,9 +54,9 @@ enum Commands {
         #[arg(long)]
         status: Option<String>,
     },
-    /// Project patterns into skills, CLAUDE.md rules, and global agents
+    /// Generate content from patterns and queue for review (use `retro review` to approve)
     Apply {
-        /// Show what would be changed without writing files
+        /// Preview what would be generated without making AI calls
         #[arg(long)]
         dry_run: bool,
         /// Apply patterns for all projects, not just the current one
