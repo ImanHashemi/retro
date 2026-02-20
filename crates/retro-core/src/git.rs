@@ -236,6 +236,21 @@ pub fn create_pr(title: &str, body: &str, base: &str) -> Result<String, CoreErro
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Check the state of a PR by its URL. Returns "OPEN", "CLOSED", or "MERGED".
+pub fn pr_state(pr_url: &str) -> Result<String, CoreError> {
+    let output = Command::new("gh")
+        .args(["pr", "view", pr_url, "--json", "state", "-q", ".state"])
+        .output()
+        .map_err(|e| CoreError::Io(format!("gh pr view: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CoreError::Io(format!("gh pr view failed: {stderr}")));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Result of installing hook lines into a file.
 #[derive(Debug, PartialEq)]
 pub enum HookInstallResult {
