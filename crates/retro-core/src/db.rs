@@ -1,12 +1,12 @@
 use crate::errors::CoreError;
-use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projection, SuggestedTarget};
+use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget};
 use chrono::{DateTime, Utc};
 pub use rusqlite::Connection;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
 use std::path::Path;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 /// Open (or create) the retro database with WAL mode enabled.
 pub fn open_db(path: &Path) -> Result<Connection, CoreError> {
@@ -90,6 +90,13 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
                 value TEXT NOT NULL
             );
             ",
+        )?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
+
+    if current_version < 3 {
+        conn.execute_batch(
+            "ALTER TABLE projections ADD COLUMN status TEXT NOT NULL DEFAULT 'applied';",
         )?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
@@ -574,8 +581,8 @@ pub fn get_sessions_for_analysis(
 /// Insert a new projection record.
 pub fn insert_projection(conn: &Connection, proj: &Projection) -> Result<(), CoreError> {
     conn.execute(
-        "INSERT INTO projections (id, pattern_id, target_type, target_path, content, applied_at, pr_url)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO projections (id, pattern_id, target_type, target_path, content, applied_at, pr_url, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             proj.id,
             proj.pattern_id,
@@ -584,6 +591,7 @@ pub fn insert_projection(conn: &Connection, proj: &Projection) -> Result<(), Cor
             proj.content,
             proj.applied_at.to_rfc3339(),
             proj.pr_url,
+            proj.status.to_string(),
         ],
     )?;
     Ok(())
@@ -642,7 +650,7 @@ pub fn get_projections_for_active_patterns(
     conn: &Connection,
 ) -> Result<Vec<Projection>, CoreError> {
     let mut stmt = conn.prepare(
-        "SELECT p.id, p.pattern_id, p.target_type, p.target_path, p.content, p.applied_at, p.pr_url
+        "SELECT p.id, p.pattern_id, p.target_type, p.target_path, p.content, p.applied_at, p.pr_url, p.status
          FROM projections p
          INNER JOIN patterns pat ON p.pattern_id = pat.id
          WHERE pat.status = 'active'",
@@ -654,6 +662,9 @@ pub fn get_projections_for_active_patterns(
             let applied_at = DateTime::parse_from_rfc3339(&applied_at_str)
                 .map(|d| d.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now());
+            let status_str: String = row.get(7)?;
+            let status = ProjectionStatus::from_str(&status_str)
+                .unwrap_or(ProjectionStatus::Applied);
             Ok(Projection {
                 id: row.get(0)?,
                 pattern_id: row.get(1)?,
@@ -662,6 +673,7 @@ pub fn get_projections_for_active_patterns(
                 content: row.get(4)?,
                 applied_at,
                 pr_url: row.get(6)?,
+                status,
             })
         })?
         .filter_map(|r| r.ok())
@@ -675,6 +687,130 @@ pub fn update_pattern_last_projected(conn: &Connection, id: &str) -> Result<(), 
     conn.execute(
         "UPDATE patterns SET last_projected = ?2 WHERE id = ?1",
         params![id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Get all projections with pending_review status.
+pub fn get_pending_review_projections(conn: &Connection) -> Result<Vec<Projection>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.pattern_id, p.target_type, p.target_path, p.content, p.applied_at, p.pr_url, p.status
+         FROM projections p
+         WHERE p.status = 'pending_review'
+         ORDER BY p.applied_at ASC",
+    )?;
+
+    let projections = stmt
+        .query_map([], |row| {
+            let applied_at_str: String = row.get(5)?;
+            let applied_at = DateTime::parse_from_rfc3339(&applied_at_str)
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            let status_str: String = row.get(7)?;
+            let status = ProjectionStatus::from_str(&status_str)
+                .unwrap_or(ProjectionStatus::PendingReview);
+            Ok(Projection {
+                id: row.get(0)?,
+                pattern_id: row.get(1)?,
+                target_type: row.get(2)?,
+                target_path: row.get(3)?,
+                content: row.get(4)?,
+                applied_at,
+                pr_url: row.get(6)?,
+                status,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(projections)
+}
+
+/// Update a projection's status.
+pub fn update_projection_status(
+    conn: &Connection,
+    projection_id: &str,
+    status: &ProjectionStatus,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE projections SET status = ?2 WHERE id = ?1",
+        params![projection_id, status.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Delete a projection record.
+pub fn delete_projection(conn: &Connection, projection_id: &str) -> Result<(), CoreError> {
+    conn.execute("DELETE FROM projections WHERE id = ?1", params![projection_id])?;
+    Ok(())
+}
+
+/// Get applied projections that have a PR URL (for sync).
+pub fn get_applied_projections_with_pr(conn: &Connection) -> Result<Vec<Projection>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.pattern_id, p.target_type, p.target_path, p.content, p.applied_at, p.pr_url, p.status
+         FROM projections p
+         WHERE p.status = 'applied' AND p.pr_url IS NOT NULL",
+    )?;
+
+    let projections = stmt
+        .query_map([], |row| {
+            let applied_at_str: String = row.get(5)?;
+            let applied_at = DateTime::parse_from_rfc3339(&applied_at_str)
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            let status_str: String = row.get(7)?;
+            let status = ProjectionStatus::from_str(&status_str)
+                .unwrap_or(ProjectionStatus::Applied);
+            Ok(Projection {
+                id: row.get(0)?,
+                pattern_id: row.get(1)?,
+                target_type: row.get(2)?,
+                target_path: row.get(3)?,
+                content: row.get(4)?,
+                applied_at,
+                pr_url: row.get(6)?,
+                status,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(projections)
+}
+
+/// Get pattern IDs that have projections with specific statuses.
+pub fn get_projected_pattern_ids_by_status(
+    conn: &Connection,
+    statuses: &[ProjectionStatus],
+) -> Result<std::collections::HashSet<String>, CoreError> {
+    if statuses.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let placeholders: Vec<String> = statuses.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+    let sql = format!(
+        "SELECT DISTINCT pattern_id FROM projections WHERE status IN ({})",
+        placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let ids = stmt
+        .query_map(param_refs.as_slice(), |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(ids)
+}
+
+/// Update a projection's PR URL.
+pub fn update_projection_pr_url(
+    conn: &Connection,
+    projection_id: &str,
+    pr_url: &str,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE projections SET pr_url = ?2 WHERE id = ?1",
+        params![projection_id, pr_url],
     )?;
     Ok(())
 }
@@ -819,6 +955,7 @@ mod tests {
             content: "Always use uv".to_string(),
             applied_at: Utc::now(),
             pr_url: None,
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj).unwrap();
 
@@ -872,6 +1009,7 @@ mod tests {
             content: "Always use uv".to_string(),
             applied_at: Utc::now(),
             pr_url: None,
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj).unwrap();
 
@@ -920,6 +1058,7 @@ mod tests {
             content: "content a".to_string(),
             applied_at: earlier,
             pr_url: None,
+            status: ProjectionStatus::Applied,
         };
         let proj2 = Projection {
             id: "proj-2".to_string(),
@@ -929,6 +1068,7 @@ mod tests {
             content: "content b".to_string(),
             applied_at: later,
             pr_url: None,
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj1).unwrap();
         insert_projection(&conn, &proj2).unwrap();
@@ -1012,6 +1152,7 @@ mod tests {
             content: "content".to_string(),
             applied_at: Utc::now(),
             pr_url: Some("https://github.com/test/pull/1".to_string()),
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj).unwrap();
 
@@ -1077,6 +1218,7 @@ mod tests {
             content: "skill content".to_string(),
             applied_at: Utc::now(),
             pr_url: Some("https://github.com/test/pull/42".to_string()),
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj).unwrap();
         assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
@@ -1123,5 +1265,280 @@ mod tests {
             result.format("%Y-%m-%dT%H:%M:%S").to_string(),
             now.format("%Y-%m-%dT%H:%M:%S").to_string()
         );
+    }
+
+    #[test]
+    fn test_projection_status_column_exists() {
+        let conn = test_db();
+        let pattern = test_pattern("pat-1", "Test");
+        insert_pattern(&conn, &pattern).unwrap();
+
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/test/skill.md".to_string(),
+            content: "content".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        insert_projection(&conn, &proj).unwrap();
+
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM projections WHERE id = 'proj-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "pending_review");
+    }
+
+    #[test]
+    fn test_existing_projections_default_to_applied() {
+        // Simulate a v2 database with existing projections
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+
+        // Create v1 schema manually
+        conn.execute_batch(
+            "CREATE TABLE patterns (
+                id TEXT PRIMARY KEY, pattern_type TEXT NOT NULL, description TEXT NOT NULL,
+                confidence REAL NOT NULL, times_seen INTEGER NOT NULL DEFAULT 1,
+                first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, last_projected TEXT,
+                status TEXT NOT NULL DEFAULT 'discovered', source_sessions TEXT NOT NULL,
+                related_files TEXT NOT NULL, suggested_content TEXT NOT NULL,
+                suggested_target TEXT NOT NULL, project TEXT,
+                generation_failed INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE projections (
+                id TEXT PRIMARY KEY, pattern_id TEXT NOT NULL REFERENCES patterns(id),
+                target_type TEXT NOT NULL, target_path TEXT NOT NULL, content TEXT NOT NULL,
+                applied_at TEXT NOT NULL, pr_url TEXT, nudged INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE analyzed_sessions (session_id TEXT PRIMARY KEY, project TEXT NOT NULL, analyzed_at TEXT NOT NULL);
+            CREATE TABLE ingested_sessions (session_id TEXT PRIMARY KEY, project TEXT NOT NULL, session_path TEXT NOT NULL, file_size INTEGER NOT NULL, file_mtime TEXT NOT NULL, ingested_at TEXT NOT NULL);
+            PRAGMA user_version = 1;",
+        ).unwrap();
+
+        // Insert a pattern first (FK target)
+        conn.execute(
+            "INSERT INTO patterns (id, pattern_type, description, confidence, first_seen, last_seen, status, source_sessions, related_files, suggested_content, suggested_target)
+             VALUES ('pat-1', 'workflow_pattern', 'Test', 0.8, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'discovered', '[]', '[]', 'content', 'skill')",
+            [],
+        ).unwrap();
+
+        // Insert an old-style projection (no status column)
+        conn.execute(
+            "INSERT INTO projections (id, pattern_id, target_type, target_path, content, applied_at)
+             VALUES ('proj-old', 'pat-1', 'skill', '/path', 'content', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Now run migration (open_db equivalent)
+        migrate(&conn).unwrap();
+
+        // Old projection should have status = 'applied'
+        let status: String = conn
+            .query_row("SELECT status FROM projections WHERE id = 'proj-old'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(status, "applied");
+    }
+
+    #[test]
+    fn test_get_pending_review_projections() {
+        let conn = test_db();
+        let p1 = test_pattern("pat-1", "Pattern one");
+        let p2 = test_pattern("pat-2", "Pattern two");
+        insert_pattern(&conn, &p1).unwrap();
+        insert_pattern(&conn, &p2).unwrap();
+
+        // One pending, one applied
+        let proj1 = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/test/a.md".to_string(),
+            content: "content a".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        let proj2 = Projection {
+            id: "proj-2".to_string(),
+            pattern_id: "pat-2".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/test/b.md".to_string(),
+            content: "content b".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::Applied,
+        };
+        insert_projection(&conn, &proj1).unwrap();
+        insert_projection(&conn, &proj2).unwrap();
+
+        let pending = get_pending_review_projections(&conn).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "proj-1");
+    }
+
+    #[test]
+    fn test_update_projection_status() {
+        let conn = test_db();
+        let p = test_pattern("pat-1", "Pattern");
+        insert_pattern(&conn, &p).unwrap();
+
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/test.md".to_string(),
+            content: "content".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        insert_projection(&conn, &proj).unwrap();
+
+        update_projection_status(&conn, "proj-1", &ProjectionStatus::Applied).unwrap();
+
+        let status: String = conn
+            .query_row("SELECT status FROM projections WHERE id = 'proj-1'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(status, "applied");
+    }
+
+    #[test]
+    fn test_delete_projection() {
+        let conn = test_db();
+        let p = test_pattern("pat-1", "Pattern");
+        insert_pattern(&conn, &p).unwrap();
+
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/test.md".to_string(),
+            content: "content".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        insert_projection(&conn, &proj).unwrap();
+        assert!(has_projection_for_pattern(&conn, "pat-1").unwrap());
+
+        delete_projection(&conn, "proj-1").unwrap();
+        assert!(!has_projection_for_pattern(&conn, "pat-1").unwrap());
+    }
+
+    #[test]
+    fn test_get_projections_with_pr_url() {
+        let conn = test_db();
+        let p1 = test_pattern("pat-1", "Pattern one");
+        let p2 = test_pattern("pat-2", "Pattern two");
+        insert_pattern(&conn, &p1).unwrap();
+        insert_pattern(&conn, &p2).unwrap();
+
+        let proj1 = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/a.md".to_string(),
+            content: "a".to_string(),
+            applied_at: Utc::now(),
+            pr_url: Some("https://github.com/test/pull/1".to_string()),
+            status: ProjectionStatus::Applied,
+        };
+        let proj2 = Projection {
+            id: "proj-2".to_string(),
+            pattern_id: "pat-2".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/b.md".to_string(),
+            content: "b".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::Applied,
+        };
+        insert_projection(&conn, &proj1).unwrap();
+        insert_projection(&conn, &proj2).unwrap();
+
+        let with_pr = get_applied_projections_with_pr(&conn).unwrap();
+        assert_eq!(with_pr.len(), 1);
+        assert_eq!(with_pr[0].pr_url, Some("https://github.com/test/pull/1".to_string()));
+    }
+
+    #[test]
+    fn test_get_projected_pattern_ids_by_status() {
+        let conn = test_db();
+        let p1 = test_pattern("pat-1", "Pattern one");
+        let p2 = test_pattern("pat-2", "Pattern two");
+        insert_pattern(&conn, &p1).unwrap();
+        insert_pattern(&conn, &p2).unwrap();
+
+        let proj1 = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/a.md".to_string(),
+            content: "a".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::Applied,
+        };
+        let proj2 = Projection {
+            id: "proj-2".to_string(),
+            pattern_id: "pat-2".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/b.md".to_string(),
+            content: "b".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        insert_projection(&conn, &proj1).unwrap();
+        insert_projection(&conn, &proj2).unwrap();
+
+        let ids = get_projected_pattern_ids_by_status(&conn, &[ProjectionStatus::Applied, ProjectionStatus::PendingReview]).unwrap();
+        assert_eq!(ids.len(), 2);
+
+        let ids_applied_only = get_projected_pattern_ids_by_status(&conn, &[ProjectionStatus::Applied]).unwrap();
+        assert_eq!(ids_applied_only.len(), 1);
+        assert!(ids_applied_only.contains("pat-1"));
+    }
+
+    #[test]
+    fn test_has_unprojected_patterns_excludes_dismissed() {
+        let conn = test_db();
+
+        let mut pattern = test_pattern("pat-1", "Dismissed pattern");
+        pattern.status = PatternStatus::Dismissed;
+        insert_pattern(&conn, &pattern).unwrap();
+
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
+    }
+
+    #[test]
+    fn test_has_unprojected_patterns_excludes_pending_review() {
+        let conn = test_db();
+
+        let pattern = test_pattern("pat-1", "Pattern with pending review");
+        insert_pattern(&conn, &pattern).unwrap();
+
+        // Create a pending_review projection
+        let proj = Projection {
+            id: "proj-1".to_string(),
+            pattern_id: "pat-1".to_string(),
+            target_type: "skill".to_string(),
+            target_path: "/test.md".to_string(),
+            content: "content".to_string(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        insert_projection(&conn, &proj).unwrap();
+
+        // Pattern already has a pending_review projection — should NOT be "unprojected"
+        assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
     }
 }

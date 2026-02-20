@@ -29,6 +29,7 @@ Cargo workspace with two crates:
 - **Token tracking** — `BackendResponse` carries `input_tokens`/`output_tokens` (not dollar cost). `ClaudeCliOutput` extracts from nested `usage` object, summing `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` for total input.
 - **Auto-apply pipeline** — single post-commit hook orchestrates ingest → analyze → apply. Per-stage cooldowns (5m/24h/24h). Data triggers prevent unnecessary runs. Session cap (`auto_analyze_max_sessions`, default 15) skips auto-analyze when backlog is too large. Hook stderr redirected to `~/.retro/hook-stderr.log`.
 - **Observability** — every auto-mode decision gets a structured audit entry (ingest/analyze/apply success/skip/error). Enhanced nudge reads audit entries since `last_nudge_at` (stored in `metadata` table), groups within 60s as one run, displays colored multi-line status block on next interactive command.
+- **Review queue** — `retro apply` generates content and saves as `PendingReview` (no file writes or PRs). `retro review` is the gate: displays numbered list, user batch-selects apply/skip/dismiss (e.g., `1a 2a 3d` or `all:a`). `retro sync` checks PR state via `gh pr view` — resets patterns from closed PRs to `Discovered`.
 
 ## Dependencies
 
@@ -94,6 +95,13 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - PR creation flow: detect default branch via `gh repo view` → `git fetch origin <default>` → `git checkout -b retro/... origin/<default>` → write/commit → `git push -u origin HEAD` → `gh pr create --base <default>`
 - Always push before `gh pr create` — the remote branch must exist
 - `stash_push()`/`stash_pop()` around branch switches in apply — `git checkout -b` fails if tracked files differ between branches when working tree is dirty
+- `ProjectionStatus` enum: `PendingReview`, `Applied`, `Dismissed` — tracks review queue lifecycle
+- `retro apply` saves projections as `PendingReview` — does NOT write files or create PRs directly
+- `retro review` is the human gate: lists pending items, user batch-selects `apply`/`skip`/`dismiss` with `{N}{a|s|d}` or `all:{a|s|d}` syntax; preview with `{N}p`
+- `retro sync` checks PR state via `gh pr view --json state` — resets patterns from closed (not merged) PRs to `Discovered`
+- Both `retro apply` and `retro review` run `sync::run_sync()` first to clean up stale PR state
+- Nudge system shows pending review count alongside auto-run summaries
+- DB schema v3: `projections` table has `status` column (`TEXT NOT NULL DEFAULT 'applied'` for migration compatibility)
 
 ## Implementation Status
 
@@ -105,6 +113,7 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - **Post-v0.1 fixes**: Strengthened analysis prompt dedup (semantic merge guidance with examples). Replaced `cost_usd` with `input_tokens`/`output_tokens` across pipeline (extracts from nested `usage` in CLI JSON). `audit --dry-run` now skips AI calls entirely (shows context summary instead).
 - **Phase 6: DONE** — Auto-Apply Pipeline. Single post-commit hook orchestrates full pipeline (`ingest --auto` chains analyze + apply). Per-stage cooldowns (`ingest_cooldown_minutes=5`, `analyze_cooldown_minutes=1440`, `apply_cooldown_minutes=1440`). `auto_apply` config (on by default). `apply --auto` with lockfile, cooldown, and data gate. Old post-merge hook cleanup on `retro init`. Orchestration lock prevents concurrent analyze. 87 unit tests.
 - **Auto-mode observability: DONE** — `auto_analyze_max_sessions` config (default 15) skips auto-analyze when backlog exceeds cap. DB schema v2 adds `metadata` table for `last_nudge_at`. `unanalyzed_session_count()` for cap check. Comprehensive audit logging for every auto-mode decision (ingest success, analyze skip/error, apply skip/error, enriched apply with `pr_url`). Enhanced nudge system reads audit entries since last nudge, groups by 60s window, displays multi-line colored status block. Hook stderr redirected to `~/.retro/hook-stderr.log`. `retro init` updates existing hooks to new format (`HookInstallResult` enum: Installed/Updated/UpToDate). Old `get_unnudged_pr_urls`/`mark_projections_nudged` removed (replaced by audit-based nudge). 93 unit tests, 9 scenario tests.
+- **Phase 7: DONE** — Review Queue. `retro apply` now generates content and saves as `PendingReview` (no direct file writes). `retro review` command for batch approve/skip/dismiss. `retro sync` detects closed PRs and resets patterns. `ProjectionStatus` enum (`PendingReview`/`Applied`/`Dismissed`). DB schema v3 adds `status` column to projections. Nudge shows pending review count. Sync runs automatically before apply and review.
 
 ## Full Plan
 

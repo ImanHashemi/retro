@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::db;
 use crate::errors::CoreError;
 use crate::models::{
-    ApplyAction, ApplyPlan, ApplyTrack, Pattern, PatternStatus, Projection, SuggestedTarget,
+    ApplyAction, ApplyPlan, ApplyTrack, Pattern, PatternStatus, Projection, ProjectionStatus, SuggestedTarget,
 };
 use crate::util::backup_file;
 use chrono::Utc;
@@ -188,6 +188,42 @@ pub fn execute_plan(
     })
 }
 
+/// Save an apply plan's actions as pending_review projections in the database.
+/// Does NOT write files or create PRs — just records the generated content for later review.
+pub fn save_plan_for_review(
+    conn: &Connection,
+    plan: &ApplyPlan,
+    project: Option<&str>,
+) -> Result<usize, CoreError> {
+    let mut saved = 0;
+
+    for action in &plan.actions {
+        let target_path = if action.target_type == SuggestedTarget::ClaudeMd {
+            match project {
+                Some(proj) => format!("{proj}/CLAUDE.md"),
+                None => "CLAUDE.md".to_string(),
+            }
+        } else {
+            action.target_path.clone()
+        };
+
+        let proj = Projection {
+            id: uuid::Uuid::new_v4().to_string(),
+            pattern_id: action.pattern_id.clone(),
+            target_type: action.target_type.to_string(),
+            target_path,
+            content: action.content.clone(),
+            applied_at: Utc::now(),
+            pr_url: None,
+            status: ProjectionStatus::PendingReview,
+        };
+        db::insert_projection(conn, &proj)?;
+        saved += 1;
+    }
+
+    Ok(saved)
+}
+
 /// Result of executing an apply plan.
 pub struct ExecuteResult {
     pub files_written: usize,
@@ -201,7 +237,10 @@ fn get_qualifying_patterns(
     project: Option<&str>,
 ) -> Result<Vec<Pattern>, CoreError> {
     let patterns = db::get_patterns(conn, &["discovered", "active"], project)?;
-    let projected_ids = db::get_projected_pattern_ids(conn)?;
+    let projected_ids = db::get_projected_pattern_ids_by_status(
+        conn,
+        &[ProjectionStatus::Applied, ProjectionStatus::PendingReview],
+    )?;
     Ok(patterns
         .into_iter()
         .filter(|p| p.confidence >= config.analysis.confidence_threshold)
@@ -273,6 +312,7 @@ fn record_projection(
         content: action.content.clone(),
         applied_at: Utc::now(),
         pr_url: None,
+        status: crate::models::ProjectionStatus::Applied,
     };
     db::insert_projection(conn, &proj)
 }
