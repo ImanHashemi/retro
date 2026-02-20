@@ -1,5 +1,5 @@
 use crate::errors::CoreError;
-use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projection, SuggestedTarget};
+use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget};
 use chrono::{DateTime, Utc};
 pub use rusqlite::Connection;
 use rusqlite::params;
@@ -662,6 +662,7 @@ pub fn get_projections_for_active_patterns(
                 content: row.get(4)?,
                 applied_at,
                 pr_url: row.get(6)?,
+                status: crate::models::ProjectionStatus::Applied,
             })
         })?
         .filter_map(|r| r.ok())
@@ -819,6 +820,7 @@ mod tests {
             content: "Always use uv".to_string(),
             applied_at: Utc::now(),
             pr_url: None,
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj).unwrap();
 
@@ -872,6 +874,7 @@ mod tests {
             content: "Always use uv".to_string(),
             applied_at: Utc::now(),
             pr_url: None,
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj).unwrap();
 
@@ -920,6 +923,7 @@ mod tests {
             content: "content a".to_string(),
             applied_at: earlier,
             pr_url: None,
+            status: ProjectionStatus::Applied,
         };
         let proj2 = Projection {
             id: "proj-2".to_string(),
@@ -929,6 +933,7 @@ mod tests {
             content: "content b".to_string(),
             applied_at: later,
             pr_url: None,
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj1).unwrap();
         insert_projection(&conn, &proj2).unwrap();
@@ -1012,6 +1017,7 @@ mod tests {
             content: "content".to_string(),
             applied_at: Utc::now(),
             pr_url: Some("https://github.com/test/pull/1".to_string()),
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj).unwrap();
 
@@ -1077,6 +1083,7 @@ mod tests {
             content: "skill content".to_string(),
             applied_at: Utc::now(),
             pr_url: Some("https://github.com/test/pull/42".to_string()),
+            status: ProjectionStatus::Applied,
         };
         insert_projection(&conn, &proj).unwrap();
         assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());

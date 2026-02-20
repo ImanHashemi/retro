@@ -273,6 +273,7 @@ fn record_projection(
         content: action.content.clone(),
         applied_at: Utc::now(),
         pr_url: None,
+        status: crate::models::ProjectionStatus::Applied,
     };
     db::insert_projection(conn, &proj)
 }

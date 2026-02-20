@@ -568,6 +568,7 @@ pub struct Projection {
     pub content: String,
     pub applied_at: DateTime<Utc>,
     pub pr_url: Option<String>,
+    pub status: ProjectionStatus,
 }
 
 /// A generated skill draft (output of AI skill generation).
@@ -605,6 +606,36 @@ pub struct ApplyAction {
     pub track: ApplyTrack,
 }
 
+/// Status of a projection in the review queue.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionStatus {
+    PendingReview,
+    Applied,
+    Dismissed,
+}
+
+impl std::fmt::Display for ProjectionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PendingReview => write!(f, "pending_review"),
+            Self::Applied => write!(f, "applied"),
+            Self::Dismissed => write!(f, "dismissed"),
+        }
+    }
+}
+
+impl ProjectionStatus {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "pending_review" => Some(Self::PendingReview),
+            "applied" => Some(Self::Applied),
+            "dismissed" => Some(Self::Dismissed),
+            _ => None,
+        }
+    }
+}
+
 /// Whether a change is auto-applied (personal) or needs a PR (shared).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApplyTrack {
@@ -640,5 +671,25 @@ impl ApplyPlan {
 
     pub fn shared_actions(&self) -> Vec<&ApplyAction> {
         self.actions.iter().filter(|a| a.track == ApplyTrack::Shared).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_projection_status_display() {
+        assert_eq!(ProjectionStatus::PendingReview.to_string(), "pending_review");
+        assert_eq!(ProjectionStatus::Applied.to_string(), "applied");
+        assert_eq!(ProjectionStatus::Dismissed.to_string(), "dismissed");
+    }
+
+    #[test]
+    fn test_projection_status_from_str() {
+        assert_eq!(ProjectionStatus::from_str("pending_review"), Some(ProjectionStatus::PendingReview));
+        assert_eq!(ProjectionStatus::from_str("applied"), Some(ProjectionStatus::Applied));
+        assert_eq!(ProjectionStatus::from_str("dismissed"), Some(ProjectionStatus::Dismissed));
+        assert_eq!(ProjectionStatus::from_str("unknown"), None);
     }
 }
