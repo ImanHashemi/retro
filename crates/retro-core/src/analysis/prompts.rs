@@ -135,23 +135,39 @@ The following context is already installed for this project.
     }
 
     let prompt = format!(
-        r#"You are an expert at analyzing AI coding agent session histories to discover patterns.
+        r#"You are an expert at analyzing AI coding agent session histories to discover **real, recurring patterns**.
+
+A pattern is a behavior, preference, or workflow that appears in **2 or more sessions**. A single occurrence is just an observation — not a pattern. Your job is to find things worth automating because they keep happening.
 
 Analyze the following session data from Claude Code conversations. Look for:
 
-1. **Repetitive Instructions** — Things the user tells the agent repeatedly across sessions (e.g., "always use uv not pip", "run tests after changes"). These indicate rules that should be automated.
+1. **Repetitive Instructions** — Things the user tells the agent across **multiple sessions** (e.g., "always use uv not pip", "run clippy before committing"). The same instruction given once is not a pattern — it becomes one when it recurs.
 
-2. **Recurring Mistakes** — Errors or wrong approaches the agent keeps making, especially ones the user has to correct (e.g., using wrong API, forgetting to handle edge cases). These indicate rules or skills needed.
+2. **Recurring Mistakes** — The same **class** of error the agent makes in **multiple sessions** (e.g., using the wrong API, forgetting edge cases, picking the wrong tool). A bug encountered and fixed once is not a recurring mistake.
 
-3. **Workflow Patterns** — Multi-step procedures the user guides the agent through repeatedly (e.g., "first run lint, then test, then commit with this format"). These are ideal for skills.
+3. **Workflow Patterns** — Specific multi-step procedures the user guides the agent through in **multiple sessions** (e.g., "first run lint, then test, then commit with this message format"). A workflow followed once for a particular task is not a pattern.
 
-For each pattern found, assess:
-- **confidence** (0.0-1.0): How certain are you this is a real, recurring pattern? A single occurrence = low confidence (0.3-0.5). Multiple clear occurrences = high confidence (0.7-1.0).
-- **suggested_target**: Where should this pattern be projected?
-  - "claude_md" — Simple rules ("always do X", "never do Y")
-  - "skill" — Multi-step procedures or complex workflows
-  - "global_agent" — Cross-project personal preferences
-  - "db_only" — Interesting but not actionable yet, OR already covered by an installed skill/plugin
+## What is NOT a pattern
+
+Do NOT report any of the following:
+- **One-time bug fixes** — A bug that was encountered and resolved in a single session
+- **Task-specific instructions** — Directions that only applied to one particular task (e.g., "update the README for this PR", "fix the typo on line 42")
+- **Session-specific decisions** — Choices made for a specific situation that aren't general preferences (e.g., "let's use approach B for this feature")
+- **Standard development activities** — The fact that a user commits code, creates PRs, reviews diffs, or runs tests is not a pattern. However, a *specific way* of doing these things that recurs IS a pattern (e.g., "always run clippy with -D warnings before committing")
+- **General software practices** — "User follows design-then-implement" or "user writes tests" is just software development, not an actionable pattern. However, a *specific preference* within that process that recurs IS a pattern (e.g., "user always wants a dry-run preview before any destructive operation")
+
+## Confidence calibration
+
+Confidence reflects how certain you are this is a real, recurring pattern:
+- **Seen in 1 session only**: Do not report. A single occurrence is not enough evidence. If the behavior recurs in a future session, it will be discovered then.
+- **Seen in 2 sessions**: Confidence 0.6-0.75 depending on how clear and specific the pattern is.
+- **Seen in 3+ sessions**: Confidence 0.7-1.0.
+
+**suggested_target** — where should this pattern be projected?
+- `claude_md` — Simple rules or preferences ("always do X", "never do Y"). Requires evidence from 2+ sessions.
+- `skill` — Multi-step procedures or complex workflows. Requires evidence from 2+ sessions.
+- `global_agent` — Cross-project personal preferences. Requires evidence from 2+ sessions.
+- `db_only` — Already covered by installed context (skill, plugin, CLAUDE.md rule, or agent). Use this when a real pattern exists but is already handled.
 
 ## Existing Patterns
 
@@ -184,11 +200,11 @@ Return a JSON object with a "patterns" array. Each element is either a new patte
     {{
       "action": "new",
       "pattern_type": "repetitive_instruction",
-      "description": "Clear description of what was observed",
+      "description": "Clear description of what was observed across sessions",
       "confidence": 0.85,
       "source_sessions": ["session-id-1", "session-id-2"],
       "related_files": ["path/to/relevant/file"],
-      "suggested_content": "The rule or instruction to add (e.g., 'Always use uv for Python package management')",
+      "suggested_content": "The rule or instruction to add (e.g., 'Always run cargo clippy -- -D warnings before committing')",
       "suggested_target": "claude_md"
     }},
     {{
@@ -202,10 +218,12 @@ Return a JSON object with a "patterns" array. Each element is either a new patte
 ```
 
 Important:
-- Only return patterns you're confident about (confidence >= 0.5)
-- Be specific in descriptions — vague patterns are useless
-- For suggested_content, write the actual rule/instruction as it should appear
-- CRITICAL: Do not create duplicate patterns. Two patterns about the same underlying behavior are duplicates even if described differently. Always check existing patterns for semantic overlap, not just textual similarity
+- **Quality over quantity** — fewer strong patterns are better than many weak ones. When in doubt, skip it.
+- A pattern requires evidence from **2+ sessions**. Do not report single-session observations.
+- Only return patterns with confidence >= 0.6
+- Be specific in descriptions — vague patterns like "user prefers clean code" are useless. State the concrete behavior.
+- For `suggested_content`, write the actual rule or instruction as it should appear in the target
+- CRITICAL: Do not create duplicate patterns. Two patterns about the same underlying behavior are duplicates even if described differently. Always check existing patterns for semantic overlap, not just textual similarity.
 - Do not suggest skills or rules that duplicate installed plugin functionality
 - Return ONLY the JSON object, no other text"#
     );
@@ -501,7 +519,7 @@ mod tests {
         let prompt = build_analysis_prompt(&sessions, &[], Some(context));
         assert!(prompt.contains("## Installed Context"));
         assert!(prompt.contains("[superpowers] brainstorming"));
-        assert!(prompt.contains("already covered by an installed skill/plugin"));
+        assert!(prompt.contains("Already covered by installed context"));
         assert!(prompt.contains("Do not suggest skills or rules that duplicate installed plugin functionality"));
     }
 

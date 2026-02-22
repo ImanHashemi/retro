@@ -244,6 +244,7 @@ fn get_qualifying_patterns(
     Ok(patterns
         .into_iter()
         .filter(|p| p.confidence >= config.analysis.confidence_threshold)
+        .filter(|p| p.times_seen >= 2) // Single occurrences are not patterns
         .filter(|p| p.suggested_target != SuggestedTarget::DbOnly)
         .filter(|p| !p.generation_failed)
         .filter(|p| !projected_ids.contains(&p.id))
