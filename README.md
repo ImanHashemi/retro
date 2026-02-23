@@ -4,7 +4,7 @@
 
 Coding agents work best when their context is right: when they know your conventions, remember past mistakes, and have the skills to work efficiently on your projects. But curating that context is manual work that most people never do well.
 
-Retro runs retrospectives on your AI coding sessions. It analyzes your Claude Code conversation history, discovers patterns (repeated instructions, recurring mistakes, workflow conventions), and turns them into skills and CLAUDE.md rules automatically.
+Retro runs retrospectives on your AI coding sessions. It analyzes your Claude Code conversation history, discovers patterns (repeated instructions, recurring mistakes, workflow conventions, explicit directives), and turns them into skills and CLAUDE.md rules automatically.
 
 Your agent gets better over time, learning from every session, without you having to maintain its context by hand. You stay in control: all changes go through a review queue where you approve, skip, or dismiss each suggestion. Shared changes are then proposed as PRs.
 
@@ -52,7 +52,8 @@ Retro operates as a three-stage pipeline:
   ┌────────────────▼────────────────────────────┐
   │  ANALYSIS (AI-powered)                      │
   │  Discovers: repeated instructions,          │
-  │  recurring mistakes, workflow patterns      │
+  │  recurring mistakes, workflow patterns,     │
+  │  explicit directives ("always"/"never")     │
   │  Stores patterns with confidence scores     │
   └────────────────┬────────────────────────────┘
                    │
@@ -65,7 +66,7 @@ Retro operates as a three-stage pipeline:
 ```
 
 - **Ingestion** is fast and runs on every commit via git hooks. No AI calls, just parsing.
-- **Analysis** uses Claude to find patterns across your sessions within a rolling window (default: 14 days).
+- **Analysis** uses Claude to find patterns across your sessions within a rolling window (default: 14 days). Explicit directives ("always use X", "never do Y") are detected as high-confidence patterns from a single session.
 - **Projection** turns high-confidence patterns into concrete artifacts: skills, CLAUDE.md rules, and global agents. All generated content is queued for your review before anything is written to disk or proposed as a PR.
 
 ## What Retro Generates
@@ -149,7 +150,7 @@ cargo install retro-cli
 Retro is v0.1. The core pipeline works and has been tested on real Claude Code session history.
 
 **What works well:**
-- Session ingestion and pattern discovery across projects
+- Session ingestion and pattern discovery across projects (including explicit directives)
 - CLAUDE.md rule generation with managed sections (never touches your content)
 - Skill and global agent generation
 - Automatic pipeline via git hooks (ingest → analyze → apply with review queue, per-stage cooldowns)

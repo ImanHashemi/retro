@@ -348,7 +348,7 @@
  - Timeout: 120 seconds
  - Cost cap via --max-budget-usd
 
- Prompt strategy: Sessions are serialized as compact JSON (user messages truncated to 200 chars, tool names only, errors, thinking block summaries). Total prompt < 150k
+ Prompt strategy: Sessions are serialized as compact JSON (user messages truncated to 500 chars, tool names only, errors, thinking block summaries). Total prompt < 150k
  chars.
 
  Four prompt types:
