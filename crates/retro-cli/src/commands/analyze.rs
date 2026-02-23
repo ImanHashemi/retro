@@ -258,6 +258,8 @@ fn print_dry_run_preview(
     let mut total_user_msgs = 0;
     let mut total_assistant_msgs = 0;
     let mut total_errors = 0;
+    let mut skipped_low_signal: usize = 0;
+    let mut analyzable_count: usize = 0;
 
     for ingested in &sessions_to_analyze {
         let path = Path::new(&ingested.session_path);
@@ -276,9 +278,13 @@ fn print_dry_run_preview(
                 let user_count = s.user_messages.len();
                 let assistant_count = s.assistant_messages.len();
                 let error_count = s.errors.len();
-                total_user_msgs += user_count;
-                total_assistant_msgs += assistant_count;
-                total_errors += error_count;
+                let is_low_signal = user_count < 2;
+
+                if !is_low_signal {
+                    total_user_msgs += user_count;
+                    total_assistant_msgs += assistant_count;
+                    total_errors += error_count;
+                }
 
                 let project_label = &ingested.project;
                 let detail = format!(
@@ -291,13 +297,29 @@ fn print_dry_run_preview(
                         String::new()
                     }
                 );
-                println!(
-                    "  {} {} {} ({})",
-                    "-".dimmed(),
-                    util::truncate_str(&ingested.session_id, 8).cyan(),
-                    project_label.dimmed(),
-                    detail.dimmed()
-                );
+
+                if is_low_signal {
+                    if verbose {
+                        println!(
+                            "  {} {} {} ({}) {}",
+                            "-".dimmed(),
+                            util::truncate_str(&ingested.session_id, 8).dimmed(),
+                            project_label.dimmed(),
+                            detail.dimmed(),
+                            "[skipped: single-message]".yellow()
+                        );
+                    }
+                    skipped_low_signal += 1;
+                } else {
+                    println!(
+                        "  {} {} {} ({})",
+                        "-".dimmed(),
+                        util::truncate_str(&ingested.session_id, 8).cyan(),
+                        project_label.dimmed(),
+                        detail.dimmed()
+                    );
+                    analyzable_count += 1;
+                }
 
                 if verbose {
                     eprintln!(
@@ -319,15 +341,32 @@ fn print_dry_run_preview(
 
     // Existing patterns
     let existing = db::get_patterns(conn, &["discovered", "active"], project)?;
-    let batch_count =
-        (sessions_to_analyze.len() + analysis::BATCH_SIZE - 1) / analysis::BATCH_SIZE;
+    let batch_count = if analyzable_count > 0 {
+        (analyzable_count + analysis::BATCH_SIZE - 1) / analysis::BATCH_SIZE
+    } else {
+        0
+    };
+
+    if skipped_low_signal > 0 {
+        println!(
+            "  {} {}",
+            format!("Skipped {} single-message session{}", skipped_low_signal,
+                if skipped_low_signal == 1 { "" } else { "s" }).yellow(),
+            "(no pattern signal)".dimmed()
+        );
+    }
 
     println!();
     println!("{}", "Summary:".white().bold());
     println!(
-        "  {} {}",
+        "  {} {}{}",
         "Sessions:".white(),
-        sessions_to_analyze.len().to_string().cyan()
+        analyzable_count.to_string().cyan(),
+        if skipped_low_signal > 0 {
+            format!(" ({} skipped)", skipped_low_signal).dimmed().to_string()
+        } else {
+            String::new()
+        }
     );
     println!(
         "  {} {} user, {} assistant",

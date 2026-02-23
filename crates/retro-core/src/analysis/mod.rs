@@ -77,7 +77,27 @@ pub fn analyze(
         }
     }
 
+    // Filter out low-signal sessions: single-message sessions are typically
+    // programmatic `claude -p` calls (including retro's own analysis) or heavily
+    // compacted sessions — not real multi-turn conversations with discoverable patterns.
+    let before_filter = parsed_sessions.len();
+    parsed_sessions.retain(|s| s.user_messages.len() >= 2);
+    let filtered_out = before_filter - parsed_sessions.len();
+    if filtered_out > 0 {
+        eprintln!(
+            "  Skipped {} single-message session{} (no pattern signal)",
+            filtered_out,
+            if filtered_out == 1 { "" } else { "s" }
+        );
+    }
+
+    let analyzed_count = parsed_sessions.len();
+
     if parsed_sessions.is_empty() {
+        // Still record all sessions as analyzed so we don't re-process low-signal ones
+        for ingested in &sessions_to_analyze {
+            db::record_analyzed_session(conn, &ingested.session_id, &ingested.project)?;
+        }
         return Ok(AnalyzeResult {
             sessions_analyzed: 0,
             new_patterns: 0,
@@ -154,7 +174,7 @@ pub fn analyze(
     let active = db::pattern_count_by_status(conn, "active")?;
 
     Ok(AnalyzeResult {
-        sessions_analyzed: sessions_to_analyze.len(),
+        sessions_analyzed: analyzed_count,
         new_patterns: new_count,
         updated_patterns: update_count,
         total_patterns: (discovered + active) as usize,
@@ -164,25 +184,95 @@ pub fn analyze(
 }
 
 /// Parse the AI response text into pattern updates.
+/// Handles multiple response formats:
+/// 1. Pure JSON: `{"patterns": [...]}`
+/// 2. Markdown-wrapped: ` ```json\n{...}\n``` `
+/// 3. Prose with embedded JSON or code block (AI sometimes narrates before the JSON)
 fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> {
-    // Try to parse as AnalysisResponse first
     let trimmed = text.trim();
 
-    // Handle case where AI wraps response in markdown code blocks
-    let json_str = if trimmed.starts_with("```") {
-        crate::util::strip_code_fences(trimmed)
-    } else {
-        trimmed.to_string()
-    };
+    // Strategy 1: Direct JSON parse
+    if let Ok(response) = serde_json::from_str::<AnalysisResponse>(trimmed) {
+        return Ok(response.patterns);
+    }
 
-    let response: AnalysisResponse = serde_json::from_str(&json_str).map_err(|e| {
-        CoreError::Analysis(format!(
-            "failed to parse AI response as JSON: {e}\nresponse text: {}",
-            truncate_for_error(text)
-        ))
+    // Strategy 2: Strip leading code fences (```json ... ```)
+    if trimmed.starts_with("```") {
+        let stripped = crate::util::strip_code_fences(trimmed);
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&stripped) {
+            return Ok(response.patterns);
+        }
+    }
+
+    // Strategy 3: Find a code-fenced JSON block embedded in prose
+    if let Some(json) = extract_fenced_json(trimmed) {
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
+            return Ok(response.patterns);
+        }
+    }
+
+    // Strategy 4: Find a bare JSON object containing "patterns" in the text
+    if let Some(json) = extract_json_object(trimmed) {
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
+            return Ok(response.patterns);
+        }
+    }
+
+    Err(CoreError::Analysis(format!(
+        "failed to parse AI response as JSON (tried direct, code-fenced, and embedded extraction)\nresponse text: {}",
+        truncate_for_error(text)
+    )))
+}
+
+/// Extract JSON from a ```json ... ``` block embedded anywhere in the text.
+fn extract_fenced_json(text: &str) -> Option<String> {
+    // Find ```json or ``` followed by a JSON block
+    let fence_start = text.find("```json").or_else(|| {
+        // Look for ``` followed by { on the next line
+        text.find("```\n{")
     })?;
 
-    Ok(response.patterns)
+    let content_start = text[fence_start..].find('\n')? + fence_start + 1;
+    let remaining = &text[content_start..];
+    let fence_end = remaining.find("\n```")?;
+    let json = remaining[..fence_end].trim();
+
+    if json.starts_with('{') {
+        Some(json.to_string())
+    } else {
+        None
+    }
+}
+
+/// Extract a JSON object containing "patterns" from prose text.
+/// Finds the outermost `{...}` that contains `"patterns"`.
+fn extract_json_object(text: &str) -> Option<String> {
+    // Look for {"patterns" as a strong signal
+    let start = text.find("{\"patterns\"")?;
+    let rest = &text[start..];
+
+    // Walk forward tracking brace depth to find the matching close
+    let mut depth = 0;
+    let mut end = 0;
+    for (i, ch) in rest.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if end > 0 {
+        Some(rest[..end].to_string())
+    } else {
+        None
+    }
 }
 
 fn truncate_for_error(s: &str) -> &str {
@@ -283,5 +373,55 @@ mod tests {
         let json = r#"{"patterns": []}"#;
         let updates = parse_analysis_response(json).unwrap();
         assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn test_parse_analysis_response_prose_with_fenced_json() {
+        let text = r#"I'll analyze these sessions to discover recurring patterns.
+
+**Session Analysis:**
+
+1. Session A - User asks to run tests
+2. Session B - User asks to run tests again
+
+Based on my analysis:
+
+```json
+{
+    "patterns": [
+        {
+            "action": "new",
+            "pattern_type": "repetitive_instruction",
+            "description": "User always runs tests before committing",
+            "confidence": 0.8,
+            "source_sessions": ["sess-a", "sess-b"],
+            "related_files": [],
+            "suggested_content": "Always run tests before committing",
+            "suggested_target": "claude_md"
+        }
+    ]
+}
+```"#;
+
+        let updates = parse_analysis_response(text).unwrap();
+        assert_eq!(updates.len(), 1);
+        assert!(matches!(&updates[0], PatternUpdate::New(_)));
+    }
+
+    #[test]
+    fn test_parse_analysis_response_prose_with_bare_json() {
+        let text = r#"After analyzing the sessions, here are the patterns:
+
+{"patterns": [{"action": "new", "pattern_type": "repetitive_instruction", "description": "Test pattern", "confidence": 0.7, "source_sessions": ["s1", "s2"], "related_files": [], "suggested_content": "Do the thing", "suggested_target": "claude_md"}]}"#;
+
+        let updates = parse_analysis_response(text).unwrap();
+        assert_eq!(updates.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_analysis_response_pure_prose_fails() {
+        let text = "I analyzed the sessions but found no recurring patterns worth reporting.";
+        let result = parse_analysis_response(text);
+        assert!(result.is_err());
     }
 }
