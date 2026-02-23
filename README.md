@@ -95,6 +95,9 @@ All changes go through `retro review` first. Approved shared changes (CLAUDE.md,
 | `retro audit` | AI-powered review of your context for redundancy and contradictions |
 | `retro status` | Show session counts, last analysis, pattern summary |
 | `retro log` | Show audit log entries |
+| `retro hooks remove` | Remove retro git hooks from the current repository |
+| `retro init --uninstall` | Remove retro hooks (preserves `~/.retro/` data) |
+| `retro init --uninstall --purge` | Remove hooks and delete all retro data |
 
 Most commands are project-scoped by default. Use `--global` to operate across all projects. Use `--dry-run` on any AI-powered command to preview without making changes or API calls.
 
@@ -116,17 +119,20 @@ Config lives at `~/.retro/config.toml`:
 
 ```toml
 [analysis]
-model = "sonnet"           # AI model for analysis (sonnet, opus, haiku)
-rolling_window_days = 14   # How far back to analyze
+window_days = 14           # How far back to analyze
+rolling_window = true      # Re-analyze all sessions in window (cross-session patterns)
+staleness_days = 28        # When to consider patterns stale
+confidence_threshold = 0.7 # Minimum confidence to act on patterns
+
+[ai]
+model = "sonnet"           # AI model (sonnet, opus, haiku)
 
 [hooks]
 ingest_cooldown_minutes = 5    # Minimum time between auto-ingests
 analyze_cooldown_minutes = 1440 # Minimum time between auto-analyses (24h)
 apply_cooldown_minutes = 1440   # Minimum time between auto-applies (24h)
 auto_apply = true               # Enable full auto pipeline
-
-[curator]
-staleness_days = 30        # When to consider patterns stale
+auto_analyze_max_sessions = 15  # Skip auto-analyze when backlog exceeds this
 ```
 
 Run `retro init` to create the default config.
@@ -147,14 +153,18 @@ cargo install retro-cli
 
 ## Status
 
-Retro is v0.1. The core pipeline works and has been tested on real Claude Code session history.
+Retro is v0.2. The core pipeline works end-to-end and has been tested on real Claude Code session history.
 
 **What works well:**
 - Session ingestion and pattern discovery across projects (including explicit directives)
+- Rolling window analysis for cross-session pattern discovery
 - CLAUDE.md rule generation with managed sections (never touches your content)
 - Skill and global agent generation
-- Automatic pipeline via git hooks (ingest → analyze → apply with review queue, per-stage cooldowns)
+- Review queue with batch approve/skip/dismiss workflow
+- Automatic pipeline via git hooks (ingest → analyze → apply → review queue, per-stage cooldowns)
+- Auto-mode observability with audit logging and terminal nudge
 - Context auditing for redundancy and contradictions
+- PR lifecycle management (`retro sync` detects closed PRs)
 - Dry-run mode on all AI-powered commands
 
 **What's early:**
