@@ -2,7 +2,7 @@ use crate::models::{
     CompactPattern, CompactSession, CompactUserMessage, ContextSnapshot, Pattern, Session,
 };
 
-const MAX_USER_MSG_LEN: usize = 200;
+const MAX_USER_MSG_LEN: usize = 500;
 const MAX_PROMPT_CHARS: usize = 150_000;
 const MAX_CONTEXT_SUMMARY_CHARS: usize = 5_000;
 
@@ -147,24 +147,28 @@ Analyze the following session data from Claude Code conversations. Look for:
 
 3. **Workflow Patterns** — Specific multi-step procedures the user guides the agent through in **multiple sessions** (e.g., "first run lint, then test, then commit with this message format"). A workflow followed once for a particular task is not a pattern.
 
+4. **Explicit Directives** — When the user uses strong directive language like **"always"**, **"never"**, **"must"**, or **"don't ever"**, they are explicitly stating a project rule or convention. These are high-confidence signals even from a single session. Examples:
+   - "Always create API routes using the router factory pattern"
+   - "Never import directly from internal modules, use the public API"
+   - "You must run migrations before testing"
+   These are typically project-specific conventions about how code should be written, not workflow preferences. They belong in `claude_md`.
+
 ## What is NOT a pattern
 
 Do NOT report any of the following:
 - **One-time bug fixes** — A bug that was encountered and resolved in a single session
-- **Task-specific instructions** — Directions that only applied to one particular task (e.g., "update the README for this PR", "fix the typo on line 42")
-- **Session-specific decisions** — Choices made for a specific situation that aren't general preferences (e.g., "let's use approach B for this feature")
-- **Standard development activities** — The fact that a user commits code, creates PRs, reviews diffs, or runs tests is not a pattern. However, a *specific way* of doing these things that recurs IS a pattern (e.g., "always run clippy with -D warnings before committing")
-- **General software practices** — "User follows design-then-implement" or "user writes tests" is just software development, not an actionable pattern. However, a *specific preference* within that process that recurs IS a pattern (e.g., "user always wants a dry-run preview before any destructive operation")
+- **Task-specific instructions** — Directions that only applied to one particular task and are not general preferences
 
 ## Confidence calibration
 
 Confidence reflects how certain you are this is a real, recurring pattern:
-- **Seen in 1 session only**: Do not report. A single occurrence is not enough evidence. If the behavior recurs in a future session, it will be discovered then.
+- **Explicit directive (single session)**: When the user uses "always", "never", "must", or similar imperative language to state a rule, report with confidence **0.7-0.85** even from a single session. The directive language itself is strong evidence this is a standing rule, not a one-time instruction. Target: `claude_md`.
+- **Seen in 1 session only (no directive language)**: Report with confidence 0.4-0.5 if the signal is clear and specific. These are stored as candidate observations and will be confirmed when the behavior recurs in a future session. Do NOT report vague or ambiguous single-session observations.
 - **Seen in 2 sessions**: Confidence 0.6-0.75 depending on how clear and specific the pattern is.
 - **Seen in 3+ sessions**: Confidence 0.7-1.0.
 
 **suggested_target** — where should this pattern be projected?
-- `claude_md` — Simple rules or preferences ("always do X", "never do Y"). Requires evidence from 2+ sessions.
+- `claude_md` — Simple rules, project conventions, or explicit directives ("always do X", "never do Y"). Explicit directives qualify from a single session. Other rules require 2+ sessions.
 - `skill` — Multi-step procedures or complex workflows. Requires evidence from 2+ sessions.
 - `global_agent` — Cross-project personal preferences. Requires evidence from 2+ sessions.
 - `db_only` — Already covered by installed context (skill, plugin, CLAUDE.md rule, or agent). Use this when a real pattern exists but is already handled.
@@ -219,13 +223,13 @@ Return a JSON object with a "patterns" array. Each element is either a new patte
 
 Important:
 - **Quality over quantity** — fewer strong patterns are better than many weak ones. When in doubt, skip it.
-- A pattern requires evidence from **2+ sessions**. Do not report single-session observations.
-- Only return patterns with confidence >= 0.6
+- Strong patterns require evidence from **2+ sessions**. Single-session observations may be reported only if the signal is clear and specific (confidence 0.4-0.5).
+- Only return patterns with confidence >= 0.4
 - Be specific in descriptions — vague patterns like "user prefers clean code" are useless. State the concrete behavior.
 - For `suggested_content`, write the actual rule or instruction as it should appear in the target
 - CRITICAL: Do not create duplicate patterns. Two patterns about the same underlying behavior are duplicates even if described differently. Always check existing patterns for semantic overlap, not just textual similarity.
 - Do not suggest skills or rules that duplicate installed plugin functionality
-- Return ONLY the JSON object, no other text"#
+- CRITICAL: Return ONLY the raw JSON object. No prose, no explanation, no markdown formatting, no commentary before or after. Your entire response must be parseable as a single JSON object starting with {{ and ending with }}. If no patterns found, return {{"patterns": []}}"#
     );
 
     prompt

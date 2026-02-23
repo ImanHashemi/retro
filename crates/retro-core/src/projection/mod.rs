@@ -244,7 +244,10 @@ fn get_qualifying_patterns(
     Ok(patterns
         .into_iter()
         .filter(|p| p.confidence >= config.analysis.confidence_threshold)
-        .filter(|p| p.times_seen >= 2) // Single occurrences are not patterns
+        // times_seen filter removed: the confidence threshold (default 0.7)
+        // is the primary gate. The AI assigns low confidence (0.4-0.5) to weak
+        // single-session observations and high confidence (0.6-0.75) to explicit
+        // directives ("always"/"never"), so the threshold naturally filters.
         .filter(|p| p.suggested_target != SuggestedTarget::DbOnly)
         .filter(|p| !p.generation_failed)
         .filter(|p| !projected_ids.contains(&p.id))
