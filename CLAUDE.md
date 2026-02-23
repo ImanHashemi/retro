@@ -1,6 +1,6 @@
 # Retro — Active Context Curator for AI Coding Agents
 
-Rust CLI tool that analyzes Claude Code session history to discover repetitive instructions, recurring mistakes, and workflow patterns — then projects them into skills and CLAUDE.md rules.
+Rust CLI tool that analyzes Claude Code session history to discover repetitive instructions, recurring mistakes, workflow patterns, and explicit directives — then projects them into skills and CLAUDE.md rules.
 
 ## Architecture
 
@@ -26,6 +26,10 @@ Cargo workspace with two crates:
 - **MEMORY.md** — read-only input, never write. Claude Code owns it.
 - **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
 - **Pattern merging** — AI-assisted (primary) with strong semantic dedup prompt guidance + Levenshtein similarity > 0.8 safety net.
+- **Pattern accumulation** — single-session observations stored at 0.4–0.5 confidence; confirmed when behavior recurs across sessions (AI emits "update" action bumping confidence). Explicit directives ("always"/"never"/"must") get 0.7–0.85 confidence from a single session.
+- **Projection gating** — confidence threshold (default 0.7) is the sole gate for projection. No `times_seen` minimum — explicit directives can project from a single session.
+- **Session filtering** — sessions with < 2 user messages are low-signal (retro's own `claude -p` calls, compacted sessions) and filtered before AI analysis. They are still recorded as analyzed to prevent reprocessing.
+- **Robust AI response parsing** — `parse_analysis_response` uses 4-strategy fallback: direct JSON → code-fenced → embedded fenced block in prose → bare JSON extraction. The AI sometimes narrates before returning JSON.
 - **Token tracking** — `BackendResponse` carries `input_tokens`/`output_tokens` (not dollar cost). `ClaudeCliOutput` extracts from nested `usage` object, summing `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` for total input.
 - **Auto-apply pipeline** — single post-commit hook orchestrates ingest → analyze → apply. Per-stage cooldowns (5m/24h/24h). Data triggers prevent unnecessary runs. Session cap (`auto_analyze_max_sessions`, default 15) skips auto-analyze when backlog is too large. Hook stderr redirected to `~/.retro/hook-stderr.log`.
 - **Observability** — every auto-mode decision gets a structured audit entry (ingest/analyze/apply success/skip/error). Enhanced nudge reads audit entries since `last_nudge_at` (stored in `metadata` table), groups within 60s as one run, displays colored multi-line status block on next interactive command.
@@ -89,6 +93,8 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - Test strategy: unit tests with fixtures (no AI), integration tests with `MockBackend`
 - Auto-mode orchestration: `ingest --auto` chains analyze and apply when `auto_apply=true` and data triggers + cooldowns are satisfied
 - Terminal nudge: `check_and_display_nudge()` runs before interactive commands, reads audit entries since `last_nudge_at` from metadata table, aggregates into `AutoRunSummary` structs (60s window grouping), displays colored status block, updates `last_nudge_at`
+- Session filtering: sessions with < 2 user messages (low-signal) are skipped before AI analysis but still recorded as analyzed. `analyze --dry-run` shows skipped count in summary and per-session in `--verbose` mode
+- User message truncation: `MAX_USER_MSG_LEN = 500` chars in prompt serialization — balances signal quality against token budget
 - Session cap: `auto_analyze_max_sessions` (default 15) — `unanalyzed_session_count()` checked before auto-analyze; if exceeded, writes `analyze_skipped` audit entry with `reason: "session_cap"` and skips AI call
 - Audit coverage: every auto-mode decision gets an entry — `ingest` (success), `analyze_skipped` (session_cap or cooldown_or_no_data), `analyze_error`, `apply_skipped` (no_qualifying_patterns), `apply_error`, enriched `apply` (with `pr_url`)
 - Per-stage cooldowns: `ingest_cooldown_minutes` (5), `analyze_cooldown_minutes` (1440), `apply_cooldown_minutes` (1440) — each stage has its own cooldown matching cost profile
@@ -114,6 +120,7 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - **Phase 6: DONE** — Auto-Apply Pipeline. Single post-commit hook orchestrates full pipeline (`ingest --auto` chains analyze + apply). Per-stage cooldowns (`ingest_cooldown_minutes=5`, `analyze_cooldown_minutes=1440`, `apply_cooldown_minutes=1440`). `auto_apply` config (on by default). `apply --auto` with lockfile, cooldown, and data gate. Old post-merge hook cleanup on `retro init`. Orchestration lock prevents concurrent analyze. 87 unit tests.
 - **Auto-mode observability: DONE** — `auto_analyze_max_sessions` config (default 15) skips auto-analyze when backlog exceeds cap. DB schema v2 adds `metadata` table for `last_nudge_at`. `unanalyzed_session_count()` for cap check. Comprehensive audit logging for every auto-mode decision (ingest success, analyze skip/error, apply skip/error, enriched apply with `pr_url`). Enhanced nudge system reads audit entries since last nudge, groups by 60s window, displays multi-line colored status block. Hook stderr redirected to `~/.retro/hook-stderr.log`. `retro init` updates existing hooks to new format (`HookInstallResult` enum: Installed/Updated/UpToDate). Old `get_unnudged_pr_urls`/`mark_projections_nudged` removed (replaced by audit-based nudge). 93 unit tests, 9 scenario tests.
 - **Phase 7: DONE** — Review Queue. `retro apply` now generates content and saves as `PendingReview` (no direct file writes). `retro review` command for batch approve/skip/dismiss. `retro sync` detects closed PRs and resets patterns. `ProjectionStatus` enum (`PendingReview`/`Applied`/`Dismissed`). DB schema v3 adds `status` column to projections. Nudge shows pending review count. Sync runs automatically before apply and review.
+- **Pattern discovery quality: DONE** — Robust JSON response parsing (4-strategy fallback). Session filtering (< 2 user messages = low signal). Explicit directives category ("always"/"never"/"must" at 0.7–0.85 confidence). Pattern accumulation model (single-session at 0.4–0.5, confirmed via updates). Confidence threshold as sole projection gate (removed `times_seen >= 2`). Simplified prompt exclusions. Context-aware analysis prompt. 115 unit tests.
 
 ## Full Plan
 
