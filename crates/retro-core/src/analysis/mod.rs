@@ -197,52 +197,27 @@ pub fn analyze(
 /// 1. Pure JSON: `{"patterns": [...]}`
 /// 2. Markdown-wrapped: ` ```json\n{...}\n``` `
 /// 3. Prose with embedded JSON or code block (AI sometimes narrates before the JSON)
+///
+/// Runs two passes: first on the original text, then on sanitized text.
+/// Sanitizing first is critical when suggested_content contains markdown with
+/// code fences (```) and literal newlines — the embedded ``` confuse fence
+/// stripping, truncating the JSON. Sanitizing escapes literal newlines into \n,
+/// collapsing multi-line strings into single lines so fence detection works.
 fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> {
     let trimmed = text.trim();
 
-    // Strategy 1: Direct JSON parse
-    if let Ok(response) = serde_json::from_str::<AnalysisResponse>(trimmed) {
-        return Ok(response.patterns);
+    // Pass 1: try all extraction strategies on the original text.
+    if let Some(patterns) = try_parse_strategies(trimmed) {
+        return Ok(patterns);
     }
 
-    // Strategy 2: Strip leading code fences (```json ... ```)
-    if trimmed.starts_with("```") {
-        let stripped = crate::util::strip_code_fences(trimmed);
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&stripped) {
-            return Ok(response.patterns);
-        }
-        // AI often puts literal newlines inside JSON string values (e.g., multi-line
-        // suggested_content). JSON spec requires these to be escaped as \n.
-        let sanitized = sanitize_json_strings(&stripped);
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&sanitized) {
-            return Ok(response.patterns);
-        }
+    // Pass 2: sanitize the entire response first, then retry.
+    let sanitized = sanitize_json_strings(trimmed);
+    if let Some(patterns) = try_parse_strategies(&sanitized) {
+        return Ok(patterns);
     }
 
-    // Strategy 3: Find a code-fenced JSON block embedded in prose
-    if let Some(json) = extract_fenced_json(trimmed) {
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
-            return Ok(response.patterns);
-        }
-        let sanitized = sanitize_json_strings(&json);
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&sanitized) {
-            return Ok(response.patterns);
-        }
-    }
-
-    // Strategy 4: Find a bare JSON object containing "patterns" in the text
-    if let Some(json) = extract_json_object(trimmed) {
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
-            return Ok(response.patterns);
-        }
-        let sanitized = sanitize_json_strings(&json);
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&sanitized) {
-            return Ok(response.patterns);
-        }
-    }
-
-    // Show both head and tail of response so we can diagnose whether it's
-    // truncation (ends mid-word) or a parsing issue (ends with valid JSON).
+    // Show both head and tail of response for diagnostics.
     let tail = if text.len() > 200 {
         let mut i = text.len().saturating_sub(200);
         while i < text.len() && !text.is_char_boundary(i) {
@@ -257,6 +232,38 @@ fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> 
         truncate_for_error(text, 1500),
         tail
     )))
+}
+
+/// Try multiple extraction strategies to parse text as an AnalysisResponse.
+fn try_parse_strategies(text: &str) -> Option<Vec<PatternUpdate>> {
+    // Strategy 1: Direct JSON parse
+    if let Ok(response) = serde_json::from_str::<AnalysisResponse>(text) {
+        return Some(response.patterns);
+    }
+
+    // Strategy 2: Strip leading code fences (```json ... ```)
+    if text.starts_with("```") {
+        let stripped = crate::util::strip_code_fences(text);
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&stripped) {
+            return Some(response.patterns);
+        }
+    }
+
+    // Strategy 3: Find a code-fenced JSON block embedded in prose
+    if let Some(json) = extract_fenced_json(text) {
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
+            return Some(response.patterns);
+        }
+    }
+
+    // Strategy 4: Find a bare JSON object containing "patterns" in the text
+    if let Some(json) = extract_json_object(text) {
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
+            return Some(response.patterns);
+        }
+    }
+
+    None
 }
 
 /// Extract JSON from a ```json ... ``` block embedded anywhere in the text.
@@ -516,6 +523,17 @@ Based on my analysis:
         let text = "```json\n{\n  \"patterns\": [\n    {\n      \"action\": \"new\",\n      \"pattern_type\": \"workflow_pattern\",\n      \"description\": \"User does X across sessions\",\n      \"confidence\": 0.75,\n      \"source_sessions\": [\"s1\", \"s2\"],\n      \"related_files\": [],\n      \"suggested_content\": \"Step 1: do this\nStep 2: do that\nStep 3: finish\",\n      \"suggested_target\": \"skill\"\n    }\n  ]\n}\n```";
         let result = parse_analysis_response(text);
         assert!(result.is_ok(), "Parser should handle literal newlines in JSON string values");
+    }
+
+    #[test]
+    fn test_parse_analysis_response_embedded_code_fences_in_strings() {
+        // AI generates suggested_content with markdown code blocks AND literal newlines.
+        // The embedded ``` inside the string confuses fence-stripping, truncating the JSON.
+        // This is the exact failure mode: strip_code_fences sees ```bash as the closing
+        // fence and stops, yielding truncated JSON.
+        let text = "```json\n{\n  \"patterns\": [\n    {\n      \"action\": \"new\",\n      \"pattern_type\": \"workflow_pattern\",\n      \"description\": \"User uses uv for Python deps\",\n      \"confidence\": 0.8,\n      \"source_sessions\": [\"s1\"],\n      \"related_files\": [\"pyproject.toml\"],\n      \"suggested_content\": \"Always use uv for dependency management:\n```bash\nuv add package-name\nuv lock\n```\nNever use pip install directly.\",\n      \"suggested_target\": \"claude_md\"\n    }\n  ]\n}\n```";
+        let result = parse_analysis_response(text);
+        assert!(result.is_ok(), "Parser should handle embedded code fences inside JSON string values: {:?}", result.err());
     }
 
 }
