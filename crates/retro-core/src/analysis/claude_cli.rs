@@ -51,6 +51,9 @@ impl AnalysisBackend for ClaudeCliBackend {
             // Clear CLAUDECODE to avoid nested-session rejection when retro
             // is invoked from a post-commit hook inside a Claude Code session.
             .env_remove("CLAUDECODE")
+            // Disable extended thinking — it consumes output tokens (default budget
+            // is ~32K) leaving very few for the actual JSON response, causing truncation.
+            .env("MAX_THINKING_TOKENS", "0")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

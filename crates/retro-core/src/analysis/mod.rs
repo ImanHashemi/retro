@@ -16,7 +16,7 @@ use std::path::Path;
 use backend::AnalysisBackend;
 use claude_cli::ClaudeCliBackend;
 
-pub const BATCH_SIZE: usize = 20;
+pub const BATCH_SIZE: usize = 10;
 
 /// Run analysis: re-parse sessions, scrub, call AI, merge patterns, store results.
 pub fn analyze(
