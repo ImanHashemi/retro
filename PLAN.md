@@ -202,7 +202,6 @@
  [ai]
  backend = "claude-cli"              # "claude-cli" | "claude-api" (future)
  model = "sonnet"                    # Model for analysis calls
- max_budget_per_call = 0.50          # Cost cap per AI invocation
 
  [hooks]
  ingest_cooldown_minutes = 5         # Minimum time between auto-ingests
@@ -341,12 +340,10 @@
  Note: Sync trait (no async). PatternUpdate can be either a new pattern or an update to an existing one (with existing pattern ID).
 
  Primary implementation (ClaudeCliBackend):
- claude -p "<prompt>" --output-format json --model sonnet --max-budget-usd 0.50
+ claude -p "<prompt>" --output-format json --model sonnet --max-turns 1
  - Spawns claude CLI in non-interactive mode via std::process::Command
  - --output-format json returns a wrapper object with result field — parser extracts inner content
- - --json-schema constrains the inner result structure
- - Timeout: 120 seconds
- - Cost cap via --max-budget-usd
+ - --max-turns 1 ensures single-turn execution
 
  Prompt strategy: Sessions are serialized as compact JSON (user messages truncated to 500 chars, tool names only, errors, thinking block summaries). Total prompt < 150k
  chars.
