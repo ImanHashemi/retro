@@ -244,8 +244,9 @@ pub fn unanalyzed_session_count(conn: &Connection) -> Result<u64, CoreError> {
 }
 
 /// Check if there are patterns eligible for projection that haven't been projected yet.
-/// Excludes patterns that have generation_failed=true, suggested_target='db_only',
-/// or confidence below the given threshold.
+/// Mirrors the gating logic in `get_qualifying_patterns()`: excludes patterns with
+/// generation_failed=true, suggested_target='db_only', or confidence below threshold.
+/// The confidence threshold is the sole quality gate (no times_seen requirement).
 pub fn has_unprojected_patterns(conn: &Connection, confidence_threshold: f64) -> Result<bool, CoreError> {
     let count: u64 = conn.query_row(
         "SELECT COUNT(*) FROM patterns p

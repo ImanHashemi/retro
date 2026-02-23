@@ -162,7 +162,7 @@ Do NOT report any of the following:
 ## Confidence calibration
 
 Confidence reflects how certain you are this is a real, recurring pattern:
-- **Explicit directive (single session)**: When the user uses "always", "never", "must", or similar imperative language to state a rule, report with confidence **0.6-0.75** even from a single session. The directive language itself is strong evidence this is a standing rule, not a one-time instruction. Target: `claude_md`.
+- **Explicit directive (single session)**: When the user uses "always", "never", "must", or similar imperative language to state a rule, report with confidence **0.7-0.85** even from a single session. The directive language itself is strong evidence this is a standing rule, not a one-time instruction. Target: `claude_md`.
 - **Seen in 1 session only (no directive language)**: Report with confidence 0.4-0.5 if the signal is clear and specific. These are stored as candidate observations and will be confirmed when the behavior recurs in a future session. Do NOT report vague or ambiguous single-session observations.
 - **Seen in 2 sessions**: Confidence 0.6-0.75 depending on how clear and specific the pattern is.
 - **Seen in 3+ sessions**: Confidence 0.7-1.0.
