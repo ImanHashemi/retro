@@ -239,7 +239,9 @@ fn print_dry_run_preview(
     verbose: bool,
 ) -> Result<()> {
     let since = Utc::now() - Duration::days(window_days as i64);
-    let sessions_to_analyze = db::get_sessions_for_analysis(conn, project, &since)?;
+    // Dry-run always shows unanalyzed sessions (not rolling window) since
+    // it's previewing what would be NEW work, not the full window.
+    let sessions_to_analyze = db::get_sessions_for_analysis(conn, project, &since, false)?;
 
     if sessions_to_analyze.is_empty() {
         println!();

@@ -36,6 +36,8 @@ pub struct AnalysisConfig {
     pub confidence_threshold: f64,
     #[serde(default = "default_staleness_days")]
     pub staleness_days: u32,
+    #[serde(default = "default_rolling_window")]
+    pub rolling_window: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +85,7 @@ fn default_analysis() -> AnalysisConfig {
         window_days: default_window_days(),
         confidence_threshold: default_confidence_threshold(),
         staleness_days: default_staleness_days(),
+        rolling_window: default_rolling_window(),
     }
 }
 
@@ -120,6 +123,9 @@ fn default_privacy() -> PrivacyConfig {
 
 fn default_window_days() -> u32 {
     14
+}
+fn default_rolling_window() -> bool {
+    true
 }
 fn default_confidence_threshold() -> f64 {
     0.7

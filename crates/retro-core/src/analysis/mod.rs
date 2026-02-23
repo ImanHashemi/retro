@@ -34,8 +34,10 @@ pub fn analyze(
 
     let since = Utc::now() - Duration::days(window_days as i64);
 
-    // Get sessions to analyze (within window, not yet analyzed)
-    let sessions_to_analyze = db::get_sessions_for_analysis(conn, project, &since)?;
+    // Get sessions to analyze — rolling_window=true re-analyzes all sessions in window,
+    // false only picks up sessions not yet analyzed.
+    let rolling = config.analysis.rolling_window;
+    let sessions_to_analyze = db::get_sessions_for_analysis(conn, project, &since, rolling)?;
 
     if sessions_to_analyze.is_empty() {
         return Ok(AnalyzeResult {
@@ -209,11 +211,21 @@ fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> 
         if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&stripped) {
             return Ok(response.patterns);
         }
+        // AI often puts literal newlines inside JSON string values (e.g., multi-line
+        // suggested_content). JSON spec requires these to be escaped as \n.
+        let sanitized = sanitize_json_strings(&stripped);
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&sanitized) {
+            return Ok(response.patterns);
+        }
     }
 
     // Strategy 3: Find a code-fenced JSON block embedded in prose
     if let Some(json) = extract_fenced_json(trimmed) {
         if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
+            return Ok(response.patterns);
+        }
+        let sanitized = sanitize_json_strings(&json);
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&sanitized) {
             return Ok(response.patterns);
         }
     }
@@ -223,11 +235,27 @@ fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> 
         if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
             return Ok(response.patterns);
         }
+        let sanitized = sanitize_json_strings(&json);
+        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&sanitized) {
+            return Ok(response.patterns);
+        }
     }
 
+    // Show both head and tail of response so we can diagnose whether it's
+    // truncation (ends mid-word) or a parsing issue (ends with valid JSON).
+    let tail = if text.len() > 200 {
+        let mut i = text.len().saturating_sub(200);
+        while i < text.len() && !text.is_char_boundary(i) {
+            i += 1;
+        }
+        &text[i..]
+    } else {
+        text
+    };
     Err(CoreError::Analysis(format!(
-        "failed to parse AI response as JSON (tried direct, code-fenced, and embedded extraction)\nresponse text: {}",
-        truncate_for_error(text, 1500)
+        "failed to parse AI response as JSON (tried direct, code-fenced, and embedded extraction)\nresponse text (head): {}\n...response text (tail): {}",
+        truncate_for_error(text, 1500),
+        tail
     )))
 }
 
@@ -280,6 +308,55 @@ fn extract_json_object(text: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Escape literal control characters inside JSON string values.
+/// AI models sometimes put raw newlines/tabs in JSON strings instead of \n/\t.
+/// JSON spec requires control characters (U+0000–U+001F) to be escaped.
+fn sanitize_json_strings(json: &str) -> String {
+    let mut result = String::with_capacity(json.len());
+    let mut in_string = false;
+    let mut prev_backslash = false;
+
+    for ch in json.chars() {
+        if in_string {
+            if prev_backslash {
+                // Previous char was \, this char is the escape sequence — pass through
+                result.push(ch);
+                prev_backslash = false;
+                continue;
+            }
+            if ch == '\\' {
+                result.push(ch);
+                prev_backslash = true;
+                continue;
+            }
+            if ch == '"' {
+                in_string = false;
+                result.push(ch);
+                continue;
+            }
+            // Escape literal control characters inside strings
+            match ch {
+                '\n' => result.push_str("\\n"),
+                '\r' => result.push_str("\\r"),
+                '\t' => result.push_str("\\t"),
+                c if c.is_control() => {
+                    // Escape other control chars as \uXXXX
+                    result.push_str(&format!("\\u{:04x}", c as u32));
+                }
+                _ => result.push(ch),
+            }
+        } else {
+            if ch == '"' {
+                in_string = true;
+            }
+            result.push(ch);
+            prev_backslash = false;
+        }
+    }
+
+    result
 }
 
 fn truncate_for_error(s: &str, max: usize) -> &str {
@@ -430,6 +507,15 @@ Based on my analysis:
         let text = "I analyzed the sessions but found no recurring patterns worth reporting.";
         let result = parse_analysis_response(text);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_analysis_response_literal_newlines_in_strings() {
+        // Simulate what the AI produces: JSON with literal newlines inside string values
+        // (e.g., suggested_content with multi-line instructions)
+        let text = "```json\n{\n  \"patterns\": [\n    {\n      \"action\": \"new\",\n      \"pattern_type\": \"workflow_pattern\",\n      \"description\": \"User does X across sessions\",\n      \"confidence\": 0.75,\n      \"source_sessions\": [\"s1\", \"s2\"],\n      \"related_files\": [],\n      \"suggested_content\": \"Step 1: do this\nStep 2: do that\nStep 3: finish\",\n      \"suggested_target\": \"skill\"\n    }\n  ]\n}\n```";
+        let result = parse_analysis_response(text);
+        assert!(result.is_ok(), "Parser should handle literal newlines in JSON string values");
     }
 
 }

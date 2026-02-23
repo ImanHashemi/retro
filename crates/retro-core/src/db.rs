@@ -524,16 +524,29 @@ pub fn is_session_analyzed(conn: &Connection, session_id: &str) -> Result<bool, 
     Ok(count > 0)
 }
 
-/// Get ingested sessions that haven't been analyzed yet, within the time window.
+/// Get ingested sessions for analysis within the time window.
+/// When `rolling_window` is true, returns ALL sessions in the window (re-analyzes everything).
+/// When false, only returns sessions not yet in `analyzed_sessions` (analyze-once).
 pub fn get_sessions_for_analysis(
     conn: &Connection,
     project: Option<&str>,
     since: &DateTime<Utc>,
+    rolling_window: bool,
 ) -> Result<Vec<IngestedSession>, CoreError> {
     let since_str = since.to_rfc3339();
 
-    let (query, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match project {
-        Some(proj) => {
+    let (query, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match (project, rolling_window) {
+        (Some(proj), true) => {
+            let q = "SELECT i.session_id, i.project, i.session_path, i.file_size, i.file_mtime, i.ingested_at
+                     FROM ingested_sessions i
+                     WHERE i.project = ?1 AND i.ingested_at >= ?2
+                     ORDER BY i.ingested_at".to_string();
+            (q, vec![
+                Box::new(proj.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                Box::new(since_str) as Box<dyn rusqlite::types::ToSql>,
+            ])
+        }
+        (Some(proj), false) => {
             let q = "SELECT i.session_id, i.project, i.session_path, i.file_size, i.file_mtime, i.ingested_at
                      FROM ingested_sessions i
                      LEFT JOIN analyzed_sessions a ON i.session_id = a.session_id
@@ -544,7 +557,14 @@ pub fn get_sessions_for_analysis(
                 Box::new(since_str) as Box<dyn rusqlite::types::ToSql>,
             ])
         }
-        None => {
+        (None, true) => {
+            let q = "SELECT i.session_id, i.project, i.session_path, i.file_size, i.file_mtime, i.ingested_at
+                     FROM ingested_sessions i
+                     WHERE i.ingested_at >= ?1
+                     ORDER BY i.ingested_at".to_string();
+            (q, vec![Box::new(since_str) as Box<dyn rusqlite::types::ToSql>])
+        }
+        (None, false) => {
             let q = "SELECT i.session_id, i.project, i.session_path, i.file_size, i.file_mtime, i.ingested_at
                      FROM ingested_sessions i
                      LEFT JOIN analyzed_sessions a ON i.session_id = a.session_id
@@ -929,15 +949,19 @@ mod tests {
         };
         record_ingested_session(&conn, &session).unwrap();
 
-        // It should appear in sessions for analysis
+        // It should appear in sessions for analysis (non-rolling)
         let since = Utc::now() - chrono::Duration::days(14);
-        let pending = get_sessions_for_analysis(&conn, None, &since).unwrap();
+        let pending = get_sessions_for_analysis(&conn, None, &since, false).unwrap();
         assert_eq!(pending.len(), 1);
 
-        // After marking as analyzed, it should not appear
+        // After marking as analyzed, it should not appear in non-rolling mode
         record_analyzed_session(&conn, "sess-1", "/test").unwrap();
-        let pending = get_sessions_for_analysis(&conn, None, &since).unwrap();
+        let pending = get_sessions_for_analysis(&conn, None, &since, false).unwrap();
         assert_eq!(pending.len(), 0);
+
+        // But it SHOULD still appear in rolling window mode
+        let pending = get_sessions_for_analysis(&conn, None, &since, true).unwrap();
+        assert_eq!(pending.len(), 1);
     }
 
     #[test]
