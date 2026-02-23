@@ -8,14 +8,12 @@ use super::backend::{AnalysisBackend, BackendResponse};
 /// AI backend that spawns `claude -p` in non-interactive mode.
 pub struct ClaudeCliBackend {
     model: String,
-    max_budget: f64,
 }
 
 impl ClaudeCliBackend {
     pub fn new(config: &AiConfig) -> Self {
         Self {
             model: config.model.clone(),
-            max_budget: config.max_budget_per_call,
         }
     }
 
@@ -34,8 +32,6 @@ impl ClaudeCliBackend {
 
 impl AnalysisBackend for ClaudeCliBackend {
     fn execute(&self, prompt: &str) -> Result<BackendResponse, CoreError> {
-        let budget_str = format!("{:.2}", self.max_budget);
-
         // Pipe prompt via stdin to avoid ARG_MAX limits on large prompts
         let mut child = Command::new("claude")
             .args([
@@ -47,8 +43,6 @@ impl AnalysisBackend for ClaudeCliBackend {
                 &self.model,
                 "--max-turns",
                 "1",
-                "--max-budget-usd",
-                &budget_str,
             ])
             // Clear CLAUDECODE to avoid nested-session rejection when retro
             // is invoked from a post-commit hook inside a Claude Code session.

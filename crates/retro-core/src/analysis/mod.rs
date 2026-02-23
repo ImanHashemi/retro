@@ -220,7 +220,7 @@ fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> 
 
     Err(CoreError::Analysis(format!(
         "failed to parse AI response as JSON (tried direct, code-fenced, and embedded extraction)\nresponse text: {}",
-        truncate_for_error(text)
+        truncate_for_error(text, 1500)
     )))
 }
 
@@ -275,11 +275,11 @@ fn extract_json_object(text: &str) -> Option<String> {
     }
 }
 
-fn truncate_for_error(s: &str) -> &str {
-    if s.len() <= 500 {
+fn truncate_for_error(s: &str, max: usize) -> &str {
+    if s.len() <= max {
         s
     } else {
-        let mut i = 500;
+        let mut i = max;
         while i > 0 && !s.is_char_boundary(i) {
             i -= 1;
         }
@@ -424,4 +424,5 @@ Based on my analysis:
         let result = parse_analysis_response(text);
         assert!(result.is_err());
     }
+
 }

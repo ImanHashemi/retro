@@ -44,8 +44,6 @@ pub struct AiConfig {
     pub backend: String,
     #[serde(default = "default_model")]
     pub model: String,
-    #[serde(default = "default_max_budget")]
-    pub max_budget_per_call: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,7 +90,6 @@ fn default_ai() -> AiConfig {
     AiConfig {
         backend: default_backend(),
         model: default_model(),
-        max_budget_per_call: default_max_budget(),
     }
 }
 
@@ -135,9 +132,6 @@ fn default_backend() -> String {
 }
 fn default_model() -> String {
     "sonnet".to_string()
-}
-fn default_max_budget() -> f64 {
-    0.50
 }
 fn default_ingest_cooldown() -> u32 {
     5

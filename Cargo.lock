@@ -465,7 +465,7 @@ checksum = "a96887878f22d7bad8a3b6dc5b7440e0ada9a245242924394987b21cf2210a4c"
 
 [[package]]
 name = "retro-cli"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "retro-core"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "glob",
