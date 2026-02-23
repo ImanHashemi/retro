@@ -32,7 +32,9 @@ impl ClaudeCliBackend {
 
 impl AnalysisBackend for ClaudeCliBackend {
     fn execute(&self, prompt: &str) -> Result<BackendResponse, CoreError> {
-        // Pipe prompt via stdin to avoid ARG_MAX limits on large prompts
+        // Pipe prompt via stdin to avoid ARG_MAX limits on large prompts.
+        // --tools "" disables all tool use — we only need a plain JSON response,
+        // and agent-mode tool planning can consume output tokens causing truncation.
         let mut child = Command::new("claude")
             .args([
                 "-p",
@@ -43,6 +45,8 @@ impl AnalysisBackend for ClaudeCliBackend {
                 &self.model,
                 "--max-turns",
                 "1",
+                "--tools",
+                "",
             ])
             // Clear CLAUDECODE to avoid nested-session rejection when retro
             // is invoked from a post-commit hook inside a Claude Code session.

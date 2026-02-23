@@ -139,7 +139,14 @@ pub fn analyze(
         total_output_tokens += response.output_tokens;
 
         // Parse AI response into PatternUpdate objects
-        let updates = parse_analysis_response(&response.text)?;
+        let updates = parse_analysis_response(&response.text).map_err(|e| {
+            CoreError::Analysis(format!(
+                "{e}\n(prompt_chars={}, output_tokens={}, result_chars={})",
+                prompt.len(),
+                response.output_tokens,
+                response.text.len()
+            ))
+        })?;
 
         // Apply merge logic
         let (new_patterns, merge_updates) = merge::process_updates(updates, &existing, project);
