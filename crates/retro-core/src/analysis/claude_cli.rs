@@ -35,6 +35,10 @@ impl AnalysisBackend for ClaudeCliBackend {
         // Pipe prompt via stdin to avoid ARG_MAX limits on large prompts.
         // --tools "" disables all tool use — we only need a plain JSON response,
         // and agent-mode tool planning can consume output tokens causing truncation.
+        // When --json-schema is used, the CLI needs at least 2 turns
+        // (internally uses a tool call), and --tools "" must be omitted
+        // to avoid conflicting with constrained decoding.
+        let max_turns = if json_schema.is_some() { "2" } else { "1" };
         let mut args = vec![
             "-p",
             "-",
@@ -43,13 +47,15 @@ impl AnalysisBackend for ClaudeCliBackend {
             "--model",
             &self.model,
             "--max-turns",
-            "1",
-            "--tools",
-            "",
+            max_turns,
         ];
         if let Some(schema) = json_schema {
             args.push("--json-schema");
             args.push(schema);
+        } else {
+            // Only disable tools when not using --json-schema
+            args.push("--tools");
+            args.push("");
         }
         let mut child = Command::new("claude")
             .args(&args)
@@ -107,9 +113,14 @@ impl AnalysisBackend for ClaudeCliBackend {
         let input_tokens = cli_output.total_input_tokens();
         let output_tokens = cli_output.total_output_tokens();
 
+        // When --json-schema is used, the structured JSON appears in
+        // `structured_output` (as a parsed JSON value) rather than `result`.
+        // Serialize it back to a string for downstream parsing.
         let result_text = cli_output
-            .result
+            .structured_output
+            .map(|v| serde_json::to_string(&v).unwrap_or_default())
             .filter(|s| !s.is_empty())
+            .or_else(|| cli_output.result.filter(|s| !s.is_empty()))
             .ok_or_else(|| {
                 CoreError::Analysis(format!(
                     "claude CLI returned empty result (is_error={}, duration_ms={}, tokens_in={}, tokens_out={})",

@@ -478,6 +478,10 @@ pub struct ClaudeCliOutput {
     pub session_id: Option<String>,
     #[serde(default)]
     pub usage: Option<CliUsage>,
+    /// When `--json-schema` is used, the structured output appears here
+    /// as a parsed JSON value rather than in `result`.
+    #[serde(default)]
+    pub structured_output: Option<serde_json::Value>,
 }
 
 /// Token usage from Claude CLI output (nested inside `usage` field).
