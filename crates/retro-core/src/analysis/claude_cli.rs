@@ -31,23 +31,28 @@ impl ClaudeCliBackend {
 }
 
 impl AnalysisBackend for ClaudeCliBackend {
-    fn execute(&self, prompt: &str) -> Result<BackendResponse, CoreError> {
+    fn execute(&self, prompt: &str, json_schema: Option<&str>) -> Result<BackendResponse, CoreError> {
         // Pipe prompt via stdin to avoid ARG_MAX limits on large prompts.
         // --tools "" disables all tool use — we only need a plain JSON response,
         // and agent-mode tool planning can consume output tokens causing truncation.
+        let mut args = vec![
+            "-p",
+            "-",
+            "--output-format",
+            "json",
+            "--model",
+            &self.model,
+            "--max-turns",
+            "1",
+            "--tools",
+            "",
+        ];
+        if let Some(schema) = json_schema {
+            args.push("--json-schema");
+            args.push(schema);
+        }
         let mut child = Command::new("claude")
-            .args([
-                "-p",
-                "-",
-                "--output-format",
-                "json",
-                "--model",
-                &self.model,
-                "--max-turns",
-                "1",
-                "--tools",
-                "",
-            ])
+            .args(&args)
             // Clear CLAUDECODE to avoid nested-session rejection when retro
             // is invoked from a post-commit hook inside a Claude Code session.
             .env_remove("CLAUDECODE")

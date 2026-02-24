@@ -9,7 +9,7 @@ pub fn generate_agent(
     pattern: &Pattern,
 ) -> Result<AgentDraft, CoreError> {
     let prompt = build_generation_prompt(pattern);
-    let response = backend.execute(&prompt)?;
+    let response = backend.execute(&prompt, None)?;
     let content = util::strip_code_fences(&response.text);
 
     let name = parse_agent_name(&content).ok_or_else(|| {

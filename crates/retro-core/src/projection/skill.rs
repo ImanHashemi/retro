@@ -5,6 +5,9 @@ use crate::util;
 
 const MAX_RETRIES: usize = 2;
 
+/// JSON schema for constrained decoding of skill validation responses.
+const SKILL_VALIDATION_SCHEMA: &str = r#"{"type":"object","properties":{"valid":{"type":"boolean"},"feedback":{"type":"string"}},"required":["valid","feedback"],"additionalProperties":false}"#;
+
 /// Generate a skill with retry logic. Returns Err if all attempts fail.
 pub fn generate_with_retry(
     backend: &dyn AnalysisBackend,
@@ -16,7 +19,7 @@ pub fn generate_with_retry(
 
     for attempt in 0..=retries {
         let prompt = build_generation_prompt(pattern, if attempt > 0 { Some(&feedback) } else { None });
-        let response = backend.execute(&prompt)?;
+        let response = backend.execute(&prompt, None)?;
         let content = util::strip_code_fences(&response.text);
 
         let name = match parse_skill_name(&content) {
@@ -35,7 +38,7 @@ pub fn generate_with_retry(
 
         // Validate
         let validation_prompt = build_validation_prompt(&content, pattern);
-        match backend.execute(&validation_prompt) {
+        match backend.execute(&validation_prompt, Some(SKILL_VALIDATION_SCHEMA)) {
             Ok(val_response) => {
                 match parse_validation(&val_response.text) {
                     Some(v) if v.valid => return Ok(draft),
@@ -218,9 +221,9 @@ fn has_valid_frontmatter(content: &str) -> bool {
 }
 
 /// Parse the validation response JSON.
+/// With `--json-schema` constrained decoding, the response is guaranteed valid JSON.
 fn parse_validation(text: &str) -> Option<SkillValidation> {
-    let json_str = util::strip_code_fences(text);
-    serde_json::from_str(&json_str).ok()
+    serde_json::from_str(text.trim()).ok()
 }
 
 /// Determine the skill file path: {project}/.claude/skills/{name}/SKILL.md
@@ -280,10 +283,12 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_validation_markdown_wrapped() {
-        let text = "```json\n{\"valid\": true, \"feedback\": \"\"}\n```";
-        let v = parse_validation(text).unwrap();
-        assert!(v.valid);
+    fn test_skill_validation_schema_is_valid_json() {
+        let value: serde_json::Value = serde_json::from_str(SKILL_VALIDATION_SCHEMA)
+            .expect("SKILL_VALIDATION_SCHEMA must be valid JSON");
+        assert_eq!(value["type"], "object");
+        assert!(value["properties"]["valid"].is_object());
+        assert!(value["properties"]["feedback"].is_object());
     }
 
     #[test]

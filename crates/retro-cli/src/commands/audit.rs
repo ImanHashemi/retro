@@ -4,10 +4,10 @@ use retro_core::analysis::claude_cli::ClaudeCliBackend;
 use retro_core::analysis::prompts;
 use retro_core::audit_log;
 use retro_core::config::{retro_dir, Config};
-use retro_core::curator::AuditResponse;
+use retro_core::curator::{AuditResponse, AUDIT_RESPONSE_SCHEMA};
 use retro_core::ingest::context::snapshot_context;
 use retro_core::lock::LockFile;
-use retro_core::util::{shorten_path, strip_code_fences, truncate_str};
+use retro_core::util::{shorten_path, truncate_str};
 
 use super::git_root_or_cwd;
 
@@ -118,11 +118,10 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     let backend = ClaudeCliBackend::new(&config.ai);
 
     use retro_core::analysis::backend::AnalysisBackend;
-    let response = backend.execute(&prompt)?;
+    let response = backend.execute(&prompt, Some(AUDIT_RESPONSE_SCHEMA))?;
 
-    // Parse findings
-    let cleaned = strip_code_fences(&response.text);
-    let audit_response: AuditResponse = serde_json::from_str(&cleaned).map_err(|e| {
+    // Parse findings — with --json-schema, response is guaranteed valid JSON.
+    let audit_response: AuditResponse = serde_json::from_str(response.text.trim()).map_err(|e| {
         anyhow::anyhow!(
             "failed to parse audit response: {e}\nraw: {}",
             truncate_str(&response.text, 500)

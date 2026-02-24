@@ -159,6 +159,9 @@ pub fn archive_stale_items(
     Ok(result)
 }
 
+/// JSON schema for constrained decoding of context audit responses.
+pub const AUDIT_RESPONSE_SCHEMA: &str = r#"{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","properties":{"finding_type":{"type":"string","enum":["redundant","contradictory","oversized","stale"]},"description":{"type":"string"},"affected_items":{"type":"array","items":{"type":"string"}},"suggestion":{"type":"string"}},"required":["finding_type","description","affected_items","suggestion"],"additionalProperties":false}}},"required":["findings"],"additionalProperties":false}"#;
+
 /// Context audit finding from AI analysis.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AuditFinding {
@@ -172,4 +175,17 @@ pub struct AuditFinding {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AuditResponse {
     pub findings: Vec<AuditFinding>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audit_response_schema_is_valid_json() {
+        let value: serde_json::Value = serde_json::from_str(AUDIT_RESPONSE_SCHEMA)
+            .expect("AUDIT_RESPONSE_SCHEMA must be valid JSON");
+        assert_eq!(value["type"], "object");
+        assert!(value["properties"]["findings"].is_object());
+    }
 }

@@ -18,6 +18,38 @@ use claude_cli::ClaudeCliBackend;
 
 pub const BATCH_SIZE: usize = 20;
 
+/// JSON schema for constrained decoding of analysis responses.
+/// Flat schema — serde's `#[serde(tag = "action")]` handles variant discrimination.
+/// All fields optional except `action`; `additionalProperties: false` required by structured output.
+pub const ANALYSIS_RESPONSE_SCHEMA: &str = r#"{
+  "type": "object",
+  "properties": {
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["new", "update"]},
+          "pattern_type": {"type": "string", "enum": ["repetitive_instruction", "recurring_mistake", "workflow_pattern", "stale_context", "redundant_context"]},
+          "description": {"type": "string"},
+          "confidence": {"type": "number"},
+          "source_sessions": {"type": "array", "items": {"type": "string"}},
+          "related_files": {"type": "array", "items": {"type": "string"}},
+          "suggested_content": {"type": "string"},
+          "suggested_target": {"type": "string", "enum": ["skill", "claude_md", "global_agent", "db_only"]},
+          "existing_id": {"type": "string"},
+          "new_sessions": {"type": "array", "items": {"type": "string"}},
+          "new_confidence": {"type": "number"}
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["patterns"],
+  "additionalProperties": false
+}"#;
+
 /// Run analysis: re-parse sessions, scrub, call AI, merge patterns, store results.
 pub fn analyze(
     conn: &Connection,
@@ -136,7 +168,7 @@ pub fn analyze(
         let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref());
 
         // Call AI backend
-        let response = backend.execute(&prompt)?;
+        let response = backend.execute(&prompt, Some(ANALYSIS_RESPONSE_SCHEMA))?;
         total_input_tokens += response.input_tokens;
         total_output_tokens += response.output_tokens;
 
@@ -193,177 +225,16 @@ pub fn analyze(
 }
 
 /// Parse the AI response text into pattern updates.
-/// Handles multiple response formats:
-/// 1. Pure JSON: `{"patterns": [...]}`
-/// 2. Markdown-wrapped: ` ```json\n{...}\n``` `
-/// 3. Prose with embedded JSON or code block (AI sometimes narrates before the JSON)
-///
-/// Runs two passes: first on the original text, then on sanitized text.
-/// Sanitizing first is critical when suggested_content contains markdown with
-/// code fences (```) and literal newlines — the embedded ``` confuse fence
-/// stripping, truncating the JSON. Sanitizing escapes literal newlines into \n,
-/// collapsing multi-line strings into single lines so fence detection works.
+/// With `--json-schema` constrained decoding, the response is guaranteed valid JSON.
 fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> {
     let trimmed = text.trim();
-
-    // Pass 1: try all extraction strategies on the original text.
-    if let Some(patterns) = try_parse_strategies(trimmed) {
-        return Ok(patterns);
-    }
-
-    // Pass 2: sanitize the entire response first, then retry.
-    let sanitized = sanitize_json_strings(trimmed);
-    if let Some(patterns) = try_parse_strategies(&sanitized) {
-        return Ok(patterns);
-    }
-
-    // Show both head and tail of response for diagnostics.
-    let tail = if text.len() > 200 {
-        let mut i = text.len().saturating_sub(200);
-        while i < text.len() && !text.is_char_boundary(i) {
-            i += 1;
-        }
-        &text[i..]
-    } else {
-        text
-    };
-    Err(CoreError::Analysis(format!(
-        "failed to parse AI response as JSON (tried direct, code-fenced, and embedded extraction)\nresponse text (head): {}\n...response text (tail): {}",
-        truncate_for_error(text, 1500),
-        tail
-    )))
-}
-
-/// Try multiple extraction strategies to parse text as an AnalysisResponse.
-fn try_parse_strategies(text: &str) -> Option<Vec<PatternUpdate>> {
-    // Strategy 1: Direct JSON parse
-    if let Ok(response) = serde_json::from_str::<AnalysisResponse>(text) {
-        return Some(response.patterns);
-    }
-
-    // Strategy 2: Strip leading code fences (```json ... ```)
-    if text.starts_with("```") {
-        let stripped = crate::util::strip_code_fences(text);
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&stripped) {
-            return Some(response.patterns);
-        }
-    }
-
-    // Strategy 3: Find a code-fenced JSON block embedded in prose
-    if let Some(json) = extract_fenced_json(text) {
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
-            return Some(response.patterns);
-        }
-    }
-
-    // Strategy 4: Find a bare JSON object containing "patterns" in the text
-    if let Some(json) = extract_json_object(text) {
-        if let Ok(response) = serde_json::from_str::<AnalysisResponse>(&json) {
-            return Some(response.patterns);
-        }
-    }
-
-    None
-}
-
-/// Extract JSON from a ```json ... ``` block embedded anywhere in the text.
-fn extract_fenced_json(text: &str) -> Option<String> {
-    // Find ```json or ``` followed by a JSON block
-    let fence_start = text.find("```json").or_else(|| {
-        // Look for ``` followed by { on the next line
-        text.find("```\n{")
+    let response: AnalysisResponse = serde_json::from_str(trimmed).map_err(|e| {
+        CoreError::Analysis(format!(
+            "failed to parse AI response as JSON: {e}\nresponse text: {}",
+            truncate_for_error(text, 1500)
+        ))
     })?;
-
-    let content_start = text[fence_start..].find('\n')? + fence_start + 1;
-    let remaining = &text[content_start..];
-    let fence_end = remaining.find("\n```")?;
-    let json = remaining[..fence_end].trim();
-
-    if json.starts_with('{') {
-        Some(json.to_string())
-    } else {
-        None
-    }
-}
-
-/// Extract a JSON object containing "patterns" from prose text.
-/// Finds the outermost `{...}` that contains `"patterns"`.
-fn extract_json_object(text: &str) -> Option<String> {
-    // Look for {"patterns" as a strong signal
-    let start = text.find("{\"patterns\"")?;
-    let rest = &text[start..];
-
-    // Walk forward tracking brace depth to find the matching close
-    let mut depth = 0;
-    let mut end = 0;
-    for (i, ch) in rest.char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = i + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if end > 0 {
-        Some(rest[..end].to_string())
-    } else {
-        None
-    }
-}
-
-/// Escape literal control characters inside JSON string values.
-/// AI models sometimes put raw newlines/tabs in JSON strings instead of \n/\t.
-/// JSON spec requires control characters (U+0000–U+001F) to be escaped.
-fn sanitize_json_strings(json: &str) -> String {
-    let mut result = String::with_capacity(json.len());
-    let mut in_string = false;
-    let mut prev_backslash = false;
-
-    for ch in json.chars() {
-        if in_string {
-            if prev_backslash {
-                // Previous char was \, this char is the escape sequence — pass through
-                result.push(ch);
-                prev_backslash = false;
-                continue;
-            }
-            if ch == '\\' {
-                result.push(ch);
-                prev_backslash = true;
-                continue;
-            }
-            if ch == '"' {
-                in_string = false;
-                result.push(ch);
-                continue;
-            }
-            // Escape literal control characters inside strings
-            match ch {
-                '\n' => result.push_str("\\n"),
-                '\r' => result.push_str("\\r"),
-                '\t' => result.push_str("\\t"),
-                c if c.is_control() => {
-                    // Escape other control chars as \uXXXX
-                    result.push_str(&format!("\\u{:04x}", c as u32));
-                }
-                _ => result.push(ch),
-            }
-        } else {
-            if ch == '"' {
-                in_string = true;
-            }
-            result.push(ch);
-            prev_backslash = false;
-        }
-    }
-
-    result
+    Ok(response.patterns)
 }
 
 fn truncate_for_error(s: &str, max: usize) -> &str {
@@ -412,29 +283,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_analysis_response_markdown_wrapped() {
-        let text = r#"```json
-{
-    "patterns": [
-        {
-            "action": "new",
-            "pattern_type": "recurring_mistake",
-            "description": "Agent forgets to run tests",
-            "confidence": 0.75,
-            "source_sessions": [],
-            "related_files": [],
-            "suggested_content": "Run tests after changes",
-            "suggested_target": "skill"
-        }
-    ]
-}
-```"#;
-
-        let updates = parse_analysis_response(text).unwrap();
-        assert_eq!(updates.len(), 1);
-    }
-
-    #[test]
     fn test_parse_analysis_response_null_fields() {
         let json = r#"{
             "patterns": [
@@ -467,49 +315,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_analysis_response_prose_with_fenced_json() {
-        let text = r#"I'll analyze these sessions to discover recurring patterns.
-
-**Session Analysis:**
-
-1. Session A - User asks to run tests
-2. Session B - User asks to run tests again
-
-Based on my analysis:
-
-```json
-{
-    "patterns": [
-        {
-            "action": "new",
-            "pattern_type": "repetitive_instruction",
-            "description": "User always runs tests before committing",
-            "confidence": 0.8,
-            "source_sessions": ["sess-a", "sess-b"],
-            "related_files": [],
-            "suggested_content": "Always run tests before committing",
-            "suggested_target": "claude_md"
-        }
-    ]
-}
-```"#;
-
-        let updates = parse_analysis_response(text).unwrap();
-        assert_eq!(updates.len(), 1);
-        assert!(matches!(&updates[0], PatternUpdate::New(_)));
-    }
-
-    #[test]
-    fn test_parse_analysis_response_prose_with_bare_json() {
-        let text = r#"After analyzing the sessions, here are the patterns:
-
-{"patterns": [{"action": "new", "pattern_type": "repetitive_instruction", "description": "Test pattern", "confidence": 0.7, "source_sessions": ["s1", "s2"], "related_files": [], "suggested_content": "Do the thing", "suggested_target": "claude_md"}]}"#;
-
-        let updates = parse_analysis_response(text).unwrap();
-        assert_eq!(updates.len(), 1);
-    }
-
-    #[test]
     fn test_parse_analysis_response_pure_prose_fails() {
         let text = "I analyzed the sessions but found no recurring patterns worth reporting.";
         let result = parse_analysis_response(text);
@@ -517,23 +322,10 @@ Based on my analysis:
     }
 
     #[test]
-    fn test_parse_analysis_response_literal_newlines_in_strings() {
-        // Simulate what the AI produces: JSON with literal newlines inside string values
-        // (e.g., suggested_content with multi-line instructions)
-        let text = "```json\n{\n  \"patterns\": [\n    {\n      \"action\": \"new\",\n      \"pattern_type\": \"workflow_pattern\",\n      \"description\": \"User does X across sessions\",\n      \"confidence\": 0.75,\n      \"source_sessions\": [\"s1\", \"s2\"],\n      \"related_files\": [],\n      \"suggested_content\": \"Step 1: do this\nStep 2: do that\nStep 3: finish\",\n      \"suggested_target\": \"skill\"\n    }\n  ]\n}\n```";
-        let result = parse_analysis_response(text);
-        assert!(result.is_ok(), "Parser should handle literal newlines in JSON string values");
+    fn test_analysis_response_schema_is_valid_json() {
+        let value: serde_json::Value = serde_json::from_str(ANALYSIS_RESPONSE_SCHEMA)
+            .expect("ANALYSIS_RESPONSE_SCHEMA must be valid JSON");
+        assert_eq!(value["type"], "object");
+        assert!(value["properties"]["patterns"].is_object());
     }
-
-    #[test]
-    fn test_parse_analysis_response_embedded_code_fences_in_strings() {
-        // AI generates suggested_content with markdown code blocks AND literal newlines.
-        // The embedded ``` inside the string confuses fence-stripping, truncating the JSON.
-        // This is the exact failure mode: strip_code_fences sees ```bash as the closing
-        // fence and stops, yielding truncated JSON.
-        let text = "```json\n{\n  \"patterns\": [\n    {\n      \"action\": \"new\",\n      \"pattern_type\": \"workflow_pattern\",\n      \"description\": \"User uses uv for Python deps\",\n      \"confidence\": 0.8,\n      \"source_sessions\": [\"s1\"],\n      \"related_files\": [\"pyproject.toml\"],\n      \"suggested_content\": \"Always use uv for dependency management:\n```bash\nuv add package-name\nuv lock\n```\nNever use pip install directly.\",\n      \"suggested_target\": \"claude_md\"\n    }\n  ]\n}\n```";
-        let result = parse_analysis_response(text);
-        assert!(result.is_ok(), "Parser should handle embedded code fences inside JSON string values: {:?}", result.err());
-    }
-
 }
