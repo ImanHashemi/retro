@@ -127,3 +127,24 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 ## Full Plan
 
 See `PLAN.md` for the complete implementation plan with database schema, CLI commands, session JSONL format details, prompt strategy, and phased implementation steps.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- Always run tests before committing changes
+- CRITICAL: Never claim a fix works, a bug is resolved, or tests pass without actually running the verification commands yourself first. User feedback shows this is a recurring issue.
+
+Before claiming success:
+1. Run the actual commands (cargo test, retro analyze, scenario tests)
+2. Verify the output shows success
+3. Only then report that the fix works
+
+Evidence before assertions. Always.
+- Always run comprehensive regression tests before claiming work is complete:
+1. Run all scenario tests (not just unit tests)
+2. Perform a clean analyze run on a test repository
+3. Verify no regressions were introduced
+
+This is mandatory before PRs and version bumps.
+
+<!-- retro:managed:end -->
