@@ -21,7 +21,7 @@ Cargo workspace with two crates:
 - **No git2 crate** — shell out to `git` and `gh` directly.
 - **SQLite bundled** — `rusqlite` with `bundled` feature. WAL mode always.
 - **Error handling** — `thiserror` in retro-core, `anyhow` in retro-cli.
-- **AI backend** — sync `AnalysisBackend` trait with `json_schema: Option<&str>` parameter. Primary impl: `claude -p - --output-format json` (prompt piped via stdin). JSON-producing calls pass `--json-schema` for constrained decoding (guaranteed valid JSON). YAML-producing calls (skill/agent generation) pass `None`.
+- **AI backend** — sync `AnalysisBackend` trait with `json_schema: Option<&str>` parameter. Primary impl: `claude -p - --output-format json` (prompt piped via stdin). JSON-producing calls pass `--json-schema` for constrained decoding (guaranteed valid JSON). YAML-producing calls (skill/agent generation) pass `None`. **CLI quirks**: `--json-schema` requires `--max-turns 2` (uses internal tool call), puts output in `structured_output` field (not `result`), and conflicts with `--tools ""`.
 - **CLAUDE.md protection** — only write within `<!-- retro:managed:start/end -->` delimiters, never touch user content.
 - **MEMORY.md** — read-only input, never write. Claude Code owns it.
 - **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
@@ -90,7 +90,7 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 - Git hook format: marker comment (`# retro hook - do not remove`) + command on next line; removal is line-pair based; `install_hook_lines` returns `HookInstallResult` (Installed/Updated/UpToDate)
 - Hook stderr: `2>>~/.retro/hook-stderr.log` (not `/dev/null`) — captures parse warnings, panics. `retro init` truncates it. `retro init` also updates existing hooks to new redirect format (remove+re-add)
 - Two-phase apply execution: personal actions on current branch, shared actions on a new `retro/updates-{YYYYMMDD-HHMMSS}` branch
-- Claude CLI JSON output nests token counts inside `usage` object — never assume top-level fields exist (use nested struct with `#[serde(default)]`)
+- Claude CLI JSON output nests token counts inside `usage` object — never assume top-level fields exist (use nested struct with `#[serde(default)]`). With `--json-schema`, structured output appears in `structured_output` field (parsed JSON), not `result` (empty string) — `ClaudeCliOutput` checks `structured_output` first, serializes to string, falls back to `result`
 - `--dry-run` on all AI commands must skip AI calls entirely — snapshot context, show summary, return early (not just suppress writes)
 - Test strategy: unit tests with fixtures (no AI), integration tests with `MockBackend`
 - Auto-mode orchestration: `ingest --auto` chains analyze and apply when `auto_apply=true` and data triggers + cooldowns are satisfied
