@@ -36,8 +36,7 @@ impl AnalysisBackend for ClaudeCliBackend {
         // --tools "" disables all tool use — we only need a plain JSON response,
         // and agent-mode tool planning can consume output tokens causing truncation.
         // When --json-schema is used, the CLI needs at least 2 turns
-        // (internally uses a tool call), and --tools "" must be omitted
-        // to avoid conflicting with constrained decoding.
+        // (internally uses a tool call for constrained decoding).
         let max_turns = if json_schema.is_some() { "2" } else { "1" };
         let mut args = vec![
             "-p",
@@ -48,14 +47,12 @@ impl AnalysisBackend for ClaudeCliBackend {
             &self.model,
             "--max-turns",
             max_turns,
+            "--tools",
+            "",
         ];
         if let Some(schema) = json_schema {
             args.push("--json-schema");
             args.push(schema);
-        } else {
-            // Only disable tools when not using --json-schema
-            args.push("--tools");
-            args.push("");
         }
         let mut child = Command::new("claude")
             .args(&args)

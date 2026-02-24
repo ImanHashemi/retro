@@ -21,7 +21,7 @@ Cargo workspace with two crates:
 - **No git2 crate** — shell out to `git` and `gh` directly.
 - **SQLite bundled** — `rusqlite` with `bundled` feature. WAL mode always.
 - **Error handling** — `thiserror` in retro-core, `anyhow` in retro-cli.
-- **AI backend** — sync `AnalysisBackend` trait with `json_schema: Option<&str>` parameter. Primary impl: `claude -p - --output-format json` (prompt piped via stdin). JSON-producing calls pass `--json-schema` for constrained decoding (guaranteed valid JSON). YAML-producing calls (skill/agent generation) pass `None`. **CLI quirks**: `--json-schema` requires `--max-turns 2` (uses internal tool call), puts output in `structured_output` field (not `result`), and conflicts with `--tools ""`.
+- **AI backend** — sync `AnalysisBackend` trait with `json_schema: Option<&str>` parameter. Primary impl: `claude -p - --output-format json --tools ""` (prompt piped via stdin). `--tools ""` always passed to prevent agent-mode tool calls consuming turns/tokens. JSON-producing calls pass `--json-schema` for constrained decoding (guaranteed valid JSON). YAML-producing calls (skill/agent generation) pass `None`. **CLI quirks**: `--json-schema` requires `--max-turns 2` (uses internal tool call for constrained decoding) and puts output in `structured_output` field (not `result`).
 - **CLAUDE.md protection** — only write within `<!-- retro:managed:start/end -->` delimiters, never touch user content.
 - **MEMORY.md** — read-only input, never write. Claude Code owns it.
 - **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
