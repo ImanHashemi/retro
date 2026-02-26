@@ -81,10 +81,16 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
             Some(git_root_or_cwd()?)
         };
 
-        // Check claude CLI availability
+        // Check claude CLI availability and auth
         if !ClaudeCliBackend::is_available() {
             if verbose {
                 eprintln!("[verbose] skipping apply: claude CLI not available");
+            }
+            return Ok(());
+        }
+        if let Err(e) = ClaudeCliBackend::check_auth() {
+            if verbose {
+                eprintln!("[verbose] skipping apply: {e}");
             }
             return Ok(());
         }
@@ -159,10 +165,11 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
         Some(git_root_or_cwd()?)
     };
 
-    // Check claude CLI availability (needed for skill/agent generation)
+    // Check claude CLI availability and auth (needed for skill/agent generation)
     if !ClaudeCliBackend::is_available() {
         anyhow::bail!("claude CLI not found on PATH. Install Claude Code CLI to generate skills.");
     }
+    ClaudeCliBackend::check_auth()?;
 
     let backend = ClaudeCliBackend::new(&config.ai);
 

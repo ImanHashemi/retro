@@ -3,6 +3,7 @@ use crate::models::{
 };
 
 const MAX_USER_MSG_LEN: usize = 500;
+const MAX_USER_MSGS_PER_SESSION: usize = 300;
 const MAX_PROMPT_CHARS: usize = 150_000;
 const MAX_CONTEXT_SUMMARY_CHARS: usize = 5_000;
 
@@ -325,6 +326,7 @@ fn to_compact_session(session: &Session) -> CompactSession {
     let user_messages: Vec<CompactUserMessage> = session
         .user_messages
         .iter()
+        .take(MAX_USER_MSGS_PER_SESSION)
         .map(|m| CompactUserMessage {
             text: truncate_str(&m.text, MAX_USER_MSG_LEN),
             timestamp: m.timestamp.clone(),

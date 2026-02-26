@@ -1,9 +1,14 @@
 use crate::config::AiConfig;
 use crate::errors::CoreError;
 use crate::models::ClaudeCliOutput;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 use super::backend::{AnalysisBackend, BackendResponse};
+
+/// Maximum time to wait for a single `claude -p` call before killing it.
+const EXECUTE_TIMEOUT_SECS: u64 = 300; // 5 minutes
 
 /// AI backend that spawns `claude -p` in non-interactive mode.
 pub struct ClaudeCliBackend {
@@ -27,6 +32,41 @@ impl ClaudeCliBackend {
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
+    }
+
+    /// Pre-flight auth check: sends a minimal prompt WITHOUT --json-schema
+    /// (which returns immediately on auth failure) and checks is_error.
+    /// This prevents the infinite StructuredOutput retry loop that occurs
+    /// when --json-schema is used with an expired/missing auth token.
+    pub fn check_auth() -> Result<(), CoreError> {
+        let output = Command::new("claude")
+            .args(["-p", "ping", "--output-format", "json", "--max-turns", "1", "--tools", ""])
+            .env_remove("CLAUDECODE")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .map_err(|e| CoreError::Analysis(format!("auth check failed to spawn: {e}")))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(cli_output) = serde_json::from_str::<ClaudeCliOutput>(&stdout) {
+            if cli_output.is_error {
+                let msg = cli_output.result.unwrap_or_default();
+                return Err(CoreError::Analysis(format!(
+                    "claude CLI auth failed: {msg}"
+                )));
+            }
+        } else if !output.status.success() {
+            // Couldn't parse JSON — fall back to checking stderr/stdout for auth errors
+            let all_output = format!("{}{}", stdout, String::from_utf8_lossy(&output.stderr));
+            if all_output.contains("Not logged in") || all_output.contains("/login") {
+                return Err(CoreError::Analysis(
+                    "claude CLI is not authenticated. Run `claude /login` first.".to_string()
+                ));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -87,19 +127,64 @@ impl AnalysisBackend for ClaudeCliBackend {
             // stdin is dropped here, closing the pipe
         }
 
-        let output = child
-            .wait_with_output()
-            .map_err(|e| CoreError::Analysis(format!("claude CLI execution failed: {e}")))?;
+        // Read stdout/stderr in background threads to prevent pipe deadlock,
+        // then poll the child with a timeout to kill runaway processes
+        // (e.g., the CLI's internal StructuredOutput retry loop).
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout_handle = thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = stdout_pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            buf
+        });
+        let stderr_handle = thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = stderr_pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            buf
+        });
+
+        let timeout = Duration::from_secs(EXECUTE_TIMEOUT_SECS);
+        let start = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {
+                    if start.elapsed() > timeout {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(CoreError::Analysis(format!(
+                            "claude CLI timed out after {}s — killed process. \
+                             This may indicate a StructuredOutput retry loop in the CLI.",
+                            EXECUTE_TIMEOUT_SECS
+                        )));
+                    }
+                    thread::sleep(Duration::from_millis(500));
+                }
+                Err(e) => {
+                    return Err(CoreError::Analysis(format!(
+                        "error waiting for claude CLI: {e}"
+                    )));
+                }
+            }
+        };
+
+        let stdout_bytes = stdout_handle.join().unwrap_or_default();
+        let stderr_bytes = stderr_handle.join().unwrap_or_default();
+
+        if !status.success() {
+            let stderr = String::from_utf8_lossy(&stderr_bytes);
             return Err(CoreError::Analysis(format!(
                 "claude CLI exited with {}: {}",
-                output.status, stderr
+                status, stderr
             )));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = String::from_utf8_lossy(&stdout_bytes);
 
         // Parse the JSON wrapper
         let cli_output: ClaudeCliOutput = serde_json::from_str(&stdout).map_err(|e| {
