@@ -59,26 +59,26 @@ After `retro init`, a post-commit hook runs the full pipeline in the background 
 Retro operates as a three-stage pipeline:
 
 ```
-  ┌─────────────────────────────────────────────┐
-  │  INGESTION (pure Rust, no AI)               │
-  │  Reads Claude Code session history          │
-  │  Parses into structured sessions in SQLite  │
-  └────────────────┬────────────────────────────┘
+  ┌──────────────────────────────────────────────┐
+  │  INGESTION (pure Rust, no AI)                │
+  │  Reads Claude Code session history           │
+  │  Parses into structured sessions in SQLite   │
+  └────────────────┬─────────────────────────────┘
                    │
-  ┌────────────────▼────────────────────────────┐
-  │  ANALYSIS (AI-powered)                      │
-  │  Discovers: repeated instructions,          │
-  │  recurring mistakes, workflow patterns,     │
-  │  explicit directives ("always"/"never")     │
-  │  Stores patterns with confidence scores     │
-  └────────────────┬────────────────────────────┘
+  ┌────────────────▼─────────────────────────────┐
+  │  ANALYSIS (AI-powered)                       │
+  │  Discovers: repeated instructions,           │
+  │  recurring mistakes, workflow patterns,      │
+  │  explicit directives ("always"/"never")      │
+  │  Stores patterns with confidence scores      │
+  └────────────────┬─────────────────────────────┘
                    │
-  ┌────────────────▼────────────────────────────┐
+  ┌────────────────▼─────────────────────────────┐
   │  PROJECTION (two-track, via review queue)    │
   │  Personal: global agents (apply after review)│
-  │  Shared: CLAUDE.md rules, skills (PR after  │
+  │  Shared: CLAUDE.md rules, skills (PR after   │
   │  review)                                     │
-  └─────────────────────────────────────────────┘
+  └──────────────────────────────────────────────┘
 ```
 
 - **Ingestion** is fast and runs on every commit via git hooks. No AI calls, just parsing.
