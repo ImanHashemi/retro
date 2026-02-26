@@ -64,12 +64,17 @@ pub fn analyze<F>(
 where
     F: Fn(usize, usize, usize, usize),
 {
-    // Check claude CLI availability
+    // Check claude CLI availability and auth
     if !ClaudeCliBackend::is_available() {
         return Err(CoreError::Analysis(
             "claude CLI not found on PATH. Install Claude Code CLI to use analysis.".to_string(),
         ));
     }
+    // Pre-flight auth check: a minimal prompt without --json-schema returns immediately
+    // on auth failure. With --json-schema, auth errors cause an infinite StructuredOutput
+    // retry loop in the CLI (it keeps injecting "You MUST call StructuredOutput" but the
+    // auth error response is always plain text, never a tool call).
+    ClaudeCliBackend::check_auth()?;
 
     let since = Utc::now() - Duration::days(window_days as i64);
 
