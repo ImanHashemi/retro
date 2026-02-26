@@ -462,6 +462,8 @@ pub struct UpdateExisting {
 /// Top-level AI response wrapper.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResponse {
+    #[serde(default)]
+    pub reasoning: String,
     pub patterns: Vec<PatternUpdate>,
 }
 
@@ -475,9 +477,17 @@ pub struct ClaudeCliOutput {
     #[serde(default)]
     pub duration_ms: u64,
     #[serde(default)]
+    pub num_turns: u64,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
     pub usage: Option<CliUsage>,
+    /// When `--json-schema` is used, the structured output appears here
+    /// as a parsed JSON value rather than in `result`.
+    #[serde(default)]
+    pub structured_output: Option<serde_json::Value>,
 }
 
 /// Token usage from Claude CLI output (nested inside `usage` field).
@@ -515,6 +525,21 @@ pub struct AuditEntry {
     pub details: serde_json::Value,
 }
 
+/// Per-batch analysis detail for diagnostics.
+#[derive(Debug, Clone)]
+pub struct BatchDetail {
+    pub batch_index: usize,
+    pub session_count: usize,
+    pub session_ids: Vec<String>,
+    pub prompt_chars: usize,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub new_patterns: usize,
+    pub updated_patterns: usize,
+    pub reasoning: String,
+    pub ai_response_preview: String,
+}
+
 /// Result of an analysis run.
 #[derive(Debug, Clone)]
 pub struct AnalyzeResult {
@@ -524,6 +549,7 @@ pub struct AnalyzeResult {
     pub total_patterns: usize,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub batch_details: Vec<BatchDetail>,
 }
 
 /// Compact session format for serialization to AI prompts.

@@ -31,23 +31,41 @@ impl ClaudeCliBackend {
 }
 
 impl AnalysisBackend for ClaudeCliBackend {
-    fn execute(&self, prompt: &str) -> Result<BackendResponse, CoreError> {
+    fn execute(&self, prompt: &str, json_schema: Option<&str>) -> Result<BackendResponse, CoreError> {
         // Pipe prompt via stdin to avoid ARG_MAX limits on large prompts.
-        // --tools "" disables all tool use — we only need a plain JSON response,
-        // and agent-mode tool planning can consume output tokens causing truncation.
+        //
+        // When --json-schema is used:
+        //   - --tools "" is omitted because it conflicts with the internal
+        //     constrained-decoding tool call on large prompts.
+        //   - --max-turns 5 gives the model room for tool calls (which it
+        //     sometimes makes when tools aren't disabled) plus the final
+        //     structured output turn. With --max-turns 2, the model
+        //     intermittently exhausts turns on tool calls before producing
+        //     structured_output, leaving both result and structured_output empty.
+        //
+        // When --json-schema is NOT used:
+        //   - --tools "" disables all tool use (we only need a plain response).
+        //   - --max-turns 1 is sufficient since there are no tool calls.
+        let max_turns = if json_schema.is_some() { "5" } else { "1" };
+        let mut args = vec![
+            "-p",
+            "-",
+            "--output-format",
+            "json",
+            "--model",
+            &self.model,
+            "--max-turns",
+            max_turns,
+        ];
+        if let Some(schema) = json_schema {
+            args.push("--json-schema");
+            args.push(schema);
+        } else {
+            args.push("--tools");
+            args.push("");
+        }
         let mut child = Command::new("claude")
-            .args([
-                "-p",
-                "-",
-                "--output-format",
-                "json",
-                "--model",
-                &self.model,
-                "--max-turns",
-                "1",
-                "--tools",
-                "",
-            ])
+            .args(&args)
             // Clear CLAUDECODE to avoid nested-session rejection when retro
             // is invoked from a post-commit hook inside a Claude Code session.
             .env_remove("CLAUDECODE")
@@ -102,13 +120,19 @@ impl AnalysisBackend for ClaudeCliBackend {
         let input_tokens = cli_output.total_input_tokens();
         let output_tokens = cli_output.total_output_tokens();
 
+        // When --json-schema is used, the structured JSON appears in
+        // `structured_output` (as a parsed JSON value) rather than `result`.
+        // Serialize it back to a string for downstream parsing.
         let result_text = cli_output
-            .result
+            .structured_output
+            .map(|v| serde_json::to_string(&v).unwrap_or_default())
             .filter(|s| !s.is_empty())
+            .or_else(|| cli_output.result.filter(|s| !s.is_empty()))
             .ok_or_else(|| {
                 CoreError::Analysis(format!(
-                    "claude CLI returned empty result (is_error={}, duration_ms={}, tokens_in={}, tokens_out={})",
+                    "claude CLI returned empty result (is_error={}, num_turns={}, duration_ms={}, tokens_in={}, tokens_out={})",
                     cli_output.is_error,
+                    cli_output.num_turns,
                     cli_output.duration_ms,
                     input_tokens,
                     output_tokens,

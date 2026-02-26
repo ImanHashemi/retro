@@ -191,6 +191,37 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, ver
     });
     audit_log::append(&audit_path, "analyze", audit_details)?;
 
+    // Print per-batch details
+    if !result.batch_details.is_empty() {
+        let total_batches = result.batch_details.len();
+        println!();
+        for bd in &result.batch_details {
+            println!(
+                "  Batch {}/{}: {} sessions, {}K chars \u{2192} {} tokens out, {} new + {} updated",
+                bd.batch_index + 1,
+                total_batches,
+                bd.session_count,
+                bd.prompt_chars / 1000,
+                bd.output_tokens,
+                bd.new_patterns.to_string().green(),
+                bd.updated_patterns.to_string().yellow(),
+            );
+            if !bd.reasoning.is_empty() {
+                let reasoning_display = if verbose {
+                    bd.reasoning.clone()
+                } else {
+                    util::truncate_str(&bd.reasoning, 200).to_string()
+                };
+                println!("    {}", reasoning_display.dimmed());
+            }
+            if verbose {
+                let ids: Vec<&str> = bd.session_ids.iter().map(|s| util::truncate_str(s, 8)).collect();
+                eprintln!("  [verbose] sessions: {}", ids.join(", "));
+                eprintln!("  [verbose] AI response: {}", bd.ai_response_preview);
+            }
+        }
+    }
+
     // Print results
     println!();
     println!("{}", "Analysis complete!".green().bold());
