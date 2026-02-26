@@ -475,6 +475,10 @@ pub struct ClaudeCliOutput {
     #[serde(default)]
     pub duration_ms: u64,
     #[serde(default)]
+    pub num_turns: u64,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
     pub usage: Option<CliUsage>,
