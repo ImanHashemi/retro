@@ -127,3 +127,32 @@ Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubunt
 ## Full Plan
 
 See `PLAN.md` for the complete implementation plan with database schema, CLI commands, session JSONL format details, prompt strategy, and phased implementation steps.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- ## Debugging Philosophy
+
+- When encountering failures, systematically reproduce the issue multiple times before proposing fixes
+- Add diagnostic logging to understand what's actually happening, not what you think is happening
+- Test proposed fixes thoroughly before committing
+- Prefer one elegant solution over multiple fallback workarounds
+- Don't guess at fixes - prove the root cause first through data and observation
+- When fixing bugs, run tests multiple times (3-5 iterations minimum) to confirm the fix is reliable and not just lucky. Do not claim success after a single passing test - bugs can be intermittent. Document the test results across iterations.
+- Always run tests before committing changes
+- When parsing AI responses containing JSON with markdown-formatted string values (like `suggested_content` fields with code fences), use specialized parsing that distinguishes between outer JSON delimiters and embedded markdown syntax. Consider using JSON schema-based structured outputs (e.g., `--json-schema` with Claude CLI) to eliminate parsing ambiguity entirely.
+- When implementing tests, always create comprehensive end-to-end tests that execute real functionality including AI calls. Do not rely solely on unit tests, mocked tests, or tests that just verify code structure. User expects tests to actually run the full pipeline and catch real issues.
+- Comprehensive end-to-end testing: Tests must execute real functionality including actual AI calls, not just mocked behavior. When implementing fixes, create tests that 'close the loop' by running the full pipeline multiple times to verify actual behavior, not just code structure.
+- ## Scenario Test Requirements
+
+When adding features that involve AI analysis (like `retro analyze`):
+- Create scenario tests that execute the full pipeline including real AI calls
+- Don't rely only on dry-run or mocked tests for AI-powered features
+- Test the actual integration, not just the happy path
+- A feature isn't complete until scenario tests validate the full execution path
+- When debugging issues: run actual commands multiple times to reproduce problems and observe patterns before proposing fixes. Do not guess at solutions or implement workarounds without confirming root cause through empirical testing.
+- When encountering bugs or unexpected behavior, always investigate the root cause systematically before proposing fixes. Avoid quick workarounds or surface-level solutions. The user values understanding WHY something broke over simply making it work again.
+- Add scenario tests that execute full end-to-end flows including real AI calls when the feature being tested fundamentally involves AI behavior. Mock tests alone are insufficient for validating AI integration correctness.
+- Before force-pushing to a PR branch, verify: 1) Only intended commits are included (check git log), 2) Only intended files are modified (check git diff), 3) No extra or unrelated changes snuck in. Ask user for confirmation if anything looks unexpected.
+
+<!-- retro:managed:end -->
