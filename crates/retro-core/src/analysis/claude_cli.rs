@@ -64,6 +64,10 @@ impl ClaudeCliBackend {
                     "claude CLI is not authenticated. Run `claude /login` first.".to_string()
                 ));
             }
+            return Err(CoreError::Analysis(format!(
+                "claude CLI auth check failed with exit code {}: {}",
+                output.status, all_output.trim()
+            )));
         }
 
         Ok(())
