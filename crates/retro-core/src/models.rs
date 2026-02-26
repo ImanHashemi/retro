@@ -462,6 +462,8 @@ pub struct UpdateExisting {
 /// Top-level AI response wrapper.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResponse {
+    #[serde(default)]
+    pub reasoning: String,
     pub patterns: Vec<PatternUpdate>,
 }
 
@@ -523,6 +525,21 @@ pub struct AuditEntry {
     pub details: serde_json::Value,
 }
 
+/// Per-batch analysis detail for diagnostics.
+#[derive(Debug, Clone)]
+pub struct BatchDetail {
+    pub batch_index: usize,
+    pub session_count: usize,
+    pub session_ids: Vec<String>,
+    pub prompt_chars: usize,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub new_patterns: usize,
+    pub updated_patterns: usize,
+    pub reasoning: String,
+    pub ai_response_preview: String,
+}
+
 /// Result of an analysis run.
 #[derive(Debug, Clone)]
 pub struct AnalyzeResult {
@@ -532,6 +549,7 @@ pub struct AnalyzeResult {
     pub total_patterns: usize,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub batch_details: Vec<BatchDetail>,
 }
 
 /// Compact session format for serialization to AI prompts.

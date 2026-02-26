@@ -196,10 +196,11 @@ When in doubt, prefer "update" over "new" — duplicate patterns are worse than 
 
 ## Response Format
 
-Return a JSON object with a "patterns" array. Each element is either a new pattern or an update to an existing one:
+Return a JSON object with a "reasoning" string and a "patterns" array. Begin with a "reasoning" field: a 1-2 sentence summary of what you observed across the sessions and why you did or didn't find patterns. Each element of the "patterns" array is either a new pattern or an update to an existing one:
 
 ```json
 {{
+  "reasoning": "Sessions contained mostly one-off bug fixes with no recurring themes. One explicit directive about testing was found.",
   "patterns": [
     {{
       "action": "new",
@@ -229,7 +230,7 @@ Important:
 - For `suggested_content`, write the actual rule or instruction as it should appear in the target
 - CRITICAL: Do not create duplicate patterns. Two patterns about the same underlying behavior are duplicates even if described differently. Always check existing patterns for semantic overlap, not just textual similarity.
 - Do not suggest skills or rules that duplicate installed plugin functionality
-- CRITICAL: Return ONLY the raw JSON object. No prose, no explanation, no markdown formatting, no commentary before or after. Your entire response must be parseable as a single JSON object starting with {{ and ending with }}. If no patterns found, return {{"patterns": []}}"#
+- CRITICAL: Return ONLY the raw JSON object. No prose, no explanation, no markdown formatting, no commentary before or after. Your entire response must be parseable as a single JSON object starting with {{ and ending with }}. If no patterns found, return {{"reasoning": "your observation summary", "patterns": []}}"#
     );
 
     prompt

@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::db;
 use crate::errors::CoreError;
 use crate::ingest::{context, session};
-use crate::models::{AnalysisResponse, AnalyzeResult, PatternUpdate};
+use crate::models::{AnalysisResponse, AnalyzeResult, BatchDetail};
 use crate::scrub;
 use chrono::{Duration, Utc};
 use rusqlite::Connection;
@@ -24,6 +24,7 @@ pub const BATCH_SIZE: usize = 20;
 pub const ANALYSIS_RESPONSE_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {
+    "reasoning": {"type": "string"},
     "patterns": {
       "type": "array",
       "items": {
@@ -46,7 +47,7 @@ pub const ANALYSIS_RESPONSE_SCHEMA: &str = r#"{
       }
     }
   },
-  "required": ["patterns"],
+  "required": ["reasoning", "patterns"],
   "additionalProperties": false
 }"#;
 
@@ -79,6 +80,7 @@ pub fn analyze(
             total_patterns: 0,
             input_tokens: 0,
             output_tokens: 0,
+            batch_details: Vec::new(),
         });
     }
 
@@ -139,6 +141,7 @@ pub fn analyze(
             total_patterns: 0,
             input_tokens: 0,
             output_tokens: 0,
+            batch_details: Vec::new(),
         });
     }
 
@@ -158,32 +161,40 @@ pub fn analyze(
     let mut total_output_tokens: u64 = 0;
     let mut new_count = 0;
     let mut update_count = 0;
+    let mut batch_details: Vec<BatchDetail> = Vec::new();
 
     // Process in batches
-    for batch in parsed_sessions.chunks(BATCH_SIZE) {
+    for (batch_idx, batch) in parsed_sessions.chunks(BATCH_SIZE).enumerate() {
         // Reload existing patterns before each batch (picks up patterns from prior batches)
         let existing = db::get_patterns(conn, &["discovered", "active"], project)?;
 
         // Build prompt
         let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref());
+        let prompt_chars = prompt.len();
 
         // Call AI backend
         let response = backend.execute(&prompt, Some(ANALYSIS_RESPONSE_SCHEMA))?;
         total_input_tokens += response.input_tokens;
         total_output_tokens += response.output_tokens;
 
-        // Parse AI response into PatternUpdate objects
-        let updates = parse_analysis_response(&response.text).map_err(|e| {
+        // Parse AI response into AnalysisResponse (reasoning + pattern updates)
+        let analysis_resp = parse_analysis_response(&response.text).map_err(|e| {
             CoreError::Analysis(format!(
                 "{e}\n(prompt_chars={}, output_tokens={}, result_chars={})",
-                prompt.len(),
+                prompt_chars,
                 response.output_tokens,
                 response.text.len()
             ))
         })?;
 
+        let reasoning = analysis_resp.reasoning;
+
         // Apply merge logic
-        let (new_patterns, merge_updates) = merge::process_updates(updates, &existing, project);
+        let (new_patterns, merge_updates) =
+            merge::process_updates(analysis_resp.patterns, &existing, project);
+
+        let batch_new = new_patterns.len();
+        let batch_updated = merge_updates.len();
 
         // Store new patterns
         for pattern in &new_patterns {
@@ -203,6 +214,21 @@ pub fn analyze(
             )?;
             update_count += 1;
         }
+
+        // Collect per-batch diagnostics
+        let preview = truncate_for_error(&response.text, 500).to_string();
+        batch_details.push(BatchDetail {
+            batch_index: batch_idx,
+            session_count: batch.len(),
+            session_ids: batch.iter().map(|s| s.session_id.clone()).collect(),
+            prompt_chars,
+            input_tokens: response.input_tokens,
+            output_tokens: response.output_tokens,
+            new_patterns: batch_new,
+            updated_patterns: batch_updated,
+            reasoning,
+            ai_response_preview: preview,
+        });
     }
 
     // Record all sessions as analyzed
@@ -221,12 +247,13 @@ pub fn analyze(
         total_patterns: (discovered + active) as usize,
         input_tokens: total_input_tokens,
         output_tokens: total_output_tokens,
+        batch_details,
     })
 }
 
-/// Parse the AI response text into pattern updates.
+/// Parse the AI response text into an AnalysisResponse (reasoning + pattern updates).
 /// With `--json-schema` constrained decoding, the response is guaranteed valid JSON.
-fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> {
+fn parse_analysis_response(text: &str) -> Result<AnalysisResponse, CoreError> {
     let trimmed = text.trim();
     let response: AnalysisResponse = serde_json::from_str(trimmed).map_err(|e| {
         CoreError::Analysis(format!(
@@ -234,7 +261,7 @@ fn parse_analysis_response(text: &str) -> Result<Vec<PatternUpdate>, CoreError> 
             truncate_for_error(text, 1500)
         ))
     })?;
-    Ok(response.patterns)
+    Ok(response)
 }
 
 fn truncate_for_error(s: &str, max: usize) -> &str {
@@ -252,10 +279,12 @@ fn truncate_for_error(s: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::PatternUpdate;
 
     #[test]
     fn test_parse_analysis_response_json() {
         let json = r#"{
+            "reasoning": "Found recurring instruction across sessions.",
             "patterns": [
                 {
                     "action": "new",
@@ -276,15 +305,17 @@ mod tests {
             ]
         }"#;
 
-        let updates = parse_analysis_response(json).unwrap();
-        assert_eq!(updates.len(), 2);
-        assert!(matches!(&updates[0], PatternUpdate::New(_)));
-        assert!(matches!(&updates[1], PatternUpdate::Update(_)));
+        let resp = parse_analysis_response(json).unwrap();
+        assert_eq!(resp.reasoning, "Found recurring instruction across sessions.");
+        assert_eq!(resp.patterns.len(), 2);
+        assert!(matches!(&resp.patterns[0], PatternUpdate::New(_)));
+        assert!(matches!(&resp.patterns[1], PatternUpdate::Update(_)));
     }
 
     #[test]
     fn test_parse_analysis_response_null_fields() {
         let json = r#"{
+            "reasoning": "Observed a single pattern.",
             "patterns": [
                 {
                     "action": "new",
@@ -298,9 +329,9 @@ mod tests {
                 }
             ]
         }"#;
-        let updates = parse_analysis_response(json).unwrap();
-        assert_eq!(updates.len(), 1);
-        if let PatternUpdate::New(ref p) = updates[0] {
+        let resp = parse_analysis_response(json).unwrap();
+        assert_eq!(resp.patterns.len(), 1);
+        if let PatternUpdate::New(ref p) = resp.patterns[0] {
             assert_eq!(p.suggested_content, "");
         } else {
             panic!("expected New pattern");
@@ -309,9 +340,18 @@ mod tests {
 
     #[test]
     fn test_parse_analysis_response_empty() {
+        let json = r#"{"reasoning": "No recurring patterns found.", "patterns": []}"#;
+        let resp = parse_analysis_response(json).unwrap();
+        assert_eq!(resp.reasoning, "No recurring patterns found.");
+        assert!(resp.patterns.is_empty());
+    }
+
+    #[test]
+    fn test_parse_analysis_response_missing_reasoning_defaults_empty() {
         let json = r#"{"patterns": []}"#;
-        let updates = parse_analysis_response(json).unwrap();
-        assert!(updates.is_empty());
+        let resp = parse_analysis_response(json).unwrap();
+        assert_eq!(resp.reasoning, "");
+        assert!(resp.patterns.is_empty());
     }
 
     #[test]
