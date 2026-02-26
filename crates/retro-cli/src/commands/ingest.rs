@@ -160,7 +160,7 @@ pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
 
                     let window_days = config.analysis.window_days;
 
-                    match analysis::analyze(&conn, &config, project.as_deref(), window_days) {
+                    match analysis::analyze(&conn, &config, project.as_deref(), window_days, |_, _, _, _| {}) {
                         Ok(result) => {
                             if verbose {
                                 eprintln!(

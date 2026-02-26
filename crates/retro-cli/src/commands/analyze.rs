@@ -82,7 +82,7 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, ver
         }
 
         // Run analysis silently
-        match analysis::analyze(&conn, &config, project.as_deref(), window_days) {
+        match analysis::analyze(&conn, &config, project.as_deref(), window_days, |_, _, _, _| {}) {
             Ok(result) => {
                 if result.sessions_analyzed > 0 {
                     // Record audit log even in auto mode
@@ -166,7 +166,16 @@ pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, ver
         "This may take a minute (AI-powered analysis)...".dimmed()
     );
 
-    let result = analysis::analyze(&conn, &config, project.as_deref(), window_days)?;
+    let result = analysis::analyze(
+        &conn, &config, project.as_deref(), window_days,
+        |idx, total, sessions, chars| {
+            println!(
+                "  {} batch {}/{} ({} sessions, ~{}K chars)...",
+                "Processing".dimmed(),
+                idx + 1, total, sessions, chars / 1000
+            );
+        },
+    )?;
 
     if result.sessions_analyzed == 0 {
         println!(

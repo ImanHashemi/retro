@@ -30,6 +30,9 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     if !dry_run && !ClaudeCliBackend::is_available() {
         anyhow::bail!("claude CLI not found on PATH. Required for context audit.");
     }
+    if !dry_run {
+        ClaudeCliBackend::check_auth()?;
+    }
 
     let project = git_root_or_cwd()?;
 

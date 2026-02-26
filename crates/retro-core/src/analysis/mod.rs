@@ -52,12 +52,18 @@ pub const ANALYSIS_RESPONSE_SCHEMA: &str = r#"{
 }"#;
 
 /// Run analysis: re-parse sessions, scrub, call AI, merge patterns, store results.
-pub fn analyze(
+///
+/// `on_batch_start` is called before each AI call with (batch_index, total_batches, session_count, prompt_chars).
+pub fn analyze<F>(
     conn: &Connection,
     config: &Config,
     project: Option<&str>,
     window_days: u32,
-) -> Result<AnalyzeResult, CoreError> {
+    on_batch_start: F,
+) -> Result<AnalyzeResult, CoreError>
+where
+    F: Fn(usize, usize, usize, usize),
+{
     // Check claude CLI availability
     if !ClaudeCliBackend::is_available() {
         return Err(CoreError::Analysis(
@@ -164,6 +170,8 @@ pub fn analyze(
     let mut batch_details: Vec<BatchDetail> = Vec::new();
 
     // Process in batches
+    let total_batches = (parsed_sessions.len() + BATCH_SIZE - 1) / BATCH_SIZE;
+
     for (batch_idx, batch) in parsed_sessions.chunks(BATCH_SIZE).enumerate() {
         // Reload existing patterns before each batch (picks up patterns from prior batches)
         let existing = db::get_patterns(conn, &["discovered", "active"], project)?;
@@ -171,6 +179,8 @@ pub fn analyze(
         // Build prompt
         let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref());
         let prompt_chars = prompt.len();
+
+        on_batch_start(batch_idx, total_batches, batch.len(), prompt_chars);
 
         // Call AI backend
         let response = backend.execute(&prompt, Some(ANALYSIS_RESPONSE_SCHEMA))?;
