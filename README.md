@@ -2,11 +2,11 @@
 
 **Active context curator for AI coding agents.**
 
-Coding agents work best when their context is right: when they know your conventions, remember past mistakes, and have the skills to work efficiently on your projects. But curating that context is manual work that most people never do well.
+You've told your agent "always use uv, not pip" across a dozen sessions. You've corrected the same testing mistake three times this week. Your agent forgets everything between conversations, and you're the one doing the remembering.
 
-Retro runs retrospectives on your AI coding sessions. It analyzes your Claude Code conversation history, discovers patterns (repeated instructions, recurring mistakes, workflow conventions, explicit directives), and turns them into skills and CLAUDE.md rules automatically.
+Retro fixes this. It analyzes your Claude Code session history, discovers patterns (repeated instructions, recurring mistakes, workflow conventions, explicit directives) and turns them into skills and CLAUDE.md rules automatically. Your agent gets better after every session, without you maintaining its context by hand.
 
-Your agent gets better over time, learning from every session, without you having to maintain its context by hand. You stay in control: all changes go through a review queue where you approve, skip, or dismiss each suggestion. Shared changes are then proposed as PRs.
+You stay in control: every change goes through a review queue where you approve, skip, or dismiss. Shared changes are proposed as PRs.
 
 ![retro demo](docs/demo.gif)
 
@@ -25,18 +25,34 @@ retro ingest
 
 # Analyze sessions to discover patterns (AI-powered)
 retro analyze
+```
 
-# See what retro wants to change
-retro diff
+You'll see output like:
+
+```
+  Batch 1/1: 12 sessions, 48K chars -> 892 tokens out, 3 new + 1 updated
+    Found recurring testing workflow and two explicit directives about package management...
+
+Analysis complete!
+  Sessions analyzed: 12
+  New patterns:      3
+  Tokens:            52340 in / 892 out
+```
+
+Then review and apply what retro found:
+
+```sh
+# See discovered patterns
+retro patterns
 
 # Generate content and queue for review
 retro apply
 
-# Review pending items: approve, skip, or dismiss
+# Review: approve, skip, or dismiss each suggestion
 retro review
 ```
 
-After `retro init`, a single post-commit hook orchestrates the full pipeline in the background: ingest → analyze → apply (queue for review), each with its own cooldown. Run `retro review` to approve items — shared changes become PRs, personal changes apply directly.
+After `retro init`, a post-commit hook runs the full pipeline in the background (ingest, analyze, apply) with per-stage cooldowns. Run `retro review` when you're ready to approve changes.
 
 ## How It Works
 
@@ -71,9 +87,19 @@ Retro operates as a three-stage pipeline:
 
 ## What Retro Generates
 
-**CLAUDE.md rules** are conventions discovered from your sessions, added to a managed section in your project's CLAUDE.md. Retro never touches your manually-written content.
+**CLAUDE.md rules** are conventions discovered from your sessions, added to a managed section in your project's CLAUDE.md:
 
-**Skills** are reusable workflow patterns extracted from your sessions, saved as `.claude/skills/` files.
+```
+<!-- retro:managed:start -->
+- Always use uv instead of pip for Python package management
+- Run cargo clippy -- -D warnings before committing
+- Use conventional commit messages with type prefix (feat:, fix:, docs:)
+<!-- retro:managed:end -->
+```
+
+Retro never touches content outside the managed delimiters.
+
+**Skills** are reusable workflow patterns saved as `.claude/skills/` files. For example, a "pre-pr-checklist" skill extracted from a workflow you guided your agent through across multiple sessions: run tests, lint, format commit message.
 
 **Global agents** are personal agent definitions at `~/.claude/agents/` for patterns that apply across all your projects.
 
@@ -105,11 +131,11 @@ Most commands are project-scoped by default. Use `--global` to operate across al
 
 After `retro init`, a single **post-commit** hook runs `retro ingest --auto` in the background. When `auto_apply = true` (the default), this chains through the full pipeline:
 
-1. **Ingest** — parse new sessions (cooldown: 5 minutes)
-2. **Analyze** — discover patterns via AI (cooldown: 24 hours)
-3. **Apply** — generate content and queue for review (cooldown: 24 hours)
+1. **Ingest**: parse new sessions (cooldown: 5 minutes)
+2. **Analyze**: discover patterns via AI (cooldown: 24 hours)
+3. **Apply**: generate content and queue for review (cooldown: 24 hours)
 
-Each stage has its own cooldown and data trigger — no unnecessary AI calls. In `--auto` mode, retro skips if another instance is running and never produces output.
+Each stage has its own cooldown and data trigger, so there are no unnecessary AI calls. In `--auto` mode, retro skips if another instance is running and never produces output.
 
 Auto mode does the expensive work (ingestion, analysis, content generation) in the background, but nothing is written to disk until you run `retro review`. You'll see a terminal nudge showing pending review count the next time you run any retro command interactively.
 
@@ -153,16 +179,17 @@ cargo install retro-cli
 
 ## Status
 
-Retro is v0.2. The core pipeline works end-to-end and has been tested on real Claude Code session history.
+Retro is v0.2. The core pipeline works end-to-end and has been tested on real Claude Code session history. 115 unit tests, 10 scenario tests.
 
 **What works well:**
-- Session ingestion and pattern discovery across projects (including explicit directives)
-- Rolling window analysis for cross-session pattern discovery
+- Session ingestion and pattern discovery across projects
+- Explicit directive detection ("always use X", "never do Y") from single sessions
+- Rolling window analysis with per-batch reasoning summaries
+- Structured output via `--json-schema` for reliable AI response parsing
 - CLAUDE.md rule generation with managed sections (never touches your content)
-- Skill and global agent generation
+- Skill and global agent generation (two-phase: generate then validate)
 - Review queue with batch approve/skip/dismiss workflow
-- Automatic pipeline via git hooks (ingest → analyze → apply → review queue, per-stage cooldowns)
-- Auto-mode observability with audit logging and terminal nudge
+- Automatic pipeline via git hooks with per-stage cooldowns
 - Context auditing for redundancy and contradictions
 - PR lifecycle management (`retro sync` detects closed PRs)
 - Dry-run mode on all AI-powered commands
