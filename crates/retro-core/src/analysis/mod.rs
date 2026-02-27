@@ -231,7 +231,7 @@ where
         let existing = db::get_patterns(conn, &["discovered", "active"], project)?;
 
         // Build prompt
-        let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref());
+        let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref(), false);
         let prompt_chars = prompt.len();
 
         on_batch_start(batch_idx, total_batches, batch.len(), prompt_chars);

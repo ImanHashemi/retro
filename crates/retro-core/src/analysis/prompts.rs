@@ -97,10 +97,14 @@ pub fn build_context_summary(snapshot: &ContextSnapshot) -> String {
 }
 
 /// Build the pattern discovery prompt for a batch of sessions.
+///
+/// When `full_management` is `true`, appends additional instructions asking the AI
+/// to examine the full CLAUDE.md and propose `claude_md_edits` (add/remove/reword/move).
 pub fn build_analysis_prompt(
     sessions: &[Session],
     existing_patterns: &[Pattern],
     context_summary: Option<&str>,
+    full_management: bool,
 ) -> String {
     let mut compact_sessions: Vec<CompactSession> = sessions.iter().map(to_compact_session).collect();
     let compact_patterns = existing_patterns.iter().map(to_compact_pattern).collect::<Vec<_>>();
@@ -135,7 +139,7 @@ The following context is already installed for this project.
         sessions_json = serde_json::to_string_pretty(&compact_sessions).unwrap_or_else(|_| "[]".to_string());
     }
 
-    let prompt = format!(
+    let mut prompt = format!(
         r#"You are an expert at analyzing AI coding agent session histories to discover **real, recurring patterns**.
 
 A pattern is a behavior, preference, or workflow that appears in **2 or more sessions**. A single occurrence is just an observation — not a pattern. Your job is to find things worth automating because they keep happening.
@@ -233,6 +237,34 @@ Important:
 - Do not suggest skills or rules that duplicate installed plugin functionality
 - CRITICAL: Return ONLY the raw JSON object. No prose, no explanation, no markdown formatting, no commentary before or after. Your entire response must be parseable as a single JSON object starting with {{ and ending with }}. If no patterns found, return {{"reasoning": "your observation summary", "patterns": []}}"#
     );
+
+    if full_management {
+        prompt.push_str(r#"
+
+## CLAUDE.md Edits (full_management mode)
+
+In addition to discovering patterns, examine the FULL CLAUDE.md content provided in the Installed Context section above. Propose edits to improve clarity, accuracy, and organization. Return these as a `claude_md_edits` array in your JSON response (alongside `reasoning` and `patterns`).
+
+Each edit is an object with:
+- `edit_type`: one of `add`, `remove`, `reword`, `move`
+  - `add` — add new content (provide `suggested_content` and `target_section`)
+  - `remove` — remove stale, redundant, or incorrect content (provide `original_text`)
+  - `reword` — improve existing content (provide `original_text` and `suggested_content`)
+  - `move` — relocate content to a better section (provide `original_text` and `target_section`)
+- `original_text`: the existing text being edited (required for remove/reword/move)
+- `suggested_content`: the new or replacement text (required for add/reword)
+- `target_section`: which section the content belongs in (required for add/move)
+- `reasoning`: why this edit improves the CLAUDE.md
+
+Only propose edits for genuine improvements — not cosmetic or stylistic changes. Focus on:
+- Removing stale or outdated information
+- Fixing contradictions or inaccuracies
+- Adding missing information discovered from session patterns
+- Improving organization (moving content to more logical sections)
+- Rewording unclear or ambiguous instructions
+
+If no edits are needed, omit `claude_md_edits` or return an empty array."#);
+    }
 
     prompt
 }
@@ -523,7 +555,7 @@ mod tests {
             },
         }];
         let context = "### Plugin Skills\n- [superpowers] brainstorming: Explores intent\n";
-        let prompt = build_analysis_prompt(&sessions, &[], Some(context));
+        let prompt = build_analysis_prompt(&sessions, &[], Some(context), false);
         assert!(prompt.contains("## Installed Context"));
         assert!(prompt.contains("[superpowers] brainstorming"));
         assert!(prompt.contains("Already covered by installed context"));
@@ -548,10 +580,57 @@ mod tests {
                 model: None,
             },
         }];
-        let prompt = build_analysis_prompt(&sessions, &[], None);
+        let prompt = build_analysis_prompt(&sessions, &[], None, false);
         assert!(!prompt.contains("## Installed Context"));
         // Core prompt structure should still be there
         assert!(prompt.contains("## Existing Patterns"));
         assert!(prompt.contains("## Session Data"));
+    }
+
+    fn make_test_session() -> Session {
+        Session {
+            session_id: "sess-1".to_string(),
+            project: "/test".to_string(),
+            session_path: "/test/session.jsonl".to_string(),
+            user_messages: vec![],
+            assistant_messages: vec![],
+            summaries: vec![],
+            tools_used: vec![],
+            errors: vec![],
+            metadata: crate::models::SessionMetadata {
+                cwd: None,
+                version: None,
+                git_branch: None,
+                model: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_prompt_full_management() {
+        let sessions = vec![make_test_session()];
+        let context = "### Existing CLAUDE.md Rules\n- Always use uv\n";
+        let prompt = build_analysis_prompt(&sessions, &[], Some(context), true);
+        assert!(
+            prompt.contains("claude_md_edits"),
+            "full_management=true should include claude_md_edits instructions"
+        );
+        assert!(prompt.contains("## CLAUDE.md Edits (full_management mode)"));
+        assert!(prompt.contains("edit_type"));
+        assert!(prompt.contains("original_text"));
+        assert!(prompt.contains("suggested_content"));
+        assert!(prompt.contains("target_section"));
+    }
+
+    #[test]
+    fn test_build_analysis_prompt_no_full_management() {
+        let sessions = vec![make_test_session()];
+        let context = "### Existing CLAUDE.md Rules\n- Always use uv\n";
+        let prompt = build_analysis_prompt(&sessions, &[], Some(context), false);
+        assert!(
+            !prompt.contains("claude_md_edits"),
+            "full_management=false should NOT include claude_md_edits instructions"
+        );
+        assert!(!prompt.contains("## CLAUDE.md Edits (full_management mode)"));
     }
 }
