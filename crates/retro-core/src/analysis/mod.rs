@@ -230,14 +230,24 @@ where
         // Reload existing patterns before each batch (picks up patterns from prior batches)
         let existing = db::get_patterns(conn, &["discovered", "active"], project)?;
 
-        // Build prompt
-        let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref(), false);
+        // Build prompt — pass full_management flag to include CLAUDE.md editing instructions
+        let full_mgmt = config.claude_md.full_management;
+        let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref(), full_mgmt);
         let prompt_chars = prompt.len();
 
         on_batch_start(batch_idx, total_batches, batch.len(), prompt_chars);
 
+        // Choose schema based on full_management config — extended schema includes claude_md_edits
+        let schema_string;
+        let schema: &str = if full_mgmt {
+            schema_string = full_management_analysis_schema();
+            &schema_string
+        } else {
+            ANALYSIS_RESPONSE_SCHEMA
+        };
+
         // Call AI backend
-        let response = backend.execute(&prompt, Some(ANALYSIS_RESPONSE_SCHEMA))?;
+        let response = backend.execute(&prompt, Some(schema))?;
         total_input_tokens += response.input_tokens;
         total_output_tokens += response.output_tokens;
 
