@@ -39,6 +39,13 @@ pub fn run(dry_run: bool, verbose: bool) -> Result<()> {
     let claude_md_path = format!("{project_root}/CLAUDE.md");
     let conn = db::open_db(&db_path)?;
 
+    // Dissolve managed section delimiters if present (full_management mode)
+    let backup_dir = dir.join("backups");
+    std::fs::create_dir_all(&backup_dir)?;
+    if retro_core::projection::dissolve_if_needed(&claude_md_path, &backup_dir)? {
+        println!("Dissolved managed section delimiters (full_management mode).");
+    }
+
     // 1. Read current CLAUDE.md
     let claude_md_content = if std::path::Path::new(&claude_md_path).exists() {
         std::fs::read_to_string(&claude_md_path)

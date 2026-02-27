@@ -391,6 +391,28 @@ fn write_file_with_backup(
     Ok(())
 }
 
+/// If CLAUDE.md has managed delimiters, dissolve them (backup first).
+/// Returns `Ok(true)` if dissolution happened, `Ok(false)` if no action needed.
+pub fn dissolve_if_needed(claude_md_path: &str, backup_dir: &Path) -> Result<bool, CoreError> {
+    if !Path::new(claude_md_path).exists() {
+        return Ok(false);
+    }
+
+    let content = std::fs::read_to_string(claude_md_path)
+        .map_err(|e| CoreError::Io(format!("reading {claude_md_path}: {e}")))?;
+
+    if !claude_md::has_managed_section(&content) {
+        return Ok(false);
+    }
+
+    backup_file(claude_md_path, backup_dir)?;
+    let cleaned = claude_md::dissolve_managed_section(&content);
+    std::fs::write(claude_md_path, &cleaned)
+        .map_err(|e| CoreError::Io(format!("writing {claude_md_path}: {e}")))?;
+
+    Ok(true)
+}
+
 /// Record a projection in the database.
 fn record_projection(
     conn: &Connection,
@@ -504,5 +526,42 @@ mod tests {
     fn test_parse_edit_missing_edit_type_returns_none() {
         let content = r#"{"original":"text","reasoning":"why"}"#;
         assert!(parse_edit(content).is_none());
+    }
+
+    #[test]
+    fn test_dissolve_if_needed_with_managed() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        let backup_dir = dir.path().join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        std::fs::write(&claude_md, "# Proj\n\n<!-- retro:managed:start -->\n## Retro-Discovered Patterns\n\n- Rule\n\n<!-- retro:managed:end -->\n").unwrap();
+
+        let dissolved = dissolve_if_needed(claude_md.to_str().unwrap(), &backup_dir).unwrap();
+        assert!(dissolved);
+        let content = std::fs::read_to_string(&claude_md).unwrap();
+        assert!(!content.contains("retro:managed"));
+        assert!(content.contains("- Rule"));
+    }
+
+    #[test]
+    fn test_dissolve_if_needed_without_managed() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        let backup_dir = dir.path().join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        std::fs::write(&claude_md, "# Proj\n\nNo managed section.\n").unwrap();
+
+        let dissolved = dissolve_if_needed(claude_md.to_str().unwrap(), &backup_dir).unwrap();
+        assert!(!dissolved);
+    }
+
+    #[test]
+    fn test_dissolve_if_needed_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        let backup_dir = dir.path().join("backups");
+
+        let dissolved = dissolve_if_needed(claude_md.to_str().unwrap(), &backup_dir).unwrap();
+        assert!(!dissolved);
     }
 }
