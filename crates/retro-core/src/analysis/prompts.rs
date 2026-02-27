@@ -354,6 +354,105 @@ Important:
     )
 }
 
+/// Build the curate prompt for agentic CLAUDE.md rewrite.
+///
+/// The AI receives the current CLAUDE.md, discovered patterns, MEMORY.md (if available),
+/// and a project file tree. It is instructed to explore the codebase and produce a
+/// complete improved CLAUDE.md.
+pub fn build_curate_prompt(
+    claude_md: &str,
+    patterns: &[Pattern],
+    memory_md: Option<&str>,
+    project_tree: &str,
+) -> String {
+    let patterns_section = if patterns.is_empty() {
+        "(no patterns discovered yet)".to_string()
+    } else {
+        let mut s = String::new();
+        for p in patterns {
+            s.push_str(&format!(
+                "- [confidence={:.2}] [{}] {}\n",
+                p.confidence,
+                p.suggested_target,
+                p.description
+            ));
+            if !p.suggested_content.is_empty() {
+                s.push_str(&format!("  suggested: {}\n", p.suggested_content));
+            }
+        }
+        s
+    };
+
+    let memory_section = match memory_md {
+        Some(content) if !content.trim().is_empty() => format!(
+            r#"
+## MEMORY.md
+
+MEMORY.md contains personal notes that Claude Code wrote for itself. This is read-only
+context — do NOT copy it verbatim into CLAUDE.md. Use it to understand the developer's
+preferences and project conventions.
+
+```
+{content}
+```
+"#
+        ),
+        _ => String::new(),
+    };
+
+    let claude_md_section = if claude_md.is_empty() {
+        "(CLAUDE.md does not exist yet — create one from scratch)".to_string()
+    } else {
+        format!("```markdown\n{claude_md}\n```")
+    };
+
+    format!(
+        r#"You are an expert at writing CLAUDE.md files — the project-level instruction files for Claude Code, an AI coding agent.
+
+Your task: produce a complete, improved CLAUDE.md for this project. You have access to tools to explore the codebase. Use them to understand the project structure, conventions, build system, test patterns, and any other relevant details.
+
+## Current CLAUDE.md
+
+{claude_md_section}
+
+## Discovered Patterns
+
+These patterns were discovered by analyzing the developer's Claude Code session history. They represent real, recurring behaviors, preferences, and conventions. Incorporate the important ones into the new CLAUDE.md.
+
+{patterns_section}
+{memory_section}
+## Project File Tree
+
+```
+{project_tree}
+```
+
+## Instructions
+
+1. **Explore the codebase** using your tools. Read key files: build configs (Cargo.toml, package.json, pyproject.toml, etc.), test files, CI configs, source code structure. Understand the project deeply.
+
+2. **Produce a complete CLAUDE.md** that includes:
+   - Project overview and purpose
+   - Architecture and structure
+   - Build/test/run commands
+   - Key design decisions and conventions
+   - Coding standards and patterns specific to this project
+   - Dependency information
+   - Any other information that would help an AI coding agent work effectively on this project
+
+3. **Incorporate discovered patterns** where they add value. Not all patterns need to go in CLAUDE.md — only those that represent project conventions, rules, or important context.
+
+4. **Improve on the existing CLAUDE.md** if one exists:
+   - Fix inaccuracies by checking the actual codebase
+   - Remove stale or outdated information
+   - Add missing sections that would be useful
+   - Improve organization and clarity
+   - Keep valuable content that is accurate
+
+5. **Output format**: Return ONLY the new CLAUDE.md content — raw markdown, no wrapping code fences, no explanation before or after. Your entire response should be the new CLAUDE.md file content, ready to write to disk."#
+    )
+}
+
 fn to_compact_session(session: &Session) -> CompactSession {
     let user_messages: Vec<CompactUserMessage> = session
         .user_messages
@@ -632,5 +731,56 @@ mod tests {
             "full_management=false should NOT include claude_md_edits instructions"
         );
         assert!(!prompt.contains("## CLAUDE.md Edits (full_management mode)"));
+    }
+
+    #[test]
+    fn test_build_curate_prompt() {
+        use crate::models::{PatternStatus, PatternType, SuggestedTarget};
+        use chrono::Utc;
+
+        let claude_md = "# My Project\n\nSome existing content.";
+        let now = Utc::now();
+        let patterns = vec![Pattern {
+            id: "pat-1".to_string(),
+            pattern_type: PatternType::RepetitiveInstruction,
+            description: "Always run cargo test before committing".to_string(),
+            confidence: 0.85,
+            times_seen: 3,
+            first_seen: now,
+            last_seen: now,
+            last_projected: None,
+            status: PatternStatus::Discovered,
+            source_sessions: vec!["sess-1".to_string()],
+            related_files: vec![],
+            suggested_content: "Run cargo test before committing".to_string(),
+            suggested_target: SuggestedTarget::ClaudeMd,
+            project: Some("/test".to_string()),
+            generation_failed: false,
+        }];
+        let memory = "User prefers concise commit messages.";
+        let tree = "src/main.rs\nsrc/lib.rs\nCargo.toml";
+
+        let prompt = build_curate_prompt(claude_md, &patterns, Some(memory), tree);
+
+        // Check key sections are present
+        assert!(prompt.contains("## Current CLAUDE.md"), "should have current CLAUDE.md section");
+        assert!(prompt.contains("Some existing content"), "should include CLAUDE.md content");
+        assert!(prompt.contains("## Discovered Patterns"), "should have patterns section");
+        assert!(prompt.contains("Always run cargo test before committing"), "should include pattern description");
+        assert!(prompt.contains("confidence=0.85"), "should include confidence");
+        assert!(prompt.contains("## MEMORY.md"), "should have MEMORY.md section");
+        assert!(prompt.contains("concise commit messages"), "should include MEMORY.md content");
+        assert!(prompt.contains("## Project File Tree"), "should have file tree section");
+        assert!(prompt.contains("src/main.rs"), "should include file tree entries");
+        assert!(prompt.contains("Explore the codebase"), "should instruct AI to explore");
+        assert!(prompt.contains("Produce a complete CLAUDE.md"), "should instruct AI to produce output");
+    }
+
+    #[test]
+    fn test_build_curate_prompt_empty_claude_md() {
+        let prompt = build_curate_prompt("", &[], None, "src/main.rs");
+        assert!(prompt.contains("does not exist yet"), "should note missing CLAUDE.md");
+        assert!(!prompt.contains("## MEMORY.md"), "should omit MEMORY.md section when not available");
+        assert!(prompt.contains("no patterns discovered"), "should note no patterns");
     }
 }
