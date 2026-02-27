@@ -205,7 +205,7 @@ pub fn execute_plan(
         })
         .collect();
 
-    // Collect CLAUDE.md rules and write as a batch
+    // Collect CLAUDE.md actions and separate edits from plain rules
     let claude_md_actions: Vec<&&ApplyAction> = actions
         .iter()
         .filter(|a| a.target_type == SuggestedTarget::ClaudeMd)
@@ -213,9 +213,25 @@ pub fn execute_plan(
 
     if !claude_md_actions.is_empty() {
         let target_path = &claude_md_actions[0].target_path;
-        let rules: Vec<String> = claude_md_actions.iter().map(|a| a.content.clone()).collect();
 
-        write_claude_md(target_path, &rules, &backup_dir)?;
+        // Separate JSON edits from plain rule additions
+        let mut edits: Vec<ClaudeMdEdit> = Vec::new();
+        let mut plain_rules: Vec<String> = Vec::new();
+
+        for action in &claude_md_actions {
+            if is_edit_action(&action.content) {
+                if let Some(edit) = parse_edit(&action.content) {
+                    edits.push(edit);
+                } else {
+                    // Fallback: treat unparseable JSON edits as plain rules
+                    plain_rules.push(action.content.clone());
+                }
+            } else {
+                plain_rules.push(action.content.clone());
+            }
+        }
+
+        write_claude_md_with_edits(target_path, &edits, &plain_rules, &backup_dir)?;
         files_written += 1;
 
         // Record projections and update status for each pattern
@@ -314,9 +330,10 @@ fn get_qualifying_patterns(
         .collect())
 }
 
-/// Write CLAUDE.md with managed section.
-fn write_claude_md(
+/// Write CLAUDE.md: apply edits first, then add plain rules to managed section.
+fn write_claude_md_with_edits(
     target_path: &str,
+    edits: &[ClaudeMdEdit],
     rules: &[String],
     backup_dir: &Path,
 ) -> Result<(), CoreError> {
@@ -328,7 +345,19 @@ fn write_claude_md(
         String::new()
     };
 
-    let updated = claude_md::update_claude_md_content(&existing, rules);
+    // Phase 1: apply edits to full file content
+    let after_edits = if edits.is_empty() {
+        existing
+    } else {
+        claude_md::apply_edits(&existing, edits)
+    };
+
+    // Phase 2: add plain rules to managed section
+    let updated = if rules.is_empty() {
+        after_edits
+    } else {
+        claude_md::update_claude_md_content(&after_edits, rules)
+    };
 
     if let Some(parent) = Path::new(target_path).parent() {
         std::fs::create_dir_all(parent)
