@@ -7,7 +7,10 @@ use crate::config::Config;
 use crate::db;
 use crate::errors::CoreError;
 use crate::ingest::{context, session};
-use crate::models::{AnalysisResponse, AnalyzeResult, BatchDetail};
+use crate::models::{
+    AnalysisResponse, AnalyzeResult, BatchDetail, Pattern, PatternStatus, PatternType,
+    SuggestedTarget,
+};
 use crate::scrub;
 use chrono::{Duration, Utc};
 use rusqlite::Connection;
@@ -262,12 +265,13 @@ where
         })?;
 
         let reasoning = analysis_resp.reasoning;
+        let claude_md_edits = analysis_resp.claude_md_edits;
 
         // Apply merge logic
         let (new_patterns, merge_updates) =
             merge::process_updates(analysis_resp.patterns, &existing, project);
 
-        let batch_new = new_patterns.len();
+        let mut batch_new = new_patterns.len();
         let batch_updated = merge_updates.len();
 
         // Store new patterns
@@ -287,6 +291,46 @@ where
                 update.additional_times_seen,
             )?;
             update_count += 1;
+        }
+
+        // Store claude_md_edits as patterns (with RedundantContext type and ClaudeMd target)
+        for edit in &claude_md_edits {
+            let edit_json = serde_json::json!({
+                "edit_type": edit.edit_type.to_string(),
+                "original": edit.original_text,
+                "replacement": edit.suggested_content,
+                "target_section": edit.target_section,
+                "reasoning": edit.reasoning,
+            });
+
+            let description = format!(
+                "[edit:{}] {}",
+                edit.edit_type,
+                edit.original_text
+            );
+
+            let now = Utc::now();
+            let pattern = Pattern {
+                id: uuid::Uuid::new_v4().to_string(),
+                pattern_type: PatternType::RedundantContext,
+                description,
+                confidence: 0.75,
+                times_seen: 1,
+                first_seen: now,
+                last_seen: now,
+                last_projected: None,
+                status: PatternStatus::Discovered,
+                source_sessions: batch.iter().map(|s| s.session_id.clone()).collect(),
+                related_files: Vec::new(),
+                suggested_content: edit_json.to_string(),
+                suggested_target: SuggestedTarget::ClaudeMd,
+                project: project.map(String::from),
+                generation_failed: false,
+            };
+
+            db::insert_pattern(conn, &pattern)?;
+            new_count += 1;
+            batch_new += 1;
         }
 
         // Collect per-batch diagnostics
