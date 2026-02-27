@@ -14,6 +14,8 @@ pub struct Config {
     pub paths: PathsConfig,
     #[serde(default = "default_privacy")]
     pub privacy: PrivacyConfig,
+    #[serde(default = "default_claude_md")]
+    pub claude_md: ClaudeMdConfig,
 }
 
 impl Default for Config {
@@ -24,6 +26,7 @@ impl Default for Config {
             hooks: default_hooks(),
             paths: default_paths(),
             privacy: default_privacy(),
+            claude_md: default_claude_md(),
         }
     }
 }
@@ -78,6 +81,12 @@ pub struct PrivacyConfig {
     pub scrub_secrets: bool,
     #[serde(default)]
     pub exclude_projects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeMdConfig {
+    #[serde(default = "default_full_management")]
+    pub full_management: bool,
 }
 
 fn default_analysis() -> AnalysisConfig {
@@ -165,6 +174,16 @@ fn default_claude_dir() -> String {
 }
 fn default_scrub_secrets() -> bool {
     true
+}
+
+fn default_claude_md() -> ClaudeMdConfig {
+    ClaudeMdConfig {
+        full_management: default_full_management(),
+    }
+}
+
+fn default_full_management() -> bool {
+    false
 }
 
 impl Config {
@@ -278,5 +297,31 @@ auto_analyze_max_sessions = 5
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.hooks.auto_analyze_max_sessions, 5);
+    }
+
+    #[test]
+    fn test_claude_md_config_defaults() {
+        let config = Config::default();
+        assert!(!config.claude_md.full_management);
+    }
+
+    #[test]
+    fn test_claude_md_config_custom() {
+        let toml_str = r#"
+[claude_md]
+full_management = true
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.claude_md.full_management);
+    }
+
+    #[test]
+    fn test_claude_md_config_absent() {
+        let toml_str = r#"
+[analysis]
+window_days = 7
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.claude_md.full_management);
     }
 }

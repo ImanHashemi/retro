@@ -7,7 +7,10 @@ use crate::config::Config;
 use crate::db;
 use crate::errors::CoreError;
 use crate::ingest::{context, session};
-use crate::models::{AnalysisResponse, AnalyzeResult, BatchDetail};
+use crate::models::{
+    AnalysisResponse, AnalyzeResult, BatchDetail, Pattern, PatternStatus, PatternType,
+    SuggestedTarget,
+};
 use crate::scrub;
 use chrono::{Duration, Utc};
 use rusqlite::Connection;
@@ -50,6 +53,55 @@ pub const ANALYSIS_RESPONSE_SCHEMA: &str = r#"{
   "required": ["reasoning", "patterns"],
   "additionalProperties": false
 }"#;
+
+/// Extended JSON schema that includes `claude_md_edits` for full_management mode.
+/// Returns a `String` because it's dynamically constructed (unlike the const base schema).
+pub fn full_management_analysis_schema() -> String {
+    r#"{
+  "type": "object",
+  "properties": {
+    "reasoning": {"type": "string"},
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["new", "update"]},
+          "pattern_type": {"type": "string", "enum": ["repetitive_instruction", "recurring_mistake", "workflow_pattern", "stale_context", "redundant_context"]},
+          "description": {"type": "string"},
+          "confidence": {"type": "number"},
+          "source_sessions": {"type": "array", "items": {"type": "string"}},
+          "related_files": {"type": "array", "items": {"type": "string"}},
+          "suggested_content": {"type": "string"},
+          "suggested_target": {"type": "string", "enum": ["skill", "claude_md", "global_agent", "db_only"]},
+          "existing_id": {"type": "string"},
+          "new_sessions": {"type": "array", "items": {"type": "string"}},
+          "new_confidence": {"type": "number"}
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      }
+    },
+    "claude_md_edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "edit_type": {"type": "string", "enum": ["add", "remove", "reword", "move"]},
+          "original_text": {"type": "string"},
+          "suggested_content": {"type": "string"},
+          "target_section": {"type": "string"},
+          "reasoning": {"type": "string"}
+        },
+        "required": ["edit_type", "reasoning"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["reasoning", "patterns"],
+  "additionalProperties": false
+}"#.to_string()
+}
 
 /// Run analysis: re-parse sessions, scrub, call AI, merge patterns, store results.
 ///
@@ -181,14 +233,24 @@ where
         // Reload existing patterns before each batch (picks up patterns from prior batches)
         let existing = db::get_patterns(conn, &["discovered", "active"], project)?;
 
-        // Build prompt
-        let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref());
+        // Build prompt — pass full_management flag to include CLAUDE.md editing instructions
+        let full_mgmt = config.claude_md.full_management;
+        let prompt = prompts::build_analysis_prompt(batch, &existing, context_summary.as_deref(), full_mgmt);
         let prompt_chars = prompt.len();
 
         on_batch_start(batch_idx, total_batches, batch.len(), prompt_chars);
 
+        // Choose schema based on full_management config — extended schema includes claude_md_edits
+        let schema_string;
+        let schema: &str = if full_mgmt {
+            schema_string = full_management_analysis_schema();
+            &schema_string
+        } else {
+            ANALYSIS_RESPONSE_SCHEMA
+        };
+
         // Call AI backend
-        let response = backend.execute(&prompt, Some(ANALYSIS_RESPONSE_SCHEMA))?;
+        let response = backend.execute(&prompt, Some(schema))?;
         total_input_tokens += response.input_tokens;
         total_output_tokens += response.output_tokens;
 
@@ -203,12 +265,13 @@ where
         })?;
 
         let reasoning = analysis_resp.reasoning;
+        let claude_md_edits = analysis_resp.claude_md_edits;
 
         // Apply merge logic
         let (new_patterns, merge_updates) =
             merge::process_updates(analysis_resp.patterns, &existing, project);
 
-        let batch_new = new_patterns.len();
+        let mut batch_new = new_patterns.len();
         let batch_updated = merge_updates.len();
 
         // Store new patterns
@@ -228,6 +291,46 @@ where
                 update.additional_times_seen,
             )?;
             update_count += 1;
+        }
+
+        // Store claude_md_edits as patterns (with RedundantContext type and ClaudeMd target)
+        for edit in &claude_md_edits {
+            let edit_json = serde_json::json!({
+                "edit_type": edit.edit_type.to_string(),
+                "original": edit.original_text,
+                "replacement": edit.suggested_content,
+                "target_section": edit.target_section,
+                "reasoning": edit.reasoning,
+            });
+
+            let description = format!(
+                "[edit:{}] {}",
+                edit.edit_type,
+                edit.original_text
+            );
+
+            let now = Utc::now();
+            let pattern = Pattern {
+                id: uuid::Uuid::new_v4().to_string(),
+                pattern_type: PatternType::RedundantContext,
+                description,
+                confidence: 0.75,
+                times_seen: 1,
+                first_seen: now,
+                last_seen: now,
+                last_projected: None,
+                status: PatternStatus::Discovered,
+                source_sessions: batch.iter().map(|s| s.session_id.clone()).collect(),
+                related_files: Vec::new(),
+                suggested_content: edit_json.to_string(),
+                suggested_target: SuggestedTarget::ClaudeMd,
+                project: project.map(String::from),
+                generation_failed: false,
+            };
+
+            db::insert_pattern(conn, &pattern)?;
+            new_count += 1;
+            batch_new += 1;
         }
 
         // Collect per-batch diagnostics
@@ -382,5 +485,90 @@ mod tests {
             .expect("ANALYSIS_RESPONSE_SCHEMA must be valid JSON");
         assert_eq!(value["type"], "object");
         assert!(value["properties"]["patterns"].is_object());
+    }
+
+    #[test]
+    fn test_full_management_analysis_schema_is_valid_json() {
+        let schema_str = full_management_analysis_schema();
+        let value: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("full_management schema must be valid JSON");
+        assert_eq!(value["type"], "object");
+        assert!(value["properties"]["patterns"].is_object());
+    }
+
+    #[test]
+    fn test_full_management_analysis_schema_contains_claude_md_edits() {
+        let schema_str = full_management_analysis_schema();
+        let value: serde_json::Value = serde_json::from_str(&schema_str).unwrap();
+
+        // claude_md_edits should be in properties
+        let edits = &value["properties"]["claude_md_edits"];
+        assert!(edits.is_object(), "claude_md_edits should be in properties");
+        assert_eq!(edits["type"], "array");
+
+        // Items should have edit_type, reasoning as required
+        let items = &edits["items"];
+        assert_eq!(items["type"], "object");
+        let required: Vec<String> = items["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert!(required.contains(&"edit_type".to_string()));
+        assert!(required.contains(&"reasoning".to_string()));
+
+        // edit_type should have the right enum values
+        let edit_type_enum = items["properties"]["edit_type"]["enum"]
+            .as_array()
+            .unwrap();
+        let enum_values: Vec<&str> = edit_type_enum.iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(enum_values.contains(&"add"));
+        assert!(enum_values.contains(&"remove"));
+        assert!(enum_values.contains(&"reword"));
+        assert!(enum_values.contains(&"move"));
+
+        // additionalProperties should be false on items
+        assert_eq!(items["additionalProperties"], false);
+    }
+
+    #[test]
+    fn test_full_management_schema_claude_md_edits_not_required() {
+        let schema_str = full_management_analysis_schema();
+        let value: serde_json::Value = serde_json::from_str(&schema_str).unwrap();
+
+        // claude_md_edits should NOT be in the top-level required array
+        let required: Vec<String> = value["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert!(
+            !required.contains(&"claude_md_edits".to_string()),
+            "claude_md_edits should NOT be in top-level required"
+        );
+        // But reasoning and patterns should still be required
+        assert!(required.contains(&"reasoning".to_string()));
+        assert!(required.contains(&"patterns".to_string()));
+    }
+
+    #[test]
+    fn test_full_management_schema_preserves_base_patterns() {
+        // The full_management schema should have the same patterns structure as the base schema
+        let base: serde_json::Value = serde_json::from_str(ANALYSIS_RESPONSE_SCHEMA).unwrap();
+        let full: serde_json::Value =
+            serde_json::from_str(&full_management_analysis_schema()).unwrap();
+
+        assert_eq!(
+            base["properties"]["patterns"],
+            full["properties"]["patterns"],
+            "patterns schema should be identical between base and full_management"
+        );
+        assert_eq!(
+            base["properties"]["reasoning"],
+            full["properties"]["reasoning"],
+            "reasoning schema should be identical"
+        );
     }
 }

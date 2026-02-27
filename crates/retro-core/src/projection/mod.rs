@@ -7,12 +7,72 @@ use crate::config::Config;
 use crate::db;
 use crate::errors::CoreError;
 use crate::models::{
-    ApplyAction, ApplyPlan, ApplyTrack, Pattern, PatternStatus, Projection, ProjectionStatus, SuggestedTarget,
+    ApplyAction, ApplyPlan, ApplyTrack, ClaudeMdEdit, ClaudeMdEditType, Pattern, PatternStatus,
+    Projection, ProjectionStatus, SuggestedTarget,
 };
 use crate::util::backup_file;
 use chrono::Utc;
 use rusqlite::Connection;
 use std::path::Path;
+
+/// Returns true if the content string is a JSON edit action (starts with `{` and contains `"edit_type"`).
+pub fn is_edit_action(content: &str) -> bool {
+    let trimmed = content.trim();
+    trimmed.starts_with('{') && trimmed.contains("\"edit_type\"")
+}
+
+/// Parse a JSON edit from an action's content field.
+///
+/// The JSON format is:
+/// ```json
+/// {"edit_type":"reword","original":"old text","replacement":"new text","target_section":null,"reasoning":"why"}
+/// ```
+///
+/// Maps fields: `original` → `original_text`, `replacement` → `suggested_content`.
+pub fn parse_edit(content: &str) -> Option<ClaudeMdEdit> {
+    let trimmed = content.trim();
+    let v: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+    let obj = v.as_object()?;
+
+    let edit_type_str = obj.get("edit_type")?.as_str()?;
+    let edit_type = match edit_type_str {
+        "add" => ClaudeMdEditType::Add,
+        "remove" => ClaudeMdEditType::Remove,
+        "reword" => ClaudeMdEditType::Reword,
+        "move" => ClaudeMdEditType::Move,
+        _ => return None,
+    };
+
+    let original_text = obj
+        .get("original")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let suggested_content = obj
+        .get("replacement")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let target_section = obj
+        .get("target_section")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let reasoning = obj
+        .get("reasoning")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Some(ClaudeMdEdit {
+        edit_type,
+        original_text,
+        suggested_content,
+        target_section,
+        reasoning,
+    })
+}
 
 /// Build an apply plan: select qualifying patterns and generate projected content.
 /// For skills and global agents, this calls the AI backend.
@@ -145,7 +205,7 @@ pub fn execute_plan(
         })
         .collect();
 
-    // Collect CLAUDE.md rules and write as a batch
+    // Collect CLAUDE.md actions and separate edits from plain rules
     let claude_md_actions: Vec<&&ApplyAction> = actions
         .iter()
         .filter(|a| a.target_type == SuggestedTarget::ClaudeMd)
@@ -153,9 +213,25 @@ pub fn execute_plan(
 
     if !claude_md_actions.is_empty() {
         let target_path = &claude_md_actions[0].target_path;
-        let rules: Vec<String> = claude_md_actions.iter().map(|a| a.content.clone()).collect();
 
-        write_claude_md(target_path, &rules, &backup_dir)?;
+        // Separate JSON edits from plain rule additions
+        let mut edits: Vec<ClaudeMdEdit> = Vec::new();
+        let mut plain_rules: Vec<String> = Vec::new();
+
+        for action in &claude_md_actions {
+            if is_edit_action(&action.content) {
+                if let Some(edit) = parse_edit(&action.content) {
+                    edits.push(edit);
+                } else {
+                    // Fallback: treat unparseable JSON edits as plain rules
+                    plain_rules.push(action.content.clone());
+                }
+            } else {
+                plain_rules.push(action.content.clone());
+            }
+        }
+
+        write_claude_md_with_edits(target_path, &edits, &plain_rules, &backup_dir)?;
         files_written += 1;
 
         // Record projections and update status for each pattern
@@ -254,9 +330,10 @@ fn get_qualifying_patterns(
         .collect())
 }
 
-/// Write CLAUDE.md with managed section.
-fn write_claude_md(
+/// Write CLAUDE.md: apply edits first, then add plain rules to managed section.
+fn write_claude_md_with_edits(
     target_path: &str,
+    edits: &[ClaudeMdEdit],
     rules: &[String],
     backup_dir: &Path,
 ) -> Result<(), CoreError> {
@@ -268,7 +345,19 @@ fn write_claude_md(
         String::new()
     };
 
-    let updated = claude_md::update_claude_md_content(&existing, rules);
+    // Phase 1: apply edits to full file content
+    let after_edits = if edits.is_empty() {
+        existing
+    } else {
+        claude_md::apply_edits(&existing, edits)
+    };
+
+    // Phase 2: add plain rules to managed section
+    let updated = if rules.is_empty() {
+        after_edits
+    } else {
+        claude_md::update_claude_md_content(&after_edits, rules)
+    };
 
     if let Some(parent) = Path::new(target_path).parent() {
         std::fs::create_dir_all(parent)
@@ -302,6 +391,28 @@ fn write_file_with_backup(
     Ok(())
 }
 
+/// If CLAUDE.md has managed delimiters, dissolve them (backup first).
+/// Returns `Ok(true)` if dissolution happened, `Ok(false)` if no action needed.
+pub fn dissolve_if_needed(claude_md_path: &str, backup_dir: &Path) -> Result<bool, CoreError> {
+    if !Path::new(claude_md_path).exists() {
+        return Ok(false);
+    }
+
+    let content = std::fs::read_to_string(claude_md_path)
+        .map_err(|e| CoreError::Io(format!("reading {claude_md_path}: {e}")))?;
+
+    if !claude_md::has_managed_section(&content) {
+        return Ok(false);
+    }
+
+    backup_file(claude_md_path, backup_dir)?;
+    let cleaned = claude_md::dissolve_managed_section(&content);
+    std::fs::write(claude_md_path, &cleaned)
+        .map_err(|e| CoreError::Io(format!("writing {claude_md_path}: {e}")))?;
+
+    Ok(true)
+}
+
 /// Record a projection in the database.
 fn record_projection(
     conn: &Connection,
@@ -319,4 +430,138 @@ fn record_projection(
         status: crate::models::ProjectionStatus::Applied,
     };
     db::insert_projection(conn, &proj)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_edit_action_reword() {
+        let content = r#"{"edit_type":"reword","original":"old text","replacement":"new text","reasoning":"clarity"}"#;
+        assert!(is_edit_action(content));
+    }
+
+    #[test]
+    fn test_is_edit_action_remove() {
+        let content = r#"{"edit_type":"remove","original":"stale rule","reasoning":"no longer relevant"}"#;
+        assert!(is_edit_action(content));
+    }
+
+    #[test]
+    fn test_is_edit_action_plain_rule() {
+        let content = "Always use uv for Python packages";
+        assert!(!is_edit_action(content));
+    }
+
+    #[test]
+    fn test_is_edit_action_json_without_edit_type() {
+        let content = r#"{"name":"something","value":42}"#;
+        assert!(!is_edit_action(content));
+    }
+
+    #[test]
+    fn test_is_edit_action_with_whitespace() {
+        let content = r#"  {"edit_type":"add","replacement":"new rule","reasoning":"new pattern"}  "#;
+        assert!(is_edit_action(content));
+    }
+
+    #[test]
+    fn test_is_edit_action_empty() {
+        assert!(!is_edit_action(""));
+    }
+
+    #[test]
+    fn test_parse_edit_reword() {
+        let content = r#"{"edit_type":"reword","original":"No async","replacement":"Sync only — no tokio, no async","target_section":null,"reasoning":"too terse"}"#;
+        let edit = parse_edit(content).unwrap();
+        assert_eq!(edit.edit_type, ClaudeMdEditType::Reword);
+        assert_eq!(edit.original_text, "No async");
+        assert_eq!(edit.suggested_content.unwrap(), "Sync only — no tokio, no async");
+        assert!(edit.target_section.is_none());
+        assert_eq!(edit.reasoning, "too terse");
+    }
+
+    #[test]
+    fn test_parse_edit_remove() {
+        let content = r#"{"edit_type":"remove","original":"stale rule","reasoning":"no longer relevant"}"#;
+        let edit = parse_edit(content).unwrap();
+        assert_eq!(edit.edit_type, ClaudeMdEditType::Remove);
+        assert_eq!(edit.original_text, "stale rule");
+        assert!(edit.suggested_content.is_none());
+        assert_eq!(edit.reasoning, "no longer relevant");
+    }
+
+    #[test]
+    fn test_parse_edit_add() {
+        let content = r#"{"edit_type":"add","original":"","replacement":"- New rule","reasoning":"new pattern"}"#;
+        let edit = parse_edit(content).unwrap();
+        assert_eq!(edit.edit_type, ClaudeMdEditType::Add);
+        assert_eq!(edit.original_text, "");
+        assert_eq!(edit.suggested_content.unwrap(), "- New rule");
+    }
+
+    #[test]
+    fn test_parse_edit_move() {
+        let content = r#"{"edit_type":"move","original":"misplaced rule","replacement":"misplaced rule","target_section":"Build","reasoning":"wrong section"}"#;
+        let edit = parse_edit(content).unwrap();
+        assert_eq!(edit.edit_type, ClaudeMdEditType::Move);
+        assert_eq!(edit.original_text, "misplaced rule");
+        assert_eq!(edit.target_section.unwrap(), "Build");
+    }
+
+    #[test]
+    fn test_parse_edit_plain_text_returns_none() {
+        let content = "Always use uv for Python packages";
+        assert!(parse_edit(content).is_none());
+    }
+
+    #[test]
+    fn test_parse_edit_invalid_edit_type_returns_none() {
+        let content = r#"{"edit_type":"unknown","original":"text","reasoning":"why"}"#;
+        assert!(parse_edit(content).is_none());
+    }
+
+    #[test]
+    fn test_parse_edit_missing_edit_type_returns_none() {
+        let content = r#"{"original":"text","reasoning":"why"}"#;
+        assert!(parse_edit(content).is_none());
+    }
+
+    #[test]
+    fn test_dissolve_if_needed_with_managed() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        let backup_dir = dir.path().join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        std::fs::write(&claude_md, "# Proj\n\n<!-- retro:managed:start -->\n## Retro-Discovered Patterns\n\n- Rule\n\n<!-- retro:managed:end -->\n").unwrap();
+
+        let dissolved = dissolve_if_needed(claude_md.to_str().unwrap(), &backup_dir).unwrap();
+        assert!(dissolved);
+        let content = std::fs::read_to_string(&claude_md).unwrap();
+        assert!(!content.contains("retro:managed"));
+        assert!(content.contains("- Rule"));
+    }
+
+    #[test]
+    fn test_dissolve_if_needed_without_managed() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        let backup_dir = dir.path().join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        std::fs::write(&claude_md, "# Proj\n\nNo managed section.\n").unwrap();
+
+        let dissolved = dissolve_if_needed(claude_md.to_str().unwrap(), &backup_dir).unwrap();
+        assert!(!dissolved);
+    }
+
+    #[test]
+    fn test_dissolve_if_needed_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        let backup_dir = dir.path().join("backups");
+
+        let dissolved = dissolve_if_needed(claude_md.to_str().unwrap(), &backup_dir).unwrap();
+        assert!(!dissolved);
+    }
 }

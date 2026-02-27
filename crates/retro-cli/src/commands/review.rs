@@ -59,10 +59,25 @@ pub fn run(global: bool, dry_run: bool, verbose: bool) -> Result<()> {
     for (i, proj) in pending.iter().enumerate() {
         let num = format!("  {}.", i + 1);
         let target_label = match proj.target_type.as_str() {
-            "skill" => "[skill]",
-            "claude_md" => "[rule] ",
-            "global_agent" => "[agent]",
-            _ => "[item] ",
+            "skill" => "[skill]".to_string(),
+            "claude_md" => {
+                if projection::is_edit_action(&proj.content) {
+                    if let Some(edit) = projection::parse_edit(&proj.content) {
+                        match edit.edit_type {
+                            retro_core::models::ClaudeMdEditType::Add => "[rule+]".to_string(),
+                            retro_core::models::ClaudeMdEditType::Remove => "[rule-]".to_string(),
+                            retro_core::models::ClaudeMdEditType::Reword => "[rule~]".to_string(),
+                            retro_core::models::ClaudeMdEditType::Move => "[rule>]".to_string(),
+                        }
+                    } else {
+                        "[rule] ".to_string()
+                    }
+                } else {
+                    "[rule+]".to_string()
+                }
+            }
+            "global_agent" => "[agent]".to_string(),
+            _ => "[item] ".to_string(),
         };
 
         let description = pattern_map
