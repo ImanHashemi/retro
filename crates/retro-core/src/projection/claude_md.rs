@@ -81,6 +81,36 @@ fn find_managed_bounds(content: &str) -> Option<(String, String)> {
     Some((before, after))
 }
 
+/// Check if content contains a managed section.
+pub fn has_managed_section(content: &str) -> bool {
+    content.contains(MANAGED_START) && content.contains(MANAGED_END)
+}
+
+/// Remove managed section delimiters and header, keeping rule content in place.
+/// Used when transitioning to full_management mode.
+pub fn dissolve_managed_section(content: &str) -> String {
+    let Some((before, inner, after)) = split_managed(content) else {
+        return content.to_string();
+    };
+
+    // Strip the "## Retro-Discovered Patterns" header from inner content
+    let cleaned_inner: String = inner
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed != "## Retro-Discovered Patterns"
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut result = before;
+    if !cleaned_inner.trim().is_empty() {
+        result.push_str(&cleaned_inner);
+    }
+    result.push_str(&after);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,5 +177,36 @@ mod tests {
     fn test_read_managed_section_none() {
         let content = "# No managed section here\n";
         assert!(read_managed_section(content).is_none());
+    }
+
+    #[test]
+    fn test_dissolve_managed_section() {
+        let content = format!(
+            "# My Project\n\nSome content.\n\n{}\n## Retro-Discovered Patterns\n\n- Rule A\n- Rule B\n\n{}\n\n## Footer\n",
+            MANAGED_START, MANAGED_END
+        );
+        let result = dissolve_managed_section(&content);
+        assert!(!result.contains(MANAGED_START));
+        assert!(!result.contains(MANAGED_END));
+        assert!(!result.contains("## Retro-Discovered Patterns"));
+        assert!(result.contains("- Rule A"));
+        assert!(result.contains("- Rule B"));
+        assert!(result.contains("# My Project"));
+        assert!(result.contains("## Footer"));
+    }
+
+    #[test]
+    fn test_dissolve_no_managed_section() {
+        let content = "# My Project\n\nNo managed section.\n";
+        let result = dissolve_managed_section(content);
+        assert_eq!(result, content);
+    }
+
+    #[test]
+    fn test_has_managed_section() {
+        let with = format!("content\n{}\nrules\n{}\n", MANAGED_START, MANAGED_END);
+        let without = "just content\n";
+        assert!(has_managed_section(&with));
+        assert!(!has_managed_section(without));
     }
 }
