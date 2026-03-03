@@ -101,6 +101,12 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Agentic CLAUDE.md rewrite: AI explores codebase and proposes a complete rewrite via PR
+    Curate {
+        /// Preview context summary without making AI calls
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Sync PR status: reset patterns from closed PRs back to discoverable
     Sync,
     /// Manage git hooks
@@ -148,6 +154,7 @@ fn main() {
         Commands::Status => commands::status::run(),
         Commands::Log { since } => commands::log::run(since),
         Commands::Review { global, dry_run } => commands::review::run(global, dry_run, verbose),
+        Commands::Curate { dry_run } => commands::curate::run(dry_run, verbose),
         Commands::Sync => commands::sync::run(verbose),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),

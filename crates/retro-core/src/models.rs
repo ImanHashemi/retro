@@ -465,6 +465,44 @@ pub struct AnalysisResponse {
     #[serde(default)]
     pub reasoning: String,
     pub patterns: Vec<PatternUpdate>,
+    #[serde(default)]
+    pub claude_md_edits: Vec<ClaudeMdEdit>,
+}
+
+// ── CLAUDE.md edit types ──
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeMdEditType {
+    Add,
+    Remove,
+    Reword,
+    Move,
+}
+
+impl std::fmt::Display for ClaudeMdEditType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "add"),
+            Self::Remove => write!(f, "remove"),
+            Self::Reword => write!(f, "reword"),
+            Self::Move => write!(f, "move"),
+        }
+    }
+}
+
+/// A proposed edit to existing CLAUDE.md content (when full_management = true).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeMdEdit {
+    pub edit_type: ClaudeMdEditType,
+    #[serde(default)]
+    pub original_text: String,
+    #[serde(default)]
+    pub suggested_content: Option<String>,
+    #[serde(default)]
+    pub target_section: Option<String>,
+    #[serde(default)]
+    pub reasoning: String,
 }
 
 /// Claude CLI --output-format json wrapper.
@@ -717,5 +755,54 @@ mod tests {
         assert_eq!(ProjectionStatus::from_str("applied"), Some(ProjectionStatus::Applied));
         assert_eq!(ProjectionStatus::from_str("dismissed"), Some(ProjectionStatus::Dismissed));
         assert_eq!(ProjectionStatus::from_str("unknown"), None);
+    }
+
+    #[test]
+    fn test_claude_md_edit_type_serde() {
+        let edit = ClaudeMdEdit {
+            edit_type: ClaudeMdEditType::Reword,
+            original_text: "No async".to_string(),
+            suggested_content: Some("Sync only — no tokio, no async".to_string()),
+            target_section: None,
+            reasoning: "Too terse".to_string(),
+        };
+        let json = serde_json::to_string(&edit).unwrap();
+        let parsed: ClaudeMdEdit = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.edit_type, ClaudeMdEditType::Reword);
+        assert_eq!(parsed.original_text, "No async");
+        assert_eq!(parsed.suggested_content.unwrap(), "Sync only — no tokio, no async");
+    }
+
+    #[test]
+    fn test_claude_md_edit_type_display() {
+        assert_eq!(ClaudeMdEditType::Add.to_string(), "add");
+        assert_eq!(ClaudeMdEditType::Remove.to_string(), "remove");
+        assert_eq!(ClaudeMdEditType::Reword.to_string(), "reword");
+        assert_eq!(ClaudeMdEditType::Move.to_string(), "move");
+    }
+
+    #[test]
+    fn test_analysis_response_with_edits() {
+        let json = r#"{
+            "reasoning": "test",
+            "patterns": [],
+            "claude_md_edits": [
+                {
+                    "edit_type": "remove",
+                    "original_text": "stale rule",
+                    "reasoning": "no longer relevant"
+                }
+            ]
+        }"#;
+        let resp: AnalysisResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.claude_md_edits.len(), 1);
+        assert_eq!(resp.claude_md_edits[0].edit_type, ClaudeMdEditType::Remove);
+    }
+
+    #[test]
+    fn test_analysis_response_without_edits() {
+        let json = r#"{"reasoning": "test", "patterns": []}"#;
+        let resp: AnalysisResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.claude_md_edits.is_empty());
     }
 }

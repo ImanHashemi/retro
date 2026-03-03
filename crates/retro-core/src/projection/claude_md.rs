@@ -1,3 +1,5 @@
+use crate::models::{ClaudeMdEdit, ClaudeMdEditType};
+
 const MANAGED_START: &str = "<!-- retro:managed:start -->";
 const MANAGED_END: &str = "<!-- retro:managed:end -->";
 
@@ -81,6 +83,122 @@ fn find_managed_bounds(content: &str) -> Option<(String, String)> {
     Some((before, after))
 }
 
+/// Check if content contains a managed section.
+pub fn has_managed_section(content: &str) -> bool {
+    content.contains(MANAGED_START) && content.contains(MANAGED_END)
+}
+
+/// Remove managed section delimiters and header, keeping rule content in place.
+/// Used when transitioning to full_management mode.
+pub fn dissolve_managed_section(content: &str) -> String {
+    let Some((before, inner, after)) = split_managed(content) else {
+        return content.to_string();
+    };
+
+    // Strip the "## Retro-Discovered Patterns" header from inner content
+    let cleaned_inner: String = inner
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed != "## Retro-Discovered Patterns"
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut result = before;
+    if !cleaned_inner.trim().is_empty() {
+        result.push_str(&cleaned_inner);
+    }
+    result.push_str(&after);
+    result
+}
+
+/// Remove the first occurrence of `needle` (trimmed) from content.
+/// Handles both single-line and multi-line original_text via substring match.
+fn remove_substring(content: &str, needle: &str) -> String {
+    let trimmed = needle.trim();
+    if trimmed.is_empty() {
+        return content.to_string();
+    }
+    // Try exact substring match first
+    if let Some(pos) = content.find(trimmed) {
+        let before = &content[..pos];
+        let after = &content[pos + trimmed.len()..];
+        // Clean up: if we left a blank line, collapse it
+        let after = after.strip_prefix('\n').unwrap_or(after);
+        format!("{before}{after}")
+    } else {
+        // Fallback: line-level match for single-line needles
+        content
+            .lines()
+            .filter(|line| line.trim() != trimmed)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + if content.ends_with('\n') { "\n" } else { "" }
+    }
+}
+
+/// Apply a single edit to CLAUDE.md content.
+pub fn apply_edit(content: &str, edit: &ClaudeMdEdit) -> String {
+    match edit.edit_type {
+        ClaudeMdEditType::Remove => {
+            remove_substring(content, &edit.original_text)
+        }
+        ClaudeMdEditType::Reword => {
+            if let Some(replacement) = &edit.suggested_content {
+                // replacen(1): only replace the first occurrence to avoid unintended changes
+                content.replacen(edit.original_text.trim(), replacement.trim(), 1)
+            } else {
+                content.to_string()
+            }
+        }
+        ClaudeMdEditType::Add => {
+            let mut result = content.to_string();
+            if let Some(new_content) = &edit.suggested_content {
+                if !result.ends_with('\n') {
+                    result.push('\n');
+                }
+                result.push_str(new_content);
+                result.push('\n');
+            }
+            result
+        }
+        ClaudeMdEditType::Move => {
+            let without = remove_substring(content, &edit.original_text);
+
+            if let (Some(section), Some(text)) = (&edit.target_section, &edit.suggested_content) {
+                let mut result = String::new();
+                let mut inserted = false;
+                for line in without.lines() {
+                    result.push_str(line);
+                    result.push('\n');
+                    if !inserted && line.trim().starts_with('#') && line.contains(section) {
+                        result.push_str(text);
+                        result.push('\n');
+                        inserted = true;
+                    }
+                }
+                if !inserted {
+                    result.push_str(text);
+                    result.push('\n');
+                }
+                result
+            } else {
+                without + "\n"
+            }
+        }
+    }
+}
+
+/// Apply a batch of edits to CLAUDE.md content, in order.
+pub fn apply_edits(content: &str, edits: &[ClaudeMdEdit]) -> String {
+    let mut result = content.to_string();
+    for edit in edits {
+        result = apply_edit(&result, edit);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,5 +265,142 @@ mod tests {
     fn test_read_managed_section_none() {
         let content = "# No managed section here\n";
         assert!(read_managed_section(content).is_none());
+    }
+
+    #[test]
+    fn test_dissolve_managed_section() {
+        let content = format!(
+            "# My Project\n\nSome content.\n\n{}\n## Retro-Discovered Patterns\n\n- Rule A\n- Rule B\n\n{}\n\n## Footer\n",
+            MANAGED_START, MANAGED_END
+        );
+        let result = dissolve_managed_section(&content);
+        assert!(!result.contains(MANAGED_START));
+        assert!(!result.contains(MANAGED_END));
+        assert!(!result.contains("## Retro-Discovered Patterns"));
+        assert!(result.contains("- Rule A"));
+        assert!(result.contains("- Rule B"));
+        assert!(result.contains("# My Project"));
+        assert!(result.contains("## Footer"));
+    }
+
+    #[test]
+    fn test_dissolve_no_managed_section() {
+        let content = "# My Project\n\nNo managed section.\n";
+        let result = dissolve_managed_section(content);
+        assert_eq!(result, content);
+    }
+
+    #[test]
+    fn test_has_managed_section() {
+        let with = format!("content\n{}\nrules\n{}\n", MANAGED_START, MANAGED_END);
+        let without = "just content\n";
+        assert!(has_managed_section(&with));
+        assert!(!has_managed_section(without));
+    }
+
+    use crate::models::{ClaudeMdEdit, ClaudeMdEditType};
+
+    #[test]
+    fn test_apply_edit_remove() {
+        let content = "# Project\n\n- Use thiserror in lib crates\n- Stale rule to remove\n\n## More\n";
+        let edit = ClaudeMdEdit {
+            edit_type: ClaudeMdEditType::Remove,
+            original_text: "- Stale rule to remove".to_string(),
+            suggested_content: None,
+            target_section: None,
+            reasoning: "stale".to_string(),
+        };
+        let result = apply_edit(content, &edit);
+        assert!(!result.contains("Stale rule to remove"));
+        assert!(result.contains("Use thiserror"));
+        assert!(result.contains("## More"));
+    }
+
+    #[test]
+    fn test_apply_edit_reword() {
+        let content = "# Project\n\nNo async\n\n## More\n";
+        let edit = ClaudeMdEdit {
+            edit_type: ClaudeMdEditType::Reword,
+            original_text: "No async".to_string(),
+            suggested_content: Some("Sync only — no tokio, no async".to_string()),
+            target_section: None,
+            reasoning: "too terse".to_string(),
+        };
+        let result = apply_edit(content, &edit);
+        assert!(!result.contains("\nNo async\n"));
+        assert!(result.contains("Sync only — no tokio, no async"));
+    }
+
+    #[test]
+    fn test_apply_edit_add() {
+        let content = "# Project\n\nExisting content.\n";
+        let edit = ClaudeMdEdit {
+            edit_type: ClaudeMdEditType::Add,
+            original_text: String::new(),
+            suggested_content: Some("- New rule to add".to_string()),
+            target_section: None,
+            reasoning: "new pattern".to_string(),
+        };
+        let result = apply_edit(content, &edit);
+        assert!(result.contains("Existing content."));
+        assert!(result.contains("- New rule to add"));
+    }
+
+    #[test]
+    fn test_apply_edit_remove_multiline() {
+        let content = "# Project\n\n## Old Section\n\n- item A\n- item B\n\n## Next Section\n";
+        let edit = ClaudeMdEdit {
+            edit_type: ClaudeMdEditType::Remove,
+            original_text: "## Old Section\n\n- item A\n- item B".to_string(),
+            suggested_content: None,
+            target_section: None,
+            reasoning: "entire section is stale".to_string(),
+        };
+        let result = apply_edit(content, &edit);
+        assert!(!result.contains("Old Section"));
+        assert!(!result.contains("item A"));
+        assert!(!result.contains("item B"));
+        assert!(result.contains("## Next Section"));
+    }
+
+    #[test]
+    fn test_apply_edit_reword_first_only() {
+        let content = "# Project\n\nNo async\n\n## Rules\n\nNo async\n";
+        let edit = ClaudeMdEdit {
+            edit_type: ClaudeMdEditType::Reword,
+            original_text: "No async".to_string(),
+            suggested_content: Some("Sync only".to_string()),
+            target_section: None,
+            reasoning: "too terse".to_string(),
+        };
+        let result = apply_edit(content, &edit);
+        // First occurrence replaced, second left intact
+        assert!(result.starts_with("# Project\n\nSync only\n"));
+        assert!(result.contains("\nNo async\n"));
+    }
+
+    #[test]
+    fn test_apply_edits_batch() {
+        let content = "# Project\n\nRule A\nRule B\nRule C\n";
+        let edits = vec![
+            ClaudeMdEdit {
+                edit_type: ClaudeMdEditType::Remove,
+                original_text: "Rule B".to_string(),
+                suggested_content: None,
+                target_section: None,
+                reasoning: "stale".to_string(),
+            },
+            ClaudeMdEdit {
+                edit_type: ClaudeMdEditType::Reword,
+                original_text: "Rule A".to_string(),
+                suggested_content: Some("Rule A (improved)".to_string()),
+                target_section: None,
+                reasoning: "clarity".to_string(),
+            },
+        ];
+        let result = apply_edits(content, &edits);
+        assert!(!result.contains("\nRule B\n"));
+        assert!(result.contains("Rule A (improved)"));
+        assert!(result.contains("Rule C"));
     }
 }

@@ -179,6 +179,18 @@ pub fn run_apply(global: bool, dry_run: bool, auto: bool, display_mode: DisplayM
         }
     }
 
+    // Dissolve managed section delimiters if full_management is enabled
+    if config.claude_md.full_management
+        && let Some(ref proj) = project
+    {
+        let claude_md_path = format!("{proj}/CLAUDE.md");
+        let backup_dir = dir.join("backups");
+        std::fs::create_dir_all(&backup_dir)?;
+        if projection::dissolve_if_needed(&claude_md_path, &backup_dir)? {
+            println!("Dissolved managed section delimiters (full_management mode).");
+        }
+    }
+
     println!(
         "{}",
         "Building apply plan (this may call AI for skill generation)...".cyan()
