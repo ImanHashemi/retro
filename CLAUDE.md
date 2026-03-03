@@ -14,27 +14,111 @@ Cargo workspace with two crates:
 - `crates/retro-core/` — library crate (all logic)
 - `crates/retro-cli/` — binary crate (clap commands)
 - `tests/` — fixtures and integration tests
+- `scenarios/` — scenario-based integration tests (see [scenarios/README.md](scenarios/README.md))
+
+## Build & Test
+
+```bash
+# Build (requires Rust toolchain and C compiler for bundled SQLite)
+cargo build
+
+# Run unit tests
+cargo test
+
+# Run scenario tests
+./scenarios/README.md  # see file for test runner usage
+
+# Always run tests before committing
+cargo test && cargo run -- --help  # verify build
+```
+
+## Commands Overview
+
+| Command | Purpose |
+|---------|---------|
+| `retro init` | Initialize retro (creates DB, installs hooks) |
+| `retro ingest [--auto]` | Scan Claude Code session files and save to DB |
+| `retro analyze [--dry-run] [--auto]` | AI-powered pattern discovery from sessions |
+| `retro patterns` | List discovered patterns |
+| `retro apply [--dry-run] [--auto] [--global]` | Generate skills/CLAUDE.md from patterns (saved as PendingReview) |
+| `retro review` | Review and approve/skip/dismiss pending projections |
+| `retro sync` | Sync PR state, reset patterns from closed PRs |
+| `retro curate [--dry-run]` | AI-assisted CLAUDE.md editing (direct file write) |
+| `retro diff [--global]` | Preview changes to CLAUDE.md or global agents |
+| `retro status` | Show summary of sessions, patterns, projections |
+| `retro clean [--dry-run]` | Archive stale patterns |
+| `retro audit [--dry-run]` | Context audit (detects inconsistencies) |
+| `retro log [--since <days>]` | View audit log entries |
+| `retro hooks remove` | Remove git hooks |
+| `retro init --uninstall [--purge]` | Uninstall retro |
 
 ## Key Design Decisions
 
+### Core Architecture
+
 - **Rust, sync only** — no tokio, no async. `std::process::Command` for spawning `claude` CLI and `git`/`gh`.
-- **No git2 crate** — shell out to `git` and `gh` directly.
-- **SQLite bundled** — `rusqlite` with `bundled` feature. WAL mode always.
-- **Error handling** — `thiserror` in retro-core, `anyhow` in retro-cli.
-- **AI backend** — sync `AnalysisBackend` trait with `json_schema: Option<&str>` parameter. Primary impl: `claude -p - --output-format json` (prompt piped via stdin). JSON-producing calls pass `--json-schema` for constrained decoding (guaranteed valid JSON). YAML-producing calls (skill/agent generation) pass `None`. **CLI quirks**: `--json-schema` conflicts with `--tools ""` on large prompts, uses an internal tool call for constrained decoding so the model needs extra turns, and puts output in `structured_output` field (not `result`). Without `--tools ""` the model sometimes makes tool calls consuming turns — `--max-turns 5` gives enough headroom. Non-schema calls use `--tools "" --max-turns 1`.
-- **CLAUDE.md protection** — only write within `<!-- retro:managed:start/end -->` delimiters, never touch user content.
-- **MEMORY.md** — read-only input, never write. Claude Code owns it.
-- **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
+- **No git2 crate** — shell out to `git` and `gh` directly for simplicity and reliability.
+- **SQLite bundled** — `rusqlite` with `bundled` feature. WAL mode always. Schema versioned via `PRAGMA user_version`.
+- **Error handling** — `thiserror` in retro-core, `anyhow` in retro-cli. `CoreError` implements `std::error::Error` — use `?` directly in CLI commands.
+
+### AI Backend
+
+- **Sync trait** — `AnalysisBackend` trait with `json_schema: Option<&str>` parameter.
+- **Primary impl** — `ClaudeCliBackend` uses `claude -p - --output-format json` (prompt piped via stdin to avoid ARG_MAX issues).
+- **Structured output** — JSON-producing calls pass `--json-schema` for constrained decoding (guaranteed valid JSON, no sanitization needed). Schema constants: `ANALYSIS_RESPONSE_SCHEMA` (analysis/mod.rs), `SKILL_VALIDATION_SCHEMA` (projection/skill.rs), `AUDIT_RESPONSE_SCHEMA` (curator.rs).
+- **CLI quirks**:
+  - `--json-schema` conflicts with `--tools ""` on large prompts — only pass `--tools ""` when NOT using `--json-schema`.
+  - `--json-schema` uses an internal tool call for constrained decoding, so model needs extra turns — `--max-turns 5` gives headroom (observed max 4 turns).
+  - Without `--tools ""`, model sometimes makes tool calls consuming turns — `--max-turns 5` prevents turn exhaustion.
+  - Non-schema calls use `--tools "" --max-turns 1` (safe, no tool calls possible).
+  - Output appears in `structured_output` field (parsed JSON), NOT `result` (empty string). `ClaudeCliOutput` checks `structured_output` first, serializes to string, falls back to `result`.
+  - Token counts nest inside `usage` object — never assume top-level fields exist (use nested struct with `#[serde(default)]`). Sum `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` for total input.
+- **YAML-producing calls** — skill/agent generation passes `None` for json_schema (free-form output).
+
+### Pattern Discovery
+
 - **Pattern merging** — AI-assisted (primary) with strong semantic dedup prompt guidance + Levenshtein similarity > 0.8 safety net.
 - **Pattern accumulation** — single-session observations stored at 0.4–0.5 confidence; confirmed when behavior recurs across sessions (AI emits "update" action bumping confidence). Explicit directives ("always"/"never"/"must") get 0.7–0.85 confidence from a single session.
 - **Projection gating** — confidence threshold (default 0.7) is the sole gate for projection. No `times_seen` minimum — explicit directives can project from a single session.
-- **Session filtering** — sessions with < 2 user messages are low-signal (retro's own `claude -p` calls, compacted sessions) and filtered before AI analysis. They are still recorded as analyzed to prevent reprocessing.
-- **Structured output** — JSON-producing AI calls use `--json-schema` for constrained decoding: analysis (`ANALYSIS_RESPONSE_SCHEMA`), skill validation (`SKILL_VALIDATION_SCHEMA`), context audit (`AUDIT_RESPONSE_SCHEMA`). Schema constants live alongside their response types. `parse_analysis_response` is a direct `serde_json::from_str` — no fallback strategies needed. `AnalysisResponse` includes a `reasoning` field (1-2 sentence summary of what the model observed) displayed truncated per batch, full with `--verbose`.
+- **Session filtering** — sessions with < 2 user messages are low-signal (retro's own `claude -p` calls, compacted sessions) and filtered before AI analysis. They are still recorded as analyzed to prevent reprocessing. `analyze --dry-run` shows skipped count.
+- **User message truncation** — `MAX_USER_MSG_LEN = 500` chars in prompt serialization (balances signal quality vs token budget).
 - **Rolling window analysis** — `rolling_window` config (default `true`) re-analyzes all sessions within the time window each run, enabling cross-session pattern discovery. When `false`, sessions are analyzed once and excluded (legacy behavior). Dry-run always shows only unanalyzed sessions regardless of this setting.
-- **Token tracking** — `BackendResponse` carries `input_tokens`/`output_tokens` (not dollar cost). `ClaudeCliOutput` extracts from nested `usage` object, summing `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` for total input.
-- **Auto-apply pipeline** — single post-commit hook orchestrates ingest → analyze → apply. Per-stage cooldowns (5m/24h/24h). Data triggers prevent unnecessary runs. Session cap (`auto_analyze_max_sessions`, default 15) skips auto-analyze when backlog is too large. Hook stderr redirected to `~/.retro/hook-stderr.log`.
-- **Observability** — every auto-mode decision gets a structured audit entry (ingest/analyze/apply success/skip/error). Enhanced nudge reads audit entries since `last_nudge_at` (stored in `metadata` table), groups within 60s as one run, displays colored multi-line status block on next interactive command.
-- **Review queue** — `retro apply` generates content and saves as `PendingReview` (no file writes or PRs). `retro review` is the gate: displays numbered list, user batch-selects apply/skip/dismiss (e.g., `1a 2a 3d` or `all:a`). `retro sync` checks PR state via `gh pr view` — resets patterns from closed PRs to `Discovered`.
+- **Analysis response** — includes `reasoning` field (1-2 sentence summary of what the model observed) displayed truncated per batch, full with `--verbose`.
+
+### Projection & Apply
+
+- **CLAUDE.md protection** — only write within `<!-- retro:managed:start/end -->` delimiters, never touch user content.
+- **MEMORY.md** — read-only input, never write. Claude Code owns it.
+- **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
+- **Review queue** — `retro apply` generates content and saves as `PendingReview` (no file writes or PRs). `retro review` is the gate: displays numbered list, user batch-selects apply/skip/dismiss (e.g., `1a 2a 3d` or `all:a`). Preview with `{N}p`.
+- **Sync** — `retro sync` checks PR state via `gh pr view --json state` — resets patterns from closed PRs to `Discovered`. Both `retro apply` and `retro review` run sync first.
+- **Two-track classification** — personal actions (skills, MEMORY.md edits) apply on current branch; shared actions (CLAUDE.md edits) create new `retro/updates-{YYYYMMDD-HHMMSS}` branch.
+- **PR creation flow** — detect default branch via `gh repo view` → `git fetch origin <default>` → `git checkout -b retro/... origin/<default>` → write/commit → `git push -u origin HEAD` → `gh pr create --base <default>`. Always push before `gh pr create` (remote branch must exist).
+- **Stash wrapper** — `stash_push()`/`stash_pop()` around branch switches (`git checkout -b` fails if tracked files differ when working tree is dirty).
+- **Backup** — files backed up to `~/.retro/backups/` before modification.
+
+### Auto-Apply Pipeline
+
+- **Single hook** — post-commit hook orchestrates full pipeline (`retro ingest --auto` chains analyze + apply).
+- **Per-stage cooldowns** — `ingest_cooldown_minutes` (5), `analyze_cooldown_minutes` (1440), `apply_cooldown_minutes` (1440) — each stage matches its cost profile.
+- **Data triggers** — prevent unnecessary runs (e.g., skip analyze if no unanalyzed sessions).
+- **Session cap** — `auto_analyze_max_sessions` (default 15) skips auto-analyze when backlog exceeds cap.
+- **Hook stderr** — `2>>~/.retro/hook-stderr.log` (not `/dev/null`) — captures parse warnings, panics. `retro init` truncates it.
+- **Auto-apply config** — `auto_apply` (default `true`) gates whether apply stage runs automatically.
+- **Orchestration lock** — prevents concurrent analyze runs.
+
+### Observability
+
+- **Audit log** — append-only JSONL at `~/.retro/audit.jsonl`. Every auto-mode decision gets an entry: `ingest` (success), `analyze_skipped` (session_cap or cooldown_or_no_data), `analyze_error`, `apply_skipped` (no_qualifying_patterns), `apply_error`, enriched `apply` (with `pr_url`).
+- **Terminal nudge** — `check_and_display_nudge()` runs before interactive commands, reads audit entries since `last_nudge_at` (stored in `metadata` table), groups within 60s as one run, displays colored multi-line status block, updates `last_nudge_at`. Shows pending review count alongside auto-run summaries.
+- **Token tracking** — `BackendResponse` carries `input_tokens`/`output_tokens` (not dollar cost).
+
+### Data Models
+
+- **Domain types** — all in `retro-core/src/models.rs`.
+- **DB schema** — v3, all operations in `retro-core/src/db.rs`. `projections` table has `status` column (`TEXT NOT NULL DEFAULT 'applied'` for migration compatibility). `metadata` table stores `last_nudge_at`.
+- **ProjectionStatus enum** — `PendingReview`, `Applied`, `Dismissed` (tracks review queue lifecycle).
+- **ToolResultContent enum** — `Text(String)` | `Blocks(Vec<Value>)` (tool results can be string or array).
 
 ## Dependencies
 
@@ -53,74 +137,85 @@ Cargo workspace with two crates:
 | toml | Config file parsing |
 | tempfile | Test-only: temporary directories for hook tests |
 
-## Build
+## Coding Conventions
 
-Standard Rust build — no special flags needed:
-```
-cargo build
-```
-
-Requires: Rust toolchain (`rustup`) and a C compiler (`build-essential` on Ubuntu) for bundled SQLite.
-
-## Conventions
+### File Organization
 
 - All domain types in `retro-core/src/models.rs`
-- All DB operations in `retro-core/src/db.rs` — schema versioned via `PRAGMA user_version`
+- All DB operations in `retro-core/src/db.rs`
+- Shared helpers:
+  - `git_root_or_cwd()` lives in `retro-cli/src/commands/mod.rs` — use `super::git_root_or_cwd`
+  - `strip_code_fences()` lives in `retro-core/src/util.rs` — use `crate::util::strip_code_fences`
+- CLI commands that share logic should expose a shared entry point (e.g., `run_apply()` with `DisplayMode` enum) rather than duplicating code
+
+### Error Handling
+
+- `CoreError` implements `std::error::Error` via thiserror — use `?` directly in CLI commands (no `.map_err(|e| anyhow!("{e}"))`)
+- `thiserror` in retro-core, `anyhow` in retro-cli
+
+### JSON/JSONL Parsing
+
 - Use `#[serde(default)]` on all optional fields for forward-compatibility with JSONL format changes
 - Skip unparseable JSONL lines gracefully (log warning for known types, silent skip for unknown types)
 - Pre-parse `type` field from JSONL before full deserialization to distinguish unknown entry types from parse errors in known types
+- JSON-producing AI calls use `--json-schema` constrained decoding — response is guaranteed valid JSON, no sanitization needed
+
+### String Handling
+
 - String truncation must use `char_boundary()` helper — never slice at arbitrary byte offsets (UTF-8 panic risk)
-- JSON-producing AI calls use `--json-schema` constrained decoding — response is guaranteed valid JSON, no sanitization needed. Schema constants: `ANALYSIS_RESPONSE_SCHEMA` (analysis/mod.rs), `SKILL_VALIDATION_SCHEMA` (projection/skill.rs), `AUDIT_RESPONSE_SCHEMA` (curator.rs)
-- `ToolResultContent` is an enum (`Text(String)` | `Blocks(Vec<Value>)`) — tool results can be string or array
 - Path decoding uses `recover_project_path()` which reads `cwd` from session files — naive decode breaks on paths with hyphens
-- Project-scoped commands resolve project path via `git rev-parse --show-toplevel`, falling back to cwd
-- `CoreError` implements `std::error::Error` via thiserror — use `?` directly in CLI commands (no `.map_err(|e| anyhow!("{e}"))`)
+
+### Process Management
+
 - Process-alive checks use `libc::kill(pid, 0)` — portable across Linux and macOS (not `/proc/` which is Linux-only)
-- Backup files to `~/.retro/backups/` before any modification
-- Audit log: append-only JSONL at `~/.retro/audit.jsonl`
 - AI prompts must be piped via stdin (`-p -`), never as CLI arguments (ARG_MAX risk with 150K prompts)
-- When progressively fitting content into a prompt budget, drop items from the end — never truncate mid-JSON
-- Shared helper `git_root_or_cwd()` lives in `retro-cli/src/commands/mod.rs` — use `super::git_root_or_cwd`
-- Shared `strip_code_fences()` lives in `retro-core/src/util.rs` — use `crate::util::strip_code_fences`
-- Confirmation prompts use `stdin` y/N pattern (not dialoguer) — keep it simple
-- CLI commands that share logic should expose a shared entry point (e.g., `run_apply()` with `DisplayMode` enum) rather than duplicating code
+- Git/gh shell-outs use `Command::new().args()` (not shell strings) — each arg passed directly to `execve()`, safe from injection
+
+### Git Hooks
+
+- Hook format: marker comment (`# retro hook - do not remove`) + command on next line; removal is line-pair based
+- `install_hook_lines` returns `HookInstallResult` (Installed/Updated/UpToDate)
+- `retro init` updates existing hooks to new redirect format (remove+re-add)
+
+### Database
+
 - Batch DB queries into HashSets when filtering (avoid N+1 queries in loops)
 - Re-export internal types from retro-core when CLI crate needs them (e.g., `pub use rusqlite::Connection` in `db.rs`) — avoid adding transitive deps to retro-cli
-- Git/gh shell-outs use `Command::new().args()` (not shell strings) — each arg passed directly to `execve()`, safe from injection
-- Git hook format: marker comment (`# retro hook - do not remove`) + command on next line; removal is line-pair based; `install_hook_lines` returns `HookInstallResult` (Installed/Updated/UpToDate)
-- Hook stderr: `2>>~/.retro/hook-stderr.log` (not `/dev/null`) — captures parse warnings, panics. `retro init` truncates it. `retro init` also updates existing hooks to new redirect format (remove+re-add)
-- Two-phase apply execution: personal actions on current branch, shared actions on a new `retro/updates-{YYYYMMDD-HHMMSS}` branch
-- Claude CLI JSON output nests token counts inside `usage` object — never assume top-level fields exist (use nested struct with `#[serde(default)]`). With `--json-schema`, structured output appears in `structured_output` field (parsed JSON), not `result` (empty string) — `ClaudeCliOutput` checks `structured_output` first, serializes to string, falls back to `result`
-- `--dry-run` on all AI commands must skip AI calls entirely — snapshot context, show summary, return early (not just suppress writes)
+
+### User Interaction
+
+- Confirmation prompts use `stdin` y/N pattern (not dialoguer) — keep it simple
+
+### Testing
+
 - Test strategy: unit tests with fixtures (no AI), integration tests with `MockBackend`
-- Auto-mode orchestration: `ingest --auto` chains analyze and apply when `auto_apply=true` and data triggers + cooldowns are satisfied
-- Terminal nudge: `check_and_display_nudge()` runs before interactive commands, reads audit entries since `last_nudge_at` from metadata table, aggregates into `AutoRunSummary` structs (60s window grouping), displays colored status block, updates `last_nudge_at`
-- Session filtering: sessions with < 2 user messages (low-signal) are skipped before AI analysis but still recorded as analyzed. `analyze --dry-run` shows skipped count in summary and per-session in `--verbose` mode
-- User message truncation: `MAX_USER_MSG_LEN = 500` chars in prompt serialization — balances signal quality against token budget
-- Session cap: `auto_analyze_max_sessions` (default 15) — `unanalyzed_session_count()` checked before auto-analyze; if exceeded, writes `analyze_skipped` audit entry with `reason: "session_cap"` and skips AI call
-- Audit coverage: every auto-mode decision gets an entry — `ingest` (success), `analyze_skipped` (session_cap or cooldown_or_no_data), `analyze_error`, `apply_skipped` (no_qualifying_patterns), `apply_error`, enriched `apply` (with `pr_url`)
-- Per-stage cooldowns: `ingest_cooldown_minutes` (5), `analyze_cooldown_minutes` (1440), `apply_cooldown_minutes` (1440) — each stage has its own cooldown matching cost profile
-- PR creation flow: detect default branch via `gh repo view` → `git fetch origin <default>` → `git checkout -b retro/... origin/<default>` → write/commit → `git push -u origin HEAD` → `gh pr create --base <default>`
-- Always push before `gh pr create` — the remote branch must exist
-- `stash_push()`/`stash_pop()` around branch switches in apply — `git checkout -b` fails if tracked files differ between branches when working tree is dirty
-- `ProjectionStatus` enum: `PendingReview`, `Applied`, `Dismissed` — tracks review queue lifecycle
-- `retro apply` saves projections as `PendingReview` — does NOT write files or create PRs directly
-- `retro review` is the human gate: lists pending items, user batch-selects `apply`/`skip`/`dismiss` with `{N}{a|s|d}` or `all:{a|s|d}` syntax; preview with `{N}p`
-- `retro sync` checks PR state via `gh pr view --json state` — resets patterns from closed (not merged) PRs to `Discovered`
-- Both `retro apply` and `retro review` run `sync::run_sync()` first to clean up stale PR state
-- Nudge system shows pending review count alongside auto-run summaries
-- DB schema v3: `projections` table has `status` column (`TEXT NOT NULL DEFAULT 'applied'` for migration compatibility)
+- Scenario tests in `scenarios/` directory — see `scenarios/README.md` for usage
+- `--dry-run` on all AI commands must skip AI calls entirely — snapshot context, show summary, return early (not just suppress writes)
+- `analyze --dry-run` shows skipped count in summary and per-session in `--verbose` mode
+
+### Performance
+
+- When progressively fitting content into a prompt budget, drop items from the end — never truncate mid-JSON
+- Project-scoped commands resolve project path via `git rev-parse --show-toplevel`, falling back to cwd
 
 ## Implementation Status
 
-- **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working. 18 sessions ingested from real data.
-- **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend (stdin), prompt builder, pattern merging with Levenshtein dedup, audit log. 19 unit tests.
-- **Phase 3: DONE** — Projection + Apply. `projection/{mod,skill,claude_md,global_agent}.rs`, `util.rs`, `retro apply [--dry-run] [--global]`, `retro diff [--global]`. Two-phase skill gen (draft+validate), CLAUDE.md managed section, global agent generation, projection CRUD, file backups, two-track classification (personal/shared), y/N confirmation before writes. 47 unit tests.
-- **Phase 4: DONE** — Full Apply + Clean + Audit + Git. `git.rs` (branch/PR/hook management), `curator.rs` (staleness detection, archiving), `retro clean [--dry-run]`, `retro audit [--dry-run]`, `retro log [--since]`, `retro hooks remove`, `retro init --uninstall [--purge]`. Apply now creates git branch + PR for shared track via `gh`. Two-phase apply (personal on current branch, shared on new branch). 63 unit tests.
-- **Phase 5: DONE** — Hooks + Polish. `--auto` mode on `ingest` and `analyze` (lockfile skip, cooldown check, silent operation), `--verbose` global flag, progress indicators for AI calls, `LockFile::try_acquire()`, post-commit hook updated to `retro ingest --auto`. `analyze --dry-run` for previewing AI calls. 63 unit tests.
-- **Post-v0.1 fixes**: Strengthened analysis prompt dedup (semantic merge guidance with examples). Replaced `cost_usd` with `input_tokens`/`output_tokens` across pipeline (extracts from nested `usage` in CLI JSON). `audit --dry-run` now skips AI calls entirely (shows context summary instead).
-- **Phase 6: DONE** — Auto-Apply Pipeline. Single post-commit hook orchestrates full pipeline (`ingest --auto` chains analyze + apply). Per-stage cooldowns (`ingest_cooldown_minutes=5`, `analyze_cooldown_minutes=1440`, `apply_cooldown_minutes=1440`). `auto_apply` config (on by default). `apply --auto` with lockfile, cooldown, and data gate. Old post-merge hook cleanup on `retro init`. Orchestration lock prevents concurrent analyze. 87 unit tests.
-- **Auto-mode observability: DONE** — `auto_analyze_max_sessions` config (default 15) skips auto-analyze when backlog exceeds cap. DB schema v2 adds `metadata` table for `last_nudge_at`. `unanalyzed_session_count()` for cap check. Comprehensive audit logging for every auto-mode decision (ingest success, analyze skip/error, apply skip/error, enriched apply with `pr_url`). Enhanced nudge system reads audit entries since last nudge, groups by 60s window, displays multi-line colored status block. Hook stderr redirected to `~/.retro/hook-stderr.log`. `retro init` updates existing hooks to new format (`HookInstallResult` enum: Installed/Updated/UpToDate). Old `get_unnudged_pr_urls`/`mark_projections_nudged` removed (replaced by audit-based nudge). 93 unit tests, 9 scenario tests.
-- **Phase 7: DONE** — Review Queue. `retro apply` now generates content and saves as `PendingReview` (no direct file writes). `retro review` command for batch approve/skip/dismiss. `retro sync` detects closed PRs and resets patterns. `ProjectionStatus` enum (`PendingReview`/`Applied`/`Dismissed`). DB schema v3 adds `status` column to projections. Nudge shows pending review count. Sync runs automatically before apply and review.
-- **Pattern discovery quality: DONE** — `--json-schema` structured output on all JSON-producing AI calls (analysis, skill validation, audit) eliminates JSON parse failures via constrained decoding. Analysis response includes `reasoning` field for per-batch diagnostics. Session filtering (< 2 user messages = low signal). Explicit directives category ("always"/"never"/"must" at 0.7–0.85 confidence). Pattern accumulation model (single-session at 0.4–0.5, confirmed via updates). Confidence threshold as sole projection gate (removed `times_seen >= 2`). Simplified prompt exclusions. Context-aware analysis prompt. Rolling window analysis (default on, configurable). 115 unit tests, 10 scenario tests.
+All core features complete and tested. Current focus: quality improvements and user experience polish.
 
+- **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working.
+- **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend, prompt builder, pattern merging.
+- **Phase 3: DONE** — Projection + Apply. Two-phase skill gen (draft+validate), CLAUDE.md managed section, global agent generation, projection CRUD.
+- **Phase 4: DONE** — Full Apply + Clean + Audit + Git. Git branch/PR management, `retro clean`, `retro audit`, `retro log`, hook removal, uninstall.
+- **Phase 5: DONE** — Hooks + Polish. `--auto` mode, `--verbose` flag, progress indicators, lockfile, `analyze --dry-run`.
+- **Phase 6: DONE** — Auto-Apply Pipeline. Single hook orchestration, per-stage cooldowns, `auto_apply` config, old hook cleanup.
+- **Phase 7: DONE** — Review Queue. `retro apply` → PendingReview, `retro review` command, `retro sync` PR state detection, nudge shows pending count.
+- **Pattern discovery quality: DONE** — `--json-schema` structured output, analysis reasoning field, session filtering, explicit directives, confidence-based projection gate, rolling window analysis.
+
+Test coverage: 115 unit tests, 10 scenario tests.
+
+## Testing
+
+Always run tests before committing:
+```bash
+cargo test
+```
