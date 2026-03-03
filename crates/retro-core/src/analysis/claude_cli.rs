@@ -77,6 +77,92 @@ impl ClaudeCliBackend {
 /// Maximum time to wait for an agentic `claude -p` call (codebase exploration).
 const AGENTIC_TIMEOUT_SECS: u64 = 600; // 10 minutes
 
+/// Spawn a `claude` CLI child process, write the prompt to stdin, wait with a timeout,
+/// and return the parsed `ClaudeCliOutput`. Shared by `execute()` and `execute_agentic()`.
+fn run_claude_child(
+    mut child: std::process::Child,
+    prompt: &str,
+    timeout_secs: u64,
+    label: &str,
+) -> Result<ClaudeCliOutput, CoreError> {
+    // Write prompt to stdin and close it
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(prompt.as_bytes()).map_err(|e| {
+            CoreError::Analysis(format!("failed to write prompt to claude stdin: {e}"))
+        })?;
+    }
+
+    // Read stdout/stderr in background threads to prevent pipe deadlock
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+
+    let stdout_handle = thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stdout_pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let stderr_handle = thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let timeout = Duration::from_secs(timeout_secs);
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(CoreError::Analysis(format!(
+                        "claude CLI {label} timed out after {timeout_secs}s — killed process."
+                    )));
+                }
+                thread::sleep(Duration::from_millis(500));
+            }
+            Err(e) => {
+                return Err(CoreError::Analysis(format!(
+                    "error waiting for claude CLI ({label}): {e}"
+                )));
+            }
+        }
+    };
+
+    let stdout_bytes = stdout_handle.join().unwrap_or_default();
+    let stderr_bytes = stderr_handle.join().unwrap_or_default();
+
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr_bytes);
+        return Err(CoreError::Analysis(format!(
+            "claude CLI ({label}) exited with {status}: {stderr}"
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&stdout_bytes);
+
+    let cli_output: ClaudeCliOutput = serde_json::from_str(&stdout).map_err(|e| {
+        CoreError::Analysis(format!(
+            "failed to parse claude CLI {label} output: {e}\nraw output: {}",
+            truncate_for_error(&stdout)
+        ))
+    })?;
+
+    if cli_output.is_error {
+        let error_text = cli_output.result.clone().unwrap_or_else(|| "unknown error".to_string());
+        return Err(CoreError::Analysis(format!(
+            "claude CLI ({label}) returned error: {error_text}"
+        )));
+    }
+
+    Ok(cli_output)
+}
+
 impl ClaudeCliBackend {
     /// Execute an agentic prompt: unlimited turns, full tool access, raw markdown output.
     ///
@@ -108,90 +194,13 @@ impl ClaudeCliBackend {
             cmd.current_dir(dir);
         }
 
-        let mut child = cmd.spawn().map_err(|e| {
+        let child = cmd.spawn().map_err(|e| {
             CoreError::Analysis(format!(
                 "failed to spawn claude CLI (agentic): {e}. Is claude installed and on PATH?"
             ))
         })?;
 
-        // Write prompt to stdin and close it
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(prompt.as_bytes()).map_err(|e| {
-                CoreError::Analysis(format!("failed to write prompt to claude stdin: {e}"))
-            })?;
-        }
-
-        // Read stdout/stderr in background threads to prevent pipe deadlock
-        let stdout_pipe = child.stdout.take();
-        let stderr_pipe = child.stderr.take();
-
-        let stdout_handle = thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut pipe) = stdout_pipe {
-                let _ = pipe.read_to_end(&mut buf);
-            }
-            buf
-        });
-        let stderr_handle = thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut pipe) = stderr_pipe {
-                let _ = pipe.read_to_end(&mut buf);
-            }
-            buf
-        });
-
-        let timeout = Duration::from_secs(AGENTIC_TIMEOUT_SECS);
-        let start = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {
-                    if start.elapsed() > timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(CoreError::Analysis(format!(
-                            "claude CLI agentic call timed out after {}s — killed process.",
-                            AGENTIC_TIMEOUT_SECS
-                        )));
-                    }
-                    thread::sleep(Duration::from_millis(500));
-                }
-                Err(e) => {
-                    return Err(CoreError::Analysis(format!(
-                        "error waiting for claude CLI (agentic): {e}"
-                    )));
-                }
-            }
-        };
-
-        let stdout_bytes = stdout_handle.join().unwrap_or_default();
-        let stderr_bytes = stderr_handle.join().unwrap_or_default();
-
-        if !status.success() {
-            let stderr = String::from_utf8_lossy(&stderr_bytes);
-            return Err(CoreError::Analysis(format!(
-                "claude CLI (agentic) exited with {}: {}",
-                status, stderr
-            )));
-        }
-
-        let stdout = String::from_utf8_lossy(&stdout_bytes);
-
-        // Parse the JSON wrapper
-        let cli_output: ClaudeCliOutput = serde_json::from_str(&stdout).map_err(|e| {
-            CoreError::Analysis(format!(
-                "failed to parse claude CLI agentic output: {e}\nraw output: {}",
-                truncate_for_error(&stdout)
-            ))
-        })?;
-
-        if cli_output.is_error {
-            let error_text = cli_output.result.unwrap_or_else(|| "unknown error".to_string());
-            return Err(CoreError::Analysis(format!(
-                "claude CLI (agentic) returned error: {}",
-                error_text
-            )));
-        }
+        let cli_output = run_claude_child(child, prompt, AGENTIC_TIMEOUT_SECS, "agentic")?;
 
         let input_tokens = cli_output.total_input_tokens();
         let output_tokens = cli_output.total_output_tokens();
@@ -253,7 +262,7 @@ impl AnalysisBackend for ClaudeCliBackend {
             args.push("--tools");
             args.push("");
         }
-        let mut child = Command::new("claude")
+        let child = Command::new("claude")
             .args(&args)
             // Clear CLAUDECODE to avoid nested-session rejection when retro
             // is invoked from a post-commit hook inside a Claude Code session.
@@ -268,88 +277,7 @@ impl AnalysisBackend for ClaudeCliBackend {
                 ))
             })?;
 
-        // Write prompt to stdin and close it
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(prompt.as_bytes()).map_err(|e| {
-                CoreError::Analysis(format!("failed to write prompt to claude stdin: {e}"))
-            })?;
-            // stdin is dropped here, closing the pipe
-        }
-
-        // Read stdout/stderr in background threads to prevent pipe deadlock,
-        // then poll the child with a timeout to kill runaway processes
-        // (e.g., the CLI's internal StructuredOutput retry loop).
-        let stdout_pipe = child.stdout.take();
-        let stderr_pipe = child.stderr.take();
-
-        let stdout_handle = thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut pipe) = stdout_pipe {
-                let _ = pipe.read_to_end(&mut buf);
-            }
-            buf
-        });
-        let stderr_handle = thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut pipe) = stderr_pipe {
-                let _ = pipe.read_to_end(&mut buf);
-            }
-            buf
-        });
-
-        let timeout = Duration::from_secs(EXECUTE_TIMEOUT_SECS);
-        let start = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {
-                    if start.elapsed() > timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(CoreError::Analysis(format!(
-                            "claude CLI timed out after {}s — killed process. \
-                             This may indicate a StructuredOutput retry loop in the CLI.",
-                            EXECUTE_TIMEOUT_SECS
-                        )));
-                    }
-                    thread::sleep(Duration::from_millis(500));
-                }
-                Err(e) => {
-                    return Err(CoreError::Analysis(format!(
-                        "error waiting for claude CLI: {e}"
-                    )));
-                }
-            }
-        };
-
-        let stdout_bytes = stdout_handle.join().unwrap_or_default();
-        let stderr_bytes = stderr_handle.join().unwrap_or_default();
-
-        if !status.success() {
-            let stderr = String::from_utf8_lossy(&stderr_bytes);
-            return Err(CoreError::Analysis(format!(
-                "claude CLI exited with {}: {}",
-                status, stderr
-            )));
-        }
-
-        let stdout = String::from_utf8_lossy(&stdout_bytes);
-
-        // Parse the JSON wrapper
-        let cli_output: ClaudeCliOutput = serde_json::from_str(&stdout).map_err(|e| {
-            CoreError::Analysis(format!(
-                "failed to parse claude CLI output: {e}\nraw output: {}",
-                truncate_for_error(&stdout)
-            ))
-        })?;
-
-        if cli_output.is_error {
-            let error_text = cli_output.result.unwrap_or_else(|| "unknown error".to_string());
-            return Err(CoreError::Analysis(format!(
-                "claude CLI returned error: {}",
-                error_text
-            )));
-        }
+        let cli_output = run_claude_child(child, prompt, EXECUTE_TIMEOUT_SECS, "execute")?;
 
         let input_tokens = cli_output.total_input_tokens();
         let output_tokens = cli_output.total_output_tokens();

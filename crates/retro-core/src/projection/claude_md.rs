@@ -113,20 +113,41 @@ pub fn dissolve_managed_section(content: &str) -> String {
     result
 }
 
+/// Remove the first occurrence of `needle` (trimmed) from content.
+/// Handles both single-line and multi-line original_text via substring match.
+fn remove_substring(content: &str, needle: &str) -> String {
+    let trimmed = needle.trim();
+    if trimmed.is_empty() {
+        return content.to_string();
+    }
+    // Try exact substring match first
+    if let Some(pos) = content.find(trimmed) {
+        let before = &content[..pos];
+        let after = &content[pos + trimmed.len()..];
+        // Clean up: if we left a blank line, collapse it
+        let after = after.strip_prefix('\n').unwrap_or(after);
+        format!("{before}{after}")
+    } else {
+        // Fallback: line-level match for single-line needles
+        content
+            .lines()
+            .filter(|line| line.trim() != trimmed)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + if content.ends_with('\n') { "\n" } else { "" }
+    }
+}
+
 /// Apply a single edit to CLAUDE.md content.
 pub fn apply_edit(content: &str, edit: &ClaudeMdEdit) -> String {
     match edit.edit_type {
         ClaudeMdEditType::Remove => {
-            content
-                .lines()
-                .filter(|line| line.trim() != edit.original_text.trim())
-                .collect::<Vec<_>>()
-                .join("\n")
-                + if content.ends_with('\n') { "\n" } else { "" }
+            remove_substring(content, &edit.original_text)
         }
         ClaudeMdEditType::Reword => {
             if let Some(replacement) = &edit.suggested_content {
-                content.replace(edit.original_text.trim(), replacement.trim())
+                // replacen(1): only replace the first occurrence to avoid unintended changes
+                content.replacen(edit.original_text.trim(), replacement.trim(), 1)
             } else {
                 content.to_string()
             }
@@ -143,11 +164,7 @@ pub fn apply_edit(content: &str, edit: &ClaudeMdEdit) -> String {
             result
         }
         ClaudeMdEditType::Move => {
-            let without = content
-                .lines()
-                .filter(|line| line.trim() != edit.original_text.trim())
-                .collect::<Vec<_>>()
-                .join("\n");
+            let without = remove_substring(content, &edit.original_text);
 
             if let (Some(section), Some(text)) = (&edit.target_section, &edit.suggested_content) {
                 let mut result = String::new();
@@ -327,6 +344,39 @@ mod tests {
         let result = apply_edit(content, &edit);
         assert!(result.contains("Existing content."));
         assert!(result.contains("- New rule to add"));
+    }
+
+    #[test]
+    fn test_apply_edit_remove_multiline() {
+        let content = "# Project\n\n## Old Section\n\n- item A\n- item B\n\n## Next Section\n";
+        let edit = ClaudeMdEdit {
+            edit_type: ClaudeMdEditType::Remove,
+            original_text: "## Old Section\n\n- item A\n- item B".to_string(),
+            suggested_content: None,
+            target_section: None,
+            reasoning: "entire section is stale".to_string(),
+        };
+        let result = apply_edit(content, &edit);
+        assert!(!result.contains("Old Section"));
+        assert!(!result.contains("item A"));
+        assert!(!result.contains("item B"));
+        assert!(result.contains("## Next Section"));
+    }
+
+    #[test]
+    fn test_apply_edit_reword_first_only() {
+        let content = "# Project\n\nNo async\n\n## Rules\n\nNo async\n";
+        let edit = ClaudeMdEdit {
+            edit_type: ClaudeMdEditType::Reword,
+            original_text: "No async".to_string(),
+            suggested_content: Some("Sync only".to_string()),
+            target_section: None,
+            reasoning: "too terse".to_string(),
+        };
+        let result = apply_edit(content, &edit);
+        // First occurrence replaced, second left intact
+        assert!(result.starts_with("# Project\n\nSync only\n"));
+        assert!(result.contains("\nNo async\n"));
     }
 
     #[test]

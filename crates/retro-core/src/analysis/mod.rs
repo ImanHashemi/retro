@@ -55,52 +55,30 @@ pub const ANALYSIS_RESPONSE_SCHEMA: &str = r#"{
 }"#;
 
 /// Extended JSON schema that includes `claude_md_edits` for full_management mode.
-/// Returns a `String` because it's dynamically constructed (unlike the const base schema).
+/// Built programmatically from `ANALYSIS_RESPONSE_SCHEMA` to avoid duplication.
 pub fn full_management_analysis_schema() -> String {
-    r#"{
-  "type": "object",
-  "properties": {
-    "reasoning": {"type": "string"},
-    "patterns": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "action": {"type": "string", "enum": ["new", "update"]},
-          "pattern_type": {"type": "string", "enum": ["repetitive_instruction", "recurring_mistake", "workflow_pattern", "stale_context", "redundant_context"]},
-          "description": {"type": "string"},
-          "confidence": {"type": "number"},
-          "source_sessions": {"type": "array", "items": {"type": "string"}},
-          "related_files": {"type": "array", "items": {"type": "string"}},
-          "suggested_content": {"type": "string"},
-          "suggested_target": {"type": "string", "enum": ["skill", "claude_md", "global_agent", "db_only"]},
-          "existing_id": {"type": "string"},
-          "new_sessions": {"type": "array", "items": {"type": "string"}},
-          "new_confidence": {"type": "number"}
-        },
-        "required": ["action"],
-        "additionalProperties": false
-      }
-    },
-    "claude_md_edits": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "edit_type": {"type": "string", "enum": ["add", "remove", "reword", "move"]},
-          "original_text": {"type": "string"},
-          "suggested_content": {"type": "string"},
-          "target_section": {"type": "string"},
-          "reasoning": {"type": "string"}
-        },
-        "required": ["edit_type", "reasoning"],
-        "additionalProperties": false
-      }
-    }
-  },
-  "required": ["reasoning", "patterns"],
-  "additionalProperties": false
-}"#.to_string()
+    let mut schema: serde_json::Value = serde_json::from_str(ANALYSIS_RESPONSE_SCHEMA)
+        .expect("ANALYSIS_RESPONSE_SCHEMA must be valid JSON");
+
+    let edits_schema: serde_json::Value = serde_json::json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "edit_type": {"type": "string", "enum": ["add", "remove", "reword", "move"]},
+                "original_text": {"type": "string"},
+                "suggested_content": {"type": "string"},
+                "target_section": {"type": "string"},
+                "reasoning": {"type": "string"}
+            },
+            "required": ["edit_type", "reasoning"],
+            "additionalProperties": false
+        }
+    });
+
+    schema["properties"]["claude_md_edits"] = edits_schema;
+
+    serde_json::to_string_pretty(&schema).expect("schema serialization cannot fail")
 }
 
 /// Run analysis: re-parse sessions, scrub, call AI, merge patterns, store results.
