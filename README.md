@@ -99,6 +99,11 @@ Retro operates as a three-stage pipeline:
 
 Retro never touches content outside the managed delimiters.
 
+**Full management mode** lets retro manage your entire CLAUDE.md, not just a managed section. Enable with `full_management = true` (see Configuration). In this mode:
+- `retro apply` proposes granular edits (add, remove, reword, move) anywhere in CLAUDE.md, reviewed through the normal queue
+- `retro curate` performs an agentic full rewrite — AI explores your codebase and proposes a complete improved CLAUDE.md via PR
+- Managed section delimiters are dissolved on first run (existing rules preserved in place)
+
 **Skills** are reusable workflow patterns saved as `.claude/skills/` files. For example, a "pre-pr-checklist" skill extracted from a workflow you guided your agent through across multiple sessions: run tests, lint, format commit message.
 
 **Global agents** are personal agent definitions at `~/.claude/agents/` for patterns that apply across all your projects.
@@ -119,6 +124,7 @@ All changes go through `retro review` first. Approved shared changes (CLAUDE.md,
 | `retro diff` | Preview what `apply` would change (alias for `apply --dry-run`) |
 | `retro clean` | Archive stale patterns and remove their projections |
 | `retro audit` | AI-powered review of your context for redundancy and contradictions |
+| `retro curate` | AI-powered full CLAUDE.md rewrite — explores codebase and proposes changes via PR |
 | `retro status` | Show session counts, last analysis, pattern summary |
 | `retro log` | Show audit log entries |
 | `retro hooks remove` | Remove retro git hooks from the current repository |
@@ -153,6 +159,9 @@ confidence_threshold = 0.7 # Minimum confidence to act on patterns
 [ai]
 model = "sonnet"           # AI model (sonnet, opus, haiku)
 
+[claude_md]
+full_management = false    # Full CLAUDE.md management (enables retro curate + granular edits)
+
 [hooks]
 ingest_cooldown_minutes = 5    # Minimum time between auto-ingests
 analyze_cooldown_minutes = 1440 # Minimum time between auto-analyses (24h)
@@ -179,7 +188,7 @@ cargo install retro-cli
 
 ## Status
 
-Retro is v0.2. The core pipeline works end-to-end and has been tested on real Claude Code session history. 115 unit tests, 10 scenario tests.
+Retro is v0.3. The core pipeline works end-to-end and has been tested on real Claude Code session history. 160 unit tests, 12 scenario tests.
 
 **What works well:**
 - Session ingestion and pattern discovery across projects
@@ -193,6 +202,7 @@ Retro is v0.2. The core pipeline works end-to-end and has been tested on real Cl
 - Context auditing for redundancy and contradictions
 - PR lifecycle management (`retro sync` detects closed PRs)
 - Dry-run mode on all AI-powered commands
+- Full CLAUDE.md management with granular edits and agentic rewrite (`retro curate`)
 
 **What's early:**
 - Skill generation quality varies (two-phase generate+validate helps but isn't perfect)

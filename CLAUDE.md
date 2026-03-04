@@ -97,6 +97,15 @@ cargo test && cargo run -- --help  # verify build
 - **Stash wrapper** — `stash_push()`/`stash_pop()` around branch switches (`git checkout -b` fails if tracked files differ when working tree is dirty).
 - **Backup** — files backed up to `~/.retro/backups/` before modification.
 
+### Full CLAUDE.md Management
+
+- **Opt-in mode** — `[claude_md] full_management = true` in config. Default is `false` (managed section only).
+- **Granular edits** — when enabled, `retro apply` uses extended analysis schema (`full_management_analysis_schema()`) that includes `claude_md_edits` (add/remove/reword/move). Edits flow through the standard apply → review pipeline.
+- **Agentic rewrite** — `retro curate` runs `execute_agentic()` with full tool access to explore codebase, proposes complete CLAUDE.md rewrite via PR on `retro/curate-{YYYYMMDD-HHMMSS}` branch.
+- **Agentic AI calls** — `execute_agentic()` uses `claude -p` with unlimited turns, full tool access, no `--json-schema` (raw markdown output), optional `cwd`, 600s timeout. Shared `run_claude_child()` helper handles stdin/stdout/stderr piping and timeout for both `execute()` and `execute_agentic()`.
+- **Delimiter dissolution** — `dissolve_if_needed()` removes `<!-- retro:managed:start/end -->` markers when full management is first enabled, preserving rule content in place. Backs up to `~/.retro/backups/`.
+- **Edit types** — `ClaudeMdEdit` (Add/Remove/Reword/Move) in `models.rs`. `apply_edit()`/`apply_edits()` in `projection/claude_md.rs`. Review command shows icons: `[rule+]`, `[rule-]`, `[rule~]`, `[rule>]`.
+
 ### Auto-Apply Pipeline
 
 - **Single hook** — post-commit hook orchestrates full pipeline (`retro ingest --auto` chains analyze + apply).
@@ -146,6 +155,8 @@ cargo test && cargo run -- --help  # verify build
 - Shared helpers:
   - `git_root_or_cwd()` lives in `retro-cli/src/commands/mod.rs` — use `super::git_root_or_cwd`
   - `strip_code_fences()` lives in `retro-core/src/util.rs` — use `crate::util::strip_code_fences`
+  - `build_curate_prompt()` lives in `analysis/prompts.rs`
+  - `run_claude_child()` shared helper in `analysis/claude_cli.rs`
 - CLI commands that share logic should expose a shared entry point (e.g., `run_apply()` with `DisplayMode` enum) rather than duplicating code
 
 ### Error Handling
@@ -210,8 +221,9 @@ All core features complete and tested. Current focus: quality improvements and u
 - **Phase 6: DONE** — Auto-Apply Pipeline. Single hook orchestration, per-stage cooldowns, `auto_apply` config, old hook cleanup.
 - **Phase 7: DONE** — Review Queue. `retro apply` → PendingReview, `retro review` command, `retro sync` PR state detection, nudge shows pending count.
 - **Pattern discovery quality: DONE** — `--json-schema` structured output, analysis reasoning field, session filtering, explicit directives, confidence-based projection gate, rolling window analysis.
+- **Full CLAUDE.md management: DONE** — `[claude_md] full_management` config. Granular edits (add/remove/reword/move) through apply pipeline with `full_management_analysis_schema()`. Agentic rewrite via `retro curate` with `execute_agentic()`. `dissolve_if_needed()` for delimiter removal. Edit type icons in review. Two scenario tests (curate-dry-run, curate-real-ai-call).
 
-Test coverage: 115 unit tests, 10 scenario tests.
+Test coverage: 160 unit tests, 12 scenario tests.
 
 ## Testing
 
