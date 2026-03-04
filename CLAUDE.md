@@ -231,3 +231,15 @@ Always run tests before committing:
 ```bash
 cargo test
 ```
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- Before completing any implementation work, run all scenario tests to verify nothing broke. Use the run-scenarios skill.
+- When debugging issues, always investigate and identify the root cause before proposing fixes. Do not implement symptom-based patches or workarounds without understanding why the problem occurs.
+- After completing implementation work, always check if documentation (CLAUDE.md, README.md) needs updates to reflect the changes
+- When AI operations return unexpected or counterintuitive results (e.g., 0 patterns found, empty responses), include a `reasoning` field in the response schema and display it to the user. This helps debug AI behavior and understand why certain decisions were made.
+- For major changes, provide commands for clean install testing: retro init --uninstall --purge && cargo build --release && ./target/release/retro init
+- Before publishing a new release, bump version numbers in all Cargo.toml files (workspace root and crate manifests)
+
+<!-- retro:managed:end -->
