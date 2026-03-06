@@ -4,7 +4,9 @@ use retro_core::config::retro_dir;
 use retro_core::db;
 use retro_core::util::shorten_path;
 
-pub fn run(status_filter: Option<String>) -> Result<()> {
+use super::git_root_or_cwd;
+
+pub fn run(status_filter: Option<String>, global: bool) -> Result<()> {
     let dir = retro_dir();
     let db_path = dir.join("retro.db");
 
@@ -15,10 +17,12 @@ pub fn run(status_filter: Option<String>) -> Result<()> {
 
     let conn = db::open_db(&db_path)?;
 
+    let project = if global { None } else { Some(git_root_or_cwd()?) };
+
     let patterns = if let Some(ref status) = status_filter {
-        db::get_patterns(&conn, &[status.as_str()], None)?
+        db::get_patterns(&conn, &[status.as_str()], project.as_deref())?
     } else {
-        db::get_all_patterns(&conn, None)?
+        db::get_all_patterns(&conn, project.as_deref())?
     };
 
     if patterns.is_empty() {

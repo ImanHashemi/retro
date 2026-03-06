@@ -53,6 +53,9 @@ enum Commands {
         /// Filter by status: discovered, active, archived, dismissed
         #[arg(long)]
         status: Option<String>,
+        /// Show patterns for all projects, not just the current one
+        #[arg(long)]
+        global: bool,
     },
     /// Generate content from patterns and queue for review (use `retro review` to approve)
     Apply {
@@ -146,7 +149,7 @@ fn main() {
             auto,
             dry_run,
         } => commands::analyze::run(global, since, auto, dry_run, verbose),
-        Commands::Patterns { status } => commands::patterns::run(status),
+        Commands::Patterns { status, global } => commands::patterns::run(status, global),
         Commands::Apply { global, dry_run, auto } => commands::apply::run(global, dry_run, auto, verbose),
         Commands::Diff { global } => commands::diff::run(global, verbose),
         Commands::Clean { dry_run } => commands::clean::run(dry_run, verbose),
