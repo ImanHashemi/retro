@@ -529,16 +529,16 @@ fn display_diff(plan: &ApplyPlan) {
         let rules: Vec<String> = claude_md_actions.iter().map(|a| a.content.clone()).collect();
         println!("{} {}", "---".dimmed(), shorten_path(target_path).bold());
 
-        // Show existing managed section if any
+        // Show existing rules as context, new rules as additions
         if let Ok(existing) = std::fs::read_to_string(target_path) {
             if let Some(old_rules) = claude_md::read_managed_section(&existing) {
                 for rule in &old_rules {
-                    println!("{} - {rule}", "-".red());
+                    println!("  - {rule}");
                 }
             }
         }
 
-        // Show new rules
+        // Show new rules being added
         for rule in &rules {
             println!("{} - {rule}", "+".green());
         }
