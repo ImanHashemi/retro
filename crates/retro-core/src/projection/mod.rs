@@ -352,11 +352,17 @@ fn write_claude_md_with_edits(
         claude_md::apply_edits(&existing, edits)
     };
 
-    // Phase 2: add plain rules to managed section
+    // Phase 2: add plain rules to managed section (preserving existing rules)
     let updated = if rules.is_empty() {
         after_edits
     } else {
-        claude_md::update_claude_md_content(&after_edits, rules)
+        let mut combined = claude_md::read_managed_section(&after_edits).unwrap_or_default();
+        for rule in rules {
+            if !combined.iter().any(|r| r == rule) {
+                combined.push(rule.clone());
+            }
+        }
+        claude_md::update_claude_md_content(&after_edits, &combined)
     };
 
     if let Some(parent) = Path::new(target_path).parent() {
