@@ -6,7 +6,7 @@ use rusqlite::params;
 use rusqlite::OptionalExtension;
 use std::path::Path;
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 
 /// Open (or create) the retro database with WAL mode enabled.
 pub fn open_db(path: &Path) -> Result<Connection, CoreError> {
@@ -97,6 +97,47 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
     if current_version < 3 {
         conn.execute_batch(
             "ALTER TABLE projections ADD COLUMN status TEXT NOT NULL DEFAULT 'applied';",
+        )?;
+        conn.pragma_update(None, "user_version", 3)?;
+    }
+
+    if current_version < 4 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS nodes (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                project_id TEXT,
+                content TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_nodes_scope_project ON nodes(scope, project_id, status);
+            CREATE INDEX IF NOT EXISTS idx_nodes_type_status ON nodes(type, status);
+
+            CREATE TABLE IF NOT EXISTS edges (
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (source_id, target_id, type)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id, type);
+            CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id, type);
+
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL,
+                remote_url TEXT,
+                agent_type TEXT NOT NULL DEFAULT 'claude_code',
+                last_seen TEXT NOT NULL
+            );
+            ",
         )?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
@@ -1565,5 +1606,63 @@ mod tests {
 
         // Pattern already has a pending_review projection — should NOT be "unprojected"
         assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
+    }
+
+    #[test]
+    fn test_v4_migration_creates_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 4);
+
+        // Verify nodes table exists with correct columns
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE 1=0", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 0);
+
+        // Verify edges table exists
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM edges WHERE 1=0", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 0);
+
+        // Verify projects table exists
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM projects WHERE 1=0", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_v4_migration_from_v3() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+
+        // Manually create a v3-state database (v1+v2+v3 tables, user_version=3)
+        conn.execute_batch("
+            CREATE TABLE patterns (id TEXT PRIMARY KEY, pattern_type TEXT NOT NULL, description TEXT NOT NULL, confidence REAL NOT NULL, times_seen INTEGER NOT NULL DEFAULT 1, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, last_projected TEXT, status TEXT NOT NULL DEFAULT 'discovered', source_sessions TEXT NOT NULL, related_files TEXT NOT NULL, suggested_content TEXT NOT NULL, suggested_target TEXT NOT NULL, project TEXT, generation_failed INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE projections (id TEXT PRIMARY KEY, pattern_id TEXT NOT NULL, target_type TEXT NOT NULL, target_path TEXT NOT NULL, content TEXT NOT NULL, applied_at TEXT NOT NULL, pr_url TEXT, nudged INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'applied');
+            CREATE TABLE analyzed_sessions (session_id TEXT PRIMARY KEY, project TEXT NOT NULL, analyzed_at TEXT NOT NULL);
+            CREATE TABLE ingested_sessions (session_id TEXT PRIMARY KEY, project TEXT NOT NULL, session_path TEXT NOT NULL, file_size INTEGER NOT NULL, file_mtime TEXT NOT NULL, ingested_at TEXT NOT NULL);
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        ").unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+
+        // Now run migrate — should only add v4 tables
+        migrate(&conn).unwrap();
+
+        let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 4);
+
+        // v4 tables exist
+        conn.query_row("SELECT COUNT(*) FROM nodes WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
+        conn.query_row("SELECT COUNT(*) FROM edges WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
+        conn.query_row("SELECT COUNT(*) FROM projects WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
+
+        // Old tables still exist
+        conn.query_row("SELECT COUNT(*) FROM patterns WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
     }
 }
