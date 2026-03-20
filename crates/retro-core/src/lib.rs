@@ -8,6 +8,7 @@ pub mod git;
 pub mod ingest;
 pub mod lock;
 pub mod models;
+pub mod observer;
 pub mod projection;
 pub mod scrub;
 pub mod util;
