@@ -54,6 +54,40 @@ pub const ANALYSIS_RESPONSE_SCHEMA: &str = r#"{
   "additionalProperties": false
 }"#;
 
+/// JSON schema for v2 graph-based analysis responses.
+pub const GRAPH_ANALYSIS_RESPONSE_SCHEMA: &str = r#"{
+    "type": "object",
+    "properties": {
+        "reasoning": { "type": "string", "description": "1-2 sentence summary of what you observed" },
+        "operations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["create_node", "update_node", "create_edge", "merge_nodes"] },
+                    "node_type": { "type": "string", "enum": ["preference", "pattern", "rule", "skill", "memory", "directive"] },
+                    "scope": { "type": "string", "enum": ["global", "project"] },
+                    "project_id": { "type": "string" },
+                    "content": { "type": "string" },
+                    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                    "node_id": { "type": "string" },
+                    "new_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                    "new_content": { "type": "string" },
+                    "source_id": { "type": "string" },
+                    "target_id": { "type": "string" },
+                    "edge_type": { "type": "string", "enum": ["supports", "contradicts", "supersedes", "derived_from", "applies_to"] },
+                    "keep_id": { "type": "string" },
+                    "remove_id": { "type": "string" }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+            }
+        }
+    },
+    "required": ["reasoning", "operations"],
+    "additionalProperties": false
+}"#;
+
 /// Extended JSON schema that includes `claude_md_edits` for full_management mode.
 /// Built programmatically from `ANALYSIS_RESPONSE_SCHEMA` to avoid duplication.
 pub fn full_management_analysis_schema() -> String {
@@ -548,5 +582,11 @@ mod tests {
             full["properties"]["reasoning"],
             "reasoning schema should be identical"
         );
+    }
+
+    #[test]
+    fn test_graph_analysis_schema_is_valid_json() {
+        let _: serde_json::Value = serde_json::from_str(GRAPH_ANALYSIS_RESPONSE_SCHEMA)
+            .expect("schema must be valid JSON");
     }
 }

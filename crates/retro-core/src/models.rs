@@ -929,6 +929,46 @@ pub enum GraphOperation {
     },
 }
 
+/// AI response for v2 graph-based analysis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphAnalysisResponse {
+    #[serde(default)]
+    pub reasoning: String,
+    pub operations: Vec<GraphOperationResponse>,
+}
+
+/// A single operation from the AI response (before conversion to GraphOperation).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphOperationResponse {
+    pub action: String,
+    #[serde(default)]
+    pub node_type: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+    #[serde(default)]
+    pub node_id: Option<String>,
+    #[serde(default)]
+    pub new_confidence: Option<f64>,
+    #[serde(default)]
+    pub new_content: Option<String>,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub edge_type: Option<String>,
+    #[serde(default)]
+    pub keep_id: Option<String>,
+    #[serde(default)]
+    pub remove_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1065,5 +1105,29 @@ mod tests {
             created_at: Utc::now(),
         };
         assert_eq!(edge.edge_type, EdgeType::Supports);
+    }
+
+    #[test]
+    fn test_graph_analysis_response_deserialize() {
+        let json = r#"{
+            "reasoning": "Found a recurring pattern",
+            "operations": [
+                {
+                    "action": "create_node",
+                    "node_type": "rule",
+                    "scope": "project",
+                    "content": "Always run tests",
+                    "confidence": 0.85
+                },
+                {
+                    "action": "update_node",
+                    "node_id": "existing-1",
+                    "new_confidence": 0.9
+                }
+            ]
+        }"#;
+        let resp: GraphAnalysisResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.operations.len(), 2);
+        assert_eq!(resp.reasoning, "Found a recurring pattern");
     }
 }
