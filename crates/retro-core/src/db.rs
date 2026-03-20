@@ -1,7 +1,7 @@
 use crate::errors::CoreError;
 use crate::models::{
     IngestedSession, KnowledgeEdge, KnowledgeNode, KnowledgeProject,
-    EdgeType, NodeScope, NodeStatus, NodeType,
+    EdgeType, GraphOperation, NodeScope, NodeStatus, NodeType,
     Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget,
 };
 use chrono::{DateTime, Utc};
@@ -1148,6 +1148,65 @@ pub fn supersede_node(conn: &Connection, new_id: &str, old_id: &str) -> Result<(
     };
     insert_edge(conn, &edge)?;
     Ok(())
+}
+
+/// Result of applying a batch of graph operations.
+#[derive(Debug, Clone, Default)]
+pub struct ApplyGraphResult {
+    pub nodes_created: usize,
+    pub nodes_updated: usize,
+    pub edges_created: usize,
+    pub nodes_merged: usize,
+}
+
+/// Apply a batch of graph operations to the database.
+pub fn apply_graph_operations(conn: &Connection, ops: &[GraphOperation]) -> Result<ApplyGraphResult, CoreError> {
+    let mut result = ApplyGraphResult::default();
+
+    for op in ops {
+        match op {
+            GraphOperation::CreateNode { node_type, scope, project_id, content, confidence } => {
+                let node = KnowledgeNode {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_type: node_type.clone(),
+                    scope: scope.clone(),
+                    project_id: project_id.clone(),
+                    content: content.clone(),
+                    confidence: *confidence,
+                    status: NodeStatus::Active,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                };
+                insert_node(conn, &node)?;
+                result.nodes_created += 1;
+            }
+            GraphOperation::UpdateNode { id, confidence, content } => {
+                if let Some(conf) = confidence {
+                    update_node_confidence(conn, id, *conf)?;
+                }
+                if let Some(cont) = content {
+                    update_node_content(conn, id, cont)?;
+                }
+                result.nodes_updated += 1;
+            }
+            GraphOperation::CreateEdge { source_id, target_id, edge_type } => {
+                let edge = KnowledgeEdge {
+                    source_id: source_id.clone(),
+                    target_id: target_id.clone(),
+                    edge_type: edge_type.clone(),
+                    created_at: Utc::now(),
+                };
+                insert_edge(conn, &edge)?;
+                result.edges_created += 1;
+            }
+            GraphOperation::MergeNodes { keep_id, remove_id } => {
+                supersede_node(conn, keep_id, remove_id)?;
+                result.nodes_merged += 1;
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 // ── Knowledge graph: Project operations ──
@@ -2356,5 +2415,71 @@ mod tests {
         // p3: confidence >= 0.85 + "always" in content -> directive (override)
         let node3 = get_node(&conn, "migrated-p3").unwrap().unwrap();
         assert_eq!(node3.node_type, NodeType::Directive);
+    }
+
+    #[test]
+    fn test_apply_graph_operations() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let ops = vec![
+            GraphOperation::CreateNode {
+                node_type: NodeType::Rule,
+                scope: NodeScope::Project,
+                project_id: Some("my-app".to_string()),
+                content: "Always run tests".to_string(),
+                confidence: 0.85,
+            },
+            GraphOperation::CreateNode {
+                node_type: NodeType::Pattern,
+                scope: NodeScope::Global,
+                project_id: None,
+                content: "Prefers TDD".to_string(),
+                confidence: 0.6,
+            },
+        ];
+
+        let result = apply_graph_operations(&conn, &ops).unwrap();
+        assert_eq!(result.nodes_created, 2);
+
+        let nodes = get_nodes_by_scope(&conn, &NodeScope::Project, Some("my-app"), &[NodeStatus::Active]).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].content, "Always run tests");
+    }
+
+    #[test]
+    fn test_apply_graph_operations_update() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Pattern,
+            scope: NodeScope::Project,
+            project_id: Some("app".to_string()),
+            content: "Old content".to_string(),
+            confidence: 0.5,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        insert_node(&conn, &node).unwrap();
+
+        let ops = vec![
+            GraphOperation::UpdateNode {
+                id: "node-1".to_string(),
+                confidence: Some(0.8),
+                content: Some("Updated content".to_string()),
+            },
+        ];
+
+        let result = apply_graph_operations(&conn, &ops).unwrap();
+        assert_eq!(result.nodes_updated, 1);
+
+        let updated = get_node(&conn, "node-1").unwrap().unwrap();
+        assert_eq!(updated.confidence, 0.8);
+        assert_eq!(updated.content, "Updated content");
     }
 }
