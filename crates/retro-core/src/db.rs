@@ -1,5 +1,8 @@
 use crate::errors::CoreError;
-use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget};
+use crate::models::{
+    IngestedSession, KnowledgeNode, NodeScope, NodeStatus, NodeType,
+    Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget,
+};
 use chrono::{DateTime, Utc};
 pub use rusqlite::Connection;
 use rusqlite::params;
@@ -877,6 +880,124 @@ pub fn update_projection_pr_url(
     Ok(())
 }
 
+// ── Knowledge graph: Node operations ──
+
+pub fn insert_node(conn: &Connection, node: &KnowledgeNode) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT INTO nodes (id, type, scope, project_id, content, confidence, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            node.id,
+            node.node_type.to_string(),
+            node.scope.to_string(),
+            node.project_id,
+            node.content,
+            node.confidence,
+            node.status.to_string(),
+            node.created_at.to_rfc3339(),
+            node.updated_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_node(conn: &Connection, id: &str) -> Result<Option<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at
+         FROM nodes WHERE id = ?1",
+    )?;
+    let result = stmt.query_row(params![id], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    }).optional()?;
+    Ok(result)
+}
+
+pub fn get_nodes_by_scope(
+    conn: &Connection,
+    scope: &NodeScope,
+    project_id: Option<&str>,
+    statuses: &[NodeStatus],
+) -> Result<Vec<KnowledgeNode>, CoreError> {
+    if statuses.is_empty() {
+        return Ok(Vec::new());
+    }
+    let status_placeholders: Vec<String> = statuses.iter().enumerate().map(|(i, _)| format!("?{}", i + 3)).collect();
+    let sql = format!(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at
+         FROM nodes WHERE scope = ?1 AND (?2 IS NULL OR project_id = ?2) AND status IN ({})
+         ORDER BY confidence DESC",
+        status_placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+        Box::new(scope.to_string()),
+        Box::new(project_id.map(|s| s.to_string())),
+    ];
+    for s in statuses {
+        params_vec.push(Box::new(s.to_string()));
+    }
+    let rows = stmt.query_map(rusqlite::params_from_iter(params_vec.iter().map(|p| p.as_ref())), |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
+pub fn update_node_confidence(conn: &Connection, id: &str, confidence: f64) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET confidence = ?1, updated_at = ?2 WHERE id = ?3",
+        params![confidence, Utc::now().to_rfc3339(), id],
+    )?;
+    Ok(())
+}
+
+pub fn update_node_status(conn: &Connection, id: &str, status: &NodeStatus) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        params![status.to_string(), Utc::now().to_rfc3339(), id],
+    )?;
+    Ok(())
+}
+
+pub fn update_node_content(conn: &Connection, id: &str, content: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET content = ?1, updated_at = ?2 WHERE id = ?3",
+        params![content, Utc::now().to_rfc3339(), id],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1634,6 +1755,111 @@ mod tests {
             "SELECT COUNT(*) FROM projects WHERE 1=0", [], |row| row.get(0)
         ).unwrap();
         assert_eq!(count, 0);
+    }
+
+    // ── Node CRUD tests ──
+
+    #[test]
+    fn test_insert_and_get_node() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Always run tests".to_string(),
+            confidence: 0.85,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        insert_node(&conn, &node).unwrap();
+        let retrieved = get_node(&conn, "node-1").unwrap().unwrap();
+        assert_eq!(retrieved.content, "Always run tests");
+        assert_eq!(retrieved.node_type, NodeType::Rule);
+        assert_eq!(retrieved.scope, NodeScope::Project);
+        assert_eq!(retrieved.confidence, 0.85);
+    }
+
+    #[test]
+    fn test_get_nodes_by_scope_and_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let now = Utc::now();
+        for (i, scope) in [NodeScope::Global, NodeScope::Project, NodeScope::Global].iter().enumerate() {
+            let node = KnowledgeNode {
+                id: format!("node-{i}"),
+                node_type: NodeType::Rule,
+                scope: scope.clone(),
+                project_id: if *scope == NodeScope::Project { Some("my-app".to_string()) } else { None },
+                content: format!("Rule {i}"),
+                confidence: 0.8,
+                status: NodeStatus::Active,
+                created_at: now,
+                updated_at: now,
+            };
+            insert_node(&conn, &node).unwrap();
+        }
+
+        let global_nodes = get_nodes_by_scope(&conn, &NodeScope::Global, None, &[NodeStatus::Active]).unwrap();
+        assert_eq!(global_nodes.len(), 2);
+
+        let project_nodes = get_nodes_by_scope(&conn, &NodeScope::Project, Some("my-app"), &[NodeStatus::Active]).unwrap();
+        assert_eq!(project_nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_update_node_confidence() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Pattern,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Forgets tests".to_string(),
+            confidence: 0.5,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        insert_node(&conn, &node).unwrap();
+
+        update_node_confidence(&conn, "node-1", 0.75).unwrap();
+        let updated = get_node(&conn, "node-1").unwrap().unwrap();
+        assert_eq!(updated.confidence, 0.75);
+    }
+
+    #[test]
+    fn test_update_node_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "Use snake_case".to_string(),
+            confidence: 0.9,
+            status: NodeStatus::PendingReview,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        insert_node(&conn, &node).unwrap();
+
+        update_node_status(&conn, "node-1", &NodeStatus::Active).unwrap();
+        let updated = get_node(&conn, "node-1").unwrap().unwrap();
+        assert_eq!(updated.status, NodeStatus::Active);
     }
 
     #[test]
