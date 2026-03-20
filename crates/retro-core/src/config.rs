@@ -16,6 +16,12 @@ pub struct Config {
     pub privacy: PrivacyConfig,
     #[serde(default = "default_claude_md")]
     pub claude_md: ClaudeMdConfig,
+    #[serde(default = "default_runner")]
+    pub runner: RunnerConfig,
+    #[serde(default = "default_trust")]
+    pub trust: TrustConfig,
+    #[serde(default = "default_knowledge")]
+    pub knowledge: KnowledgeConfig,
 }
 
 impl Default for Config {
@@ -27,6 +33,9 @@ impl Default for Config {
             paths: default_paths(),
             privacy: default_privacy(),
             claude_md: default_claude_md(),
+            runner: default_runner(),
+            trust: default_trust(),
+            knowledge: default_knowledge(),
         }
     }
 }
@@ -87,6 +96,58 @@ pub struct PrivacyConfig {
 pub struct ClaudeMdConfig {
     #[serde(default = "default_full_management")]
     pub full_management: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunnerConfig {
+    #[serde(default = "default_interval_seconds")]
+    pub interval_seconds: u32,
+    #[serde(default = "default_analysis_trigger")]
+    pub analysis_trigger: String,
+    #[serde(default = "default_analysis_threshold")]
+    pub analysis_threshold: u32,
+    #[serde(default)]
+    pub active_hours: Option<String>,
+    #[serde(default = "default_max_ai_calls_per_day")]
+    pub max_ai_calls_per_day: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustConfig {
+    #[serde(default = "default_trust_mode")]
+    pub mode: String,
+    #[serde(default = "default_auto_approve_config")]
+    pub auto_approve: AutoApproveConfig,
+    #[serde(default = "default_trust_scope_config")]
+    pub scope: TrustScopeConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoApproveConfig {
+    #[serde(default = "default_true")]
+    pub rules: bool,
+    #[serde(default)]
+    pub skills: bool,
+    #[serde(default = "default_true")]
+    pub preferences: bool,
+    #[serde(default = "default_true")]
+    pub directives: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustScopeConfig {
+    #[serde(default = "default_scope_review")]
+    pub global_changes: String,
+    #[serde(default = "default_scope_auto")]
+    pub project_changes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeConfig {
+    #[serde(default = "default_confidence_threshold")]
+    pub confidence_threshold: f64,
+    #[serde(default = "default_global_promotion_threshold")]
+    pub global_promotion_threshold: f64,
 }
 
 fn default_analysis() -> AnalysisConfig {
@@ -184,6 +245,75 @@ fn default_claude_md() -> ClaudeMdConfig {
 
 fn default_full_management() -> bool {
     false
+}
+
+fn default_interval_seconds() -> u32 {
+    60
+}
+fn default_analysis_trigger() -> String {
+    "sessions".to_string()
+}
+fn default_analysis_threshold() -> u32 {
+    3
+}
+fn default_max_ai_calls_per_day() -> u32 {
+    10
+}
+fn default_trust_mode() -> String {
+    "review".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_scope_review() -> String {
+    "review".to_string()
+}
+fn default_scope_auto() -> String {
+    "auto".to_string()
+}
+fn default_global_promotion_threshold() -> f64 {
+    0.85
+}
+
+fn default_runner() -> RunnerConfig {
+    RunnerConfig {
+        interval_seconds: default_interval_seconds(),
+        analysis_trigger: default_analysis_trigger(),
+        analysis_threshold: default_analysis_threshold(),
+        active_hours: None,
+        max_ai_calls_per_day: default_max_ai_calls_per_day(),
+    }
+}
+
+fn default_trust() -> TrustConfig {
+    TrustConfig {
+        mode: default_trust_mode(),
+        auto_approve: default_auto_approve_config(),
+        scope: default_trust_scope_config(),
+    }
+}
+
+fn default_auto_approve_config() -> AutoApproveConfig {
+    AutoApproveConfig {
+        rules: true,
+        skills: false,
+        preferences: true,
+        directives: true,
+    }
+}
+
+fn default_trust_scope_config() -> TrustScopeConfig {
+    TrustScopeConfig {
+        global_changes: default_scope_review(),
+        project_changes: default_scope_auto(),
+    }
+}
+
+fn default_knowledge() -> KnowledgeConfig {
+    KnowledgeConfig {
+        confidence_threshold: default_confidence_threshold(),
+        global_promotion_threshold: default_global_promotion_threshold(),
+    }
 }
 
 impl Config {
@@ -323,5 +453,82 @@ window_days = 7
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(!config.claude_md.full_management);
+    }
+
+    #[test]
+    fn test_runner_config_defaults() {
+        let config = Config::default();
+        assert_eq!(config.runner.interval_seconds, 60);
+        assert_eq!(config.runner.analysis_trigger, "sessions");
+        assert_eq!(config.runner.analysis_threshold, 3);
+        assert!(config.runner.active_hours.is_none());
+        assert_eq!(config.runner.max_ai_calls_per_day, 10);
+    }
+
+    #[test]
+    fn test_trust_config_defaults() {
+        let config = Config::default();
+        assert_eq!(config.trust.mode, "review");
+        assert!(config.trust.auto_approve.rules);
+        assert!(!config.trust.auto_approve.skills);
+        assert!(config.trust.auto_approve.preferences);
+        assert!(config.trust.auto_approve.directives);
+        assert_eq!(config.trust.scope.global_changes, "review");
+        assert_eq!(config.trust.scope.project_changes, "auto");
+    }
+
+    #[test]
+    fn test_knowledge_config_defaults() {
+        let config = Config::default();
+        assert_eq!(config.knowledge.confidence_threshold, 0.7);
+        assert_eq!(config.knowledge.global_promotion_threshold, 0.85);
+    }
+
+    #[test]
+    fn test_v2_config_deserialize() {
+        let toml_str = r#"
+[runner]
+interval_seconds = 120
+max_ai_calls_per_day = 5
+
+[trust]
+mode = "auto"
+
+[trust.auto_approve]
+skills = true
+
+[trust.scope]
+global_changes = "auto"
+
+[knowledge]
+confidence_threshold = 0.8
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.runner.interval_seconds, 120);
+        assert_eq!(config.runner.max_ai_calls_per_day, 5);
+        assert_eq!(config.trust.mode, "auto");
+        assert!(config.trust.auto_approve.skills);
+        assert_eq!(config.trust.scope.global_changes, "auto");
+        assert_eq!(config.knowledge.confidence_threshold, 0.8);
+    }
+
+    #[test]
+    fn test_v1_config_still_loads() {
+        // A pure v1 config (no runner/trust/knowledge sections) should still parse
+        let toml_str = r#"
+[analysis]
+window_days = 7
+
+[hooks]
+ingest_cooldown_minutes = 10
+auto_apply = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.analysis.window_days, 7);
+        assert_eq!(config.hooks.ingest_cooldown_minutes, 10);
+        // v2 sections should have defaults
+        assert_eq!(config.runner.interval_seconds, 60);
+        assert_eq!(config.trust.mode, "review");
+        assert_eq!(config.knowledge.confidence_threshold, 0.7);
     }
 }
