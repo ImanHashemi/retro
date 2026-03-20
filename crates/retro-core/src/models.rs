@@ -738,6 +738,197 @@ impl ApplyPlan {
     }
 }
 
+// ── Knowledge graph types (v2) ──
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeType {
+    Preference,
+    Pattern,
+    Rule,
+    Skill,
+    Memory,
+    Directive,
+}
+
+impl std::fmt::Display for NodeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Preference => write!(f, "preference"),
+            Self::Pattern => write!(f, "pattern"),
+            Self::Rule => write!(f, "rule"),
+            Self::Skill => write!(f, "skill"),
+            Self::Memory => write!(f, "memory"),
+            Self::Directive => write!(f, "directive"),
+        }
+    }
+}
+
+impl NodeType {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "preference" => Self::Preference,
+            "pattern" => Self::Pattern,
+            "rule" => Self::Rule,
+            "skill" => Self::Skill,
+            "memory" => Self::Memory,
+            "directive" => Self::Directive,
+            _ => Self::Pattern,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeScope {
+    Global,
+    Project,
+}
+
+impl std::fmt::Display for NodeScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Global => write!(f, "global"),
+            Self::Project => write!(f, "project"),
+        }
+    }
+}
+
+impl NodeScope {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "global" => Self::Global,
+            _ => Self::Project,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeStatus {
+    Active,
+    PendingReview,
+    Dismissed,
+    Archived,
+}
+
+impl std::fmt::Display for NodeStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Active => write!(f, "active"),
+            Self::PendingReview => write!(f, "pending_review"),
+            Self::Dismissed => write!(f, "dismissed"),
+            Self::Archived => write!(f, "archived"),
+        }
+    }
+}
+
+impl NodeStatus {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "active" => Self::Active,
+            "pending_review" => Self::PendingReview,
+            "dismissed" => Self::Dismissed,
+            "archived" => Self::Archived,
+            _ => Self::Active,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeType {
+    Supports,
+    Contradicts,
+    Supersedes,
+    DerivedFrom,
+    AppliesTo,
+}
+
+impl std::fmt::Display for EdgeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Supports => write!(f, "supports"),
+            Self::Contradicts => write!(f, "contradicts"),
+            Self::Supersedes => write!(f, "supersedes"),
+            Self::DerivedFrom => write!(f, "derived_from"),
+            Self::AppliesTo => write!(f, "applies_to"),
+        }
+    }
+}
+
+impl EdgeType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "supports" => Some(Self::Supports),
+            "contradicts" => Some(Self::Contradicts),
+            "supersedes" => Some(Self::Supersedes),
+            "derived_from" => Some(Self::DerivedFrom),
+            "applies_to" => Some(Self::AppliesTo),
+            _ => None,
+        }
+    }
+}
+
+/// A node in the knowledge graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeNode {
+    pub id: String,
+    pub node_type: NodeType,
+    pub scope: NodeScope,
+    pub project_id: Option<String>,
+    pub content: String,
+    pub confidence: f64,
+    pub status: NodeStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// An edge in the knowledge graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeEdge {
+    pub source_id: String,
+    pub target_id: String,
+    pub edge_type: EdgeType,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A tracked project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeProject {
+    pub id: String,
+    pub path: String,
+    pub remote_url: Option<String>,
+    pub agent_type: String,
+    pub last_seen: DateTime<Utc>,
+}
+
+/// Operations the analyzer produces to mutate the knowledge graph.
+#[derive(Debug, Clone)]
+pub enum GraphOperation {
+    CreateNode {
+        node_type: NodeType,
+        scope: NodeScope,
+        project_id: Option<String>,
+        content: String,
+        confidence: f64,
+    },
+    CreateEdge {
+        source_id: String,
+        target_id: String,
+        edge_type: EdgeType,
+    },
+    UpdateNode {
+        id: String,
+        confidence: Option<f64>,
+        content: Option<String>,
+    },
+    MergeNodes {
+        keep_id: String,
+        remove_id: String,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,5 +995,75 @@ mod tests {
         let json = r#"{"reasoning": "test", "patterns": []}"#;
         let resp: AnalysisResponse = serde_json::from_str(json).unwrap();
         assert!(resp.claude_md_edits.is_empty());
+    }
+
+    #[test]
+    fn test_node_type_display_and_from_str() {
+        assert_eq!(NodeType::Preference.to_string(), "preference");
+        assert_eq!(NodeType::Pattern.to_string(), "pattern");
+        assert_eq!(NodeType::Rule.to_string(), "rule");
+        assert_eq!(NodeType::Skill.to_string(), "skill");
+        assert_eq!(NodeType::Memory.to_string(), "memory");
+        assert_eq!(NodeType::Directive.to_string(), "directive");
+        assert_eq!(NodeType::from_str("rule"), NodeType::Rule);
+        assert_eq!(NodeType::from_str("unknown"), NodeType::Pattern); // default
+    }
+
+    #[test]
+    fn test_node_scope_display_and_from_str() {
+        assert_eq!(NodeScope::Global.to_string(), "global");
+        assert_eq!(NodeScope::Project.to_string(), "project");
+        assert_eq!(NodeScope::from_str("global"), NodeScope::Global);
+        assert_eq!(NodeScope::from_str("unknown"), NodeScope::Project); // default
+    }
+
+    #[test]
+    fn test_node_status_display_and_from_str() {
+        assert_eq!(NodeStatus::Active.to_string(), "active");
+        assert_eq!(NodeStatus::PendingReview.to_string(), "pending_review");
+        assert_eq!(NodeStatus::Dismissed.to_string(), "dismissed");
+        assert_eq!(NodeStatus::Archived.to_string(), "archived");
+        assert_eq!(NodeStatus::from_str("pending_review"), NodeStatus::PendingReview);
+        assert_eq!(NodeStatus::from_str("unknown"), NodeStatus::Active); // default
+    }
+
+    #[test]
+    fn test_edge_type_display_and_from_str() {
+        assert_eq!(EdgeType::Supports.to_string(), "supports");
+        assert_eq!(EdgeType::Contradicts.to_string(), "contradicts");
+        assert_eq!(EdgeType::Supersedes.to_string(), "supersedes");
+        assert_eq!(EdgeType::DerivedFrom.to_string(), "derived_from");
+        assert_eq!(EdgeType::AppliesTo.to_string(), "applies_to");
+        assert_eq!(EdgeType::from_str("contradicts"), Some(EdgeType::Contradicts));
+        assert_eq!(EdgeType::from_str("unknown"), None);
+    }
+
+    #[test]
+    fn test_knowledge_node_struct() {
+        let node = KnowledgeNode {
+            id: "test-id".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Always run tests".to_string(),
+            confidence: 0.85,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        assert_eq!(node.node_type, NodeType::Rule);
+        assert_eq!(node.scope, NodeScope::Project);
+        assert!(node.project_id.is_some());
+    }
+
+    #[test]
+    fn test_knowledge_edge_struct() {
+        let edge = KnowledgeEdge {
+            source_id: "node-1".to_string(),
+            target_id: "node-2".to_string(),
+            edge_type: EdgeType::Supports,
+            created_at: Utc::now(),
+        };
+        assert_eq!(edge.edge_type, EdgeType::Supports);
     }
 }
