@@ -143,6 +143,10 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
             );
             ",
         )?;
+
+        // Migrate existing v1 patterns to v2 nodes
+        migrate_patterns_to_nodes(conn)?;
+
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
@@ -879,6 +883,74 @@ pub fn update_projection_pr_url(
         params![projection_id, pr_url],
     )?;
     Ok(())
+}
+
+// ── Knowledge graph: Migration ──
+
+/// Migrate v1 patterns to v2 knowledge nodes. Returns number of nodes created.
+/// Safe to call multiple times — skips patterns that already have corresponding nodes.
+pub fn migrate_patterns_to_nodes(conn: &Connection) -> Result<usize, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, pattern_type, description, confidence, status, suggested_content, suggested_target, project, first_seen, last_seen
+         FROM patterns",
+    )?;
+    let patterns: Vec<(String, String, String, f64, String, String, String, Option<String>, String, String)> = stmt.query_map([], |row| {
+        Ok((
+            row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+            row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
+            row.get(8)?, row.get(9)?,
+        ))
+    })?.filter_map(|r| r.ok()).collect();
+
+    let mut count = 0;
+    for (id, pattern_type, description, confidence, _status, suggested_content, suggested_target, project, first_seen, last_seen) in &patterns {
+        let node_id = format!("migrated-{id}");
+
+        // Skip if already migrated
+        if get_node(conn, &node_id)?.is_some() {
+            continue;
+        }
+
+        // Determine node type using the spec's deterministic mapping
+        let content_lower = suggested_content.to_lowercase();
+        let has_directive_keyword = content_lower.contains("always") || content_lower.contains("never");
+        let node_type = if *confidence >= 0.85 && has_directive_keyword {
+            NodeType::Directive
+        } else {
+            match (pattern_type.as_str(), suggested_target.as_str()) {
+                ("repetitive_instruction", "claude_md") => NodeType::Rule,
+                ("repetitive_instruction", "skill") => NodeType::Directive,
+                ("recurring_mistake", _) => NodeType::Pattern,
+                ("workflow_pattern", "skill") => NodeType::Skill,
+                ("workflow_pattern", "claude_md") => NodeType::Rule,
+                ("stale_context", _) => NodeType::Memory,
+                ("redundant_context", _) => NodeType::Memory,
+                _ => NodeType::Pattern,
+            }
+        };
+
+        let created_at = DateTime::parse_from_rfc3339(first_seen)
+            .unwrap_or_default()
+            .with_timezone(&Utc);
+        let updated_at = DateTime::parse_from_rfc3339(last_seen)
+            .unwrap_or_default()
+            .with_timezone(&Utc);
+
+        let node = KnowledgeNode {
+            id: node_id,
+            node_type,
+            scope: NodeScope::Project,
+            project_id: project.clone(),
+            content: description.clone(),
+            confidence: *confidence,
+            status: NodeStatus::Active,
+            created_at,
+            updated_at,
+        };
+        insert_node(conn, &node)?;
+        count += 1;
+    }
+    Ok(count)
 }
 
 // ── Knowledge graph: Node operations ──
@@ -2243,5 +2315,46 @@ mod tests {
         assert_eq!(generate_project_slug("/home/user/my-rust-app"), "my-rust-app");
         assert_eq!(generate_project_slug("/home/user/My App"), "my-app");
         assert_eq!(generate_project_slug("/"), "unnamed-project");
+    }
+
+    #[test]
+    fn test_migrate_patterns_to_nodes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        // Insert v1 patterns
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO patterns (id, pattern_type, description, confidence, times_seen, first_seen, last_seen, status, source_sessions, related_files, suggested_content, suggested_target, project, generation_failed)
+             VALUES (?1, ?2, ?3, ?4, 2, ?5, ?5, 'active', '[]', '[]', 'content', ?6, ?7, 0)",
+            params!["p1", "repetitive_instruction", "Always run tests", 0.85, &now, "claude_md", "my-app"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO patterns (id, pattern_type, description, confidence, times_seen, first_seen, last_seen, status, source_sessions, related_files, suggested_content, suggested_target, project, generation_failed)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5, 'discovered', '[]', '[]', 'content', ?6, ?7, 0)",
+            params!["p2", "recurring_mistake", "Forgets imports", 0.6, &now, "skill", "my-app"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO patterns (id, pattern_type, description, confidence, times_seen, first_seen, last_seen, status, source_sessions, related_files, suggested_content, suggested_target, project, generation_failed)
+             VALUES (?1, ?2, ?3, ?4, 3, ?5, ?5, 'active', '[]', '[]', 'Always use snake_case', ?6, ?7, 0)",
+            params!["p3", "repetitive_instruction", "Always use snake_case", 0.9, &now, "claude_md", "my-app"],
+        ).unwrap();
+
+        let count = migrate_patterns_to_nodes(&conn).unwrap();
+        assert_eq!(count, 3);
+
+        // p1: RepetitiveInstruction + ClaudeMd -> rule
+        let node1 = get_node(&conn, "migrated-p1").unwrap().unwrap();
+        assert_eq!(node1.node_type, NodeType::Rule);
+        assert_eq!(node1.scope, NodeScope::Project);
+
+        // p2: RecurringMistake -> pattern
+        let node2 = get_node(&conn, "migrated-p2").unwrap().unwrap();
+        assert_eq!(node2.node_type, NodeType::Pattern);
+
+        // p3: confidence >= 0.85 + "always" in content -> directive (override)
+        let node3 = get_node(&conn, "migrated-p3").unwrap().unwrap();
+        assert_eq!(node3.node_type, NodeType::Directive);
     }
 }
