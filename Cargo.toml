@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/retro-core", "crates/retro-cli"]
+members = ["crates/retro-core", "crates/retro-cli", "crates/retro-projectors"]
 resolver = "2"
