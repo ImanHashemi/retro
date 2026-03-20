@@ -1,6 +1,7 @@
 use crate::errors::CoreError;
 use crate::models::{
-    IngestedSession, KnowledgeEdge, KnowledgeNode, EdgeType, NodeScope, NodeStatus, NodeType,
+    IngestedSession, KnowledgeEdge, KnowledgeNode, KnowledgeProject,
+    EdgeType, NodeScope, NodeStatus, NodeType,
     Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget,
 };
 use chrono::{DateTime, Utc};
@@ -1077,6 +1078,134 @@ pub fn supersede_node(conn: &Connection, new_id: &str, old_id: &str) -> Result<(
     Ok(())
 }
 
+// ── Knowledge graph: Project operations ──
+
+/// Generate a human-readable slug from a repository path.
+pub fn generate_project_slug(repo_path: &str) -> String {
+    let name = std::path::Path::new(repo_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unnamed-project");
+
+    let slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        "unnamed-project".to_string()
+    } else {
+        // Collapse consecutive hyphens
+        let mut result = String::new();
+        let mut prev_hyphen = false;
+        for c in slug.chars() {
+            if c == '-' {
+                if !prev_hyphen {
+                    result.push(c);
+                }
+                prev_hyphen = true;
+            } else {
+                result.push(c);
+                prev_hyphen = false;
+            }
+        }
+        result
+    }
+}
+
+/// Generate a unique project slug, appending -2, -3, etc. if needed.
+pub fn generate_unique_project_slug(conn: &Connection, repo_path: &str) -> Result<String, CoreError> {
+    let base = generate_project_slug(repo_path);
+    if get_project(conn, &base)?.is_none() {
+        return Ok(base);
+    }
+    for i in 2..100 {
+        let candidate = format!("{base}-{i}");
+        if get_project(conn, &candidate)?.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Ok(format!("{base}-{}", &uuid::Uuid::new_v4().to_string()[..8]))
+}
+
+pub fn upsert_project(conn: &Connection, project: &KnowledgeProject) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT INTO projects (id, path, remote_url, agent_type, last_seen)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+             path = excluded.path,
+             remote_url = COALESCE(excluded.remote_url, projects.remote_url),
+             last_seen = excluded.last_seen",
+        params![
+            project.id,
+            project.path,
+            project.remote_url,
+            project.agent_type,
+            project.last_seen.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_project(conn: &Connection, id: &str) -> Result<Option<KnowledgeProject>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, remote_url, agent_type, last_seen FROM projects WHERE id = ?1",
+    )?;
+    let result = stmt.query_row(params![id], |row| {
+        Ok(KnowledgeProject {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            remote_url: row.get(2)?,
+            agent_type: row.get(3)?,
+            last_seen: DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    }).optional()?;
+    Ok(result)
+}
+
+pub fn get_project_by_remote_url(conn: &Connection, remote_url: &str) -> Result<Option<KnowledgeProject>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, remote_url, agent_type, last_seen FROM projects WHERE remote_url = ?1",
+    )?;
+    let result = stmt.query_row(params![remote_url], |row| {
+        Ok(KnowledgeProject {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            remote_url: row.get(2)?,
+            agent_type: row.get(3)?,
+            last_seen: DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    }).optional()?;
+    Ok(result)
+}
+
+pub fn get_all_projects(conn: &Connection) -> Result<Vec<KnowledgeProject>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, remote_url, agent_type, last_seen FROM projects ORDER BY last_seen DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(KnowledgeProject {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            remote_url: row.get(2)?,
+            agent_type: row.get(3)?,
+            last_seen: DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    })?;
+    let mut projects = Vec::new();
+    for row in rows {
+        projects.push(row?);
+    }
+    Ok(projects)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2044,5 +2173,75 @@ mod tests {
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].edge_type, EdgeType::Supersedes);
         assert_eq!(edges[0].target_id, "old");
+    }
+
+    // ── Project CRUD tests ──
+
+    #[test]
+    fn test_upsert_and_get_project() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let project = KnowledgeProject {
+            id: "my-app".to_string(),
+            path: "/home/user/my-app".to_string(),
+            remote_url: Some("git@github.com:user/my-app.git".to_string()),
+            agent_type: "claude_code".to_string(),
+            last_seen: Utc::now(),
+        };
+        upsert_project(&conn, &project).unwrap();
+
+        let retrieved = get_project(&conn, "my-app").unwrap().unwrap();
+        assert_eq!(retrieved.path, "/home/user/my-app");
+        assert_eq!(retrieved.remote_url.unwrap(), "git@github.com:user/my-app.git");
+    }
+
+    #[test]
+    fn test_get_project_by_remote_url() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let project = KnowledgeProject {
+            id: "my-app".to_string(),
+            path: "/old/path".to_string(),
+            remote_url: Some("git@github.com:user/my-app.git".to_string()),
+            agent_type: "claude_code".to_string(),
+            last_seen: Utc::now(),
+        };
+        upsert_project(&conn, &project).unwrap();
+
+        let found = get_project_by_remote_url(&conn, "git@github.com:user/my-app.git").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, "my-app");
+    }
+
+    #[test]
+    fn test_get_all_projects() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        for name in ["app-1", "app-2"] {
+            let project = KnowledgeProject {
+                id: name.to_string(),
+                path: format!("/home/{name}"),
+                remote_url: None,
+                agent_type: "claude_code".to_string(),
+                last_seen: Utc::now(),
+            };
+            upsert_project(&conn, &project).unwrap();
+        }
+
+        let projects = get_all_projects(&conn).unwrap();
+        assert_eq!(projects.len(), 2);
+    }
+
+    #[test]
+    fn test_generate_project_slug() {
+        assert_eq!(generate_project_slug("/home/user/my-rust-app"), "my-rust-app");
+        assert_eq!(generate_project_slug("/home/user/My App"), "my-app");
+        assert_eq!(generate_project_slug("/"), "unnamed-project");
     }
 }
