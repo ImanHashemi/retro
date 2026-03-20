@@ -339,6 +339,27 @@ pub fn set_last_nudge_at(conn: &Connection, timestamp: &DateTime<Utc>) -> Result
     Ok(())
 }
 
+/// Get a value from the metadata table by key.
+pub fn get_metadata(conn: &Connection, key: &str) -> Result<Option<String>, CoreError> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM metadata WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(result)
+}
+
+/// Set a value in the metadata table (insert or replace).
+pub fn set_metadata(conn: &Connection, key: &str, value: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
 /// Verify the database is using WAL mode.
 pub fn verify_wal_mode(conn: &Connection) -> Result<bool, CoreError> {
     let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;

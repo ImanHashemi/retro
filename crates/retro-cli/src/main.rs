@@ -110,6 +110,15 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Run the full v2 pipeline (observe -> ingest -> analyze -> project -> apply)
+    Run {
+        /// Show detailed output
+        #[arg(long)]
+        verbose: bool,
+        /// Preview only, don't make changes
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Sync PR status: reset patterns from closed PRs back to discoverable
     Sync,
     /// Manage git hooks
@@ -158,6 +167,7 @@ fn main() {
         Commands::Log { since } => commands::log::run(since),
         Commands::Review { global, dry_run } => commands::review::run(global, dry_run, verbose),
         Commands::Curate { dry_run } => commands::curate::run(dry_run, verbose),
+        Commands::Run { verbose: run_verbose, dry_run } => commands::run::run(verbose || run_verbose, dry_run),
         Commands::Sync => commands::sync::run(verbose),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),

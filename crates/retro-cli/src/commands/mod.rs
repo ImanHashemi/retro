@@ -10,6 +10,7 @@ pub mod init;
 pub mod log;
 pub mod patterns;
 pub mod review;
+pub mod run;
 pub mod status;
 pub mod sync;
 
