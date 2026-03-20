@@ -1,6 +1,6 @@
 use crate::errors::CoreError;
 use crate::models::{
-    IngestedSession, KnowledgeNode, NodeScope, NodeStatus, NodeType,
+    IngestedSession, KnowledgeEdge, KnowledgeNode, EdgeType, NodeScope, NodeStatus, NodeType,
     Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget,
 };
 use chrono::{DateTime, Utc};
@@ -998,6 +998,85 @@ pub fn update_node_content(conn: &Connection, id: &str, content: &str) -> Result
     Ok(())
 }
 
+// ── Knowledge graph: Edge operations ──
+
+pub fn insert_edge(conn: &Connection, edge: &KnowledgeEdge) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT OR IGNORE INTO edges (source_id, target_id, type, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![
+            edge.source_id,
+            edge.target_id,
+            edge.edge_type.to_string(),
+            edge.created_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_edges_from(conn: &Connection, source_id: &str) -> Result<Vec<KnowledgeEdge>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT source_id, target_id, type, created_at FROM edges WHERE source_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![source_id], |row| {
+        Ok(KnowledgeEdge {
+            source_id: row.get(0)?,
+            target_id: row.get(1)?,
+            edge_type: EdgeType::from_str(&row.get::<_, String>(2)?).unwrap_or(EdgeType::Supports),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    })?;
+    let mut edges = Vec::new();
+    for row in rows {
+        edges.push(row?);
+    }
+    Ok(edges)
+}
+
+pub fn get_edges_to(conn: &Connection, target_id: &str) -> Result<Vec<KnowledgeEdge>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT source_id, target_id, type, created_at FROM edges WHERE target_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![target_id], |row| {
+        Ok(KnowledgeEdge {
+            source_id: row.get(0)?,
+            target_id: row.get(1)?,
+            edge_type: EdgeType::from_str(&row.get::<_, String>(2)?).unwrap_or(EdgeType::Supports),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    })?;
+    let mut edges = Vec::new();
+    for row in rows {
+        edges.push(row?);
+    }
+    Ok(edges)
+}
+
+pub fn delete_edge(conn: &Connection, source_id: &str, target_id: &str, edge_type: &EdgeType) -> Result<(), CoreError> {
+    conn.execute(
+        "DELETE FROM edges WHERE source_id = ?1 AND target_id = ?2 AND type = ?3",
+        params![source_id, target_id, edge_type.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Mark new_id as superseding old_id: archives old node and creates supersedes edge.
+pub fn supersede_node(conn: &Connection, new_id: &str, old_id: &str) -> Result<(), CoreError> {
+    update_node_status(conn, old_id, &NodeStatus::Archived)?;
+    let edge = KnowledgeEdge {
+        source_id: new_id.to_string(),
+        target_id: old_id.to_string(),
+        edge_type: EdgeType::Supersedes,
+        created_at: Utc::now(),
+    };
+    insert_edge(conn, &edge)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1890,5 +1969,80 @@ mod tests {
 
         // Old tables still exist
         conn.query_row("SELECT COUNT(*) FROM patterns WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
+    }
+
+    // ── Edge CRUD tests ──
+
+    #[test]
+    fn test_insert_and_get_edges() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let now = Utc::now();
+        let node1 = KnowledgeNode {
+            id: "node-1".to_string(), node_type: NodeType::Pattern,
+            scope: NodeScope::Project, project_id: Some("app".to_string()),
+            content: "Pattern A".to_string(), confidence: 0.5,
+            status: NodeStatus::Active, created_at: now, updated_at: now,
+        };
+        let node2 = KnowledgeNode {
+            id: "node-2".to_string(), node_type: NodeType::Rule,
+            scope: NodeScope::Project, project_id: Some("app".to_string()),
+            content: "Rule B".to_string(), confidence: 0.8,
+            status: NodeStatus::Active, created_at: now, updated_at: now,
+        };
+        insert_node(&conn, &node1).unwrap();
+        insert_node(&conn, &node2).unwrap();
+
+        let edge = KnowledgeEdge {
+            source_id: "node-1".to_string(),
+            target_id: "node-2".to_string(),
+            edge_type: EdgeType::DerivedFrom,
+            created_at: now,
+        };
+        insert_edge(&conn, &edge).unwrap();
+
+        let edges = get_edges_from(&conn, "node-1").unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].target_id, "node-2");
+        assert_eq!(edges[0].edge_type, EdgeType::DerivedFrom);
+
+        let edges_to = get_edges_to(&conn, "node-2").unwrap();
+        assert_eq!(edges_to.len(), 1);
+        assert_eq!(edges_to[0].source_id, "node-1");
+    }
+
+    #[test]
+    fn test_supersede_node_archives_old() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let now = Utc::now();
+        let old_node = KnowledgeNode {
+            id: "old".to_string(), node_type: NodeType::Rule,
+            scope: NodeScope::Global, project_id: None,
+            content: "Old rule".to_string(), confidence: 0.8,
+            status: NodeStatus::Active, created_at: now, updated_at: now,
+        };
+        let new_node = KnowledgeNode {
+            id: "new".to_string(), node_type: NodeType::Rule,
+            scope: NodeScope::Global, project_id: None,
+            content: "New rule".to_string(), confidence: 0.85,
+            status: NodeStatus::Active, created_at: now, updated_at: now,
+        };
+        insert_node(&conn, &old_node).unwrap();
+        insert_node(&conn, &new_node).unwrap();
+
+        supersede_node(&conn, "new", "old").unwrap();
+
+        let old = get_node(&conn, "old").unwrap().unwrap();
+        assert_eq!(old.status, NodeStatus::Archived);
+
+        let edges = get_edges_from(&conn, "new").unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].edge_type, EdgeType::Supersedes);
+        assert_eq!(edges[0].target_id, "old");
     }
 }
