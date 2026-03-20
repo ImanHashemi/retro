@@ -8,8 +8,8 @@ use crate::db;
 use crate::errors::CoreError;
 use crate::ingest::{context, session};
 use crate::models::{
-    AnalysisResponse, AnalyzeResult, BatchDetail, Pattern, PatternStatus, PatternType,
-    SuggestedTarget,
+    AnalysisResponse, AnalyzeResult, BatchDetail, EdgeType, GraphAnalysisResponse, GraphOperation,
+    NodeScope, NodeType, Pattern, PatternStatus, PatternType, SuggestedTarget,
 };
 use crate::scrub;
 use chrono::{Duration, Utc};
@@ -394,6 +394,69 @@ fn parse_analysis_response(text: &str) -> Result<AnalysisResponse, CoreError> {
     Ok(response)
 }
 
+/// Parse an AI response into a GraphOperation batch.
+pub fn parse_graph_response(json: &str, default_project: Option<&str>) -> Result<Vec<GraphOperation>, CoreError> {
+    let response: GraphAnalysisResponse = serde_json::from_str(json)
+        .map_err(|e| CoreError::Parse(format!("failed to parse graph analysis response: {e}")))?;
+
+    let mut ops = Vec::new();
+    for op_resp in &response.operations {
+        match op_resp.action.as_str() {
+            "create_node" => {
+                let node_type = op_resp.node_type.as_deref()
+                    .map(NodeType::from_str)
+                    .unwrap_or(NodeType::Pattern);
+                let scope = op_resp.scope.as_deref()
+                    .map(NodeScope::from_str)
+                    .unwrap_or(NodeScope::Project);
+                let project_id = match scope {
+                    NodeScope::Global => None,
+                    NodeScope::Project => op_resp.project_id.clone()
+                        .or_else(|| default_project.map(String::from)),
+                };
+                ops.push(GraphOperation::CreateNode {
+                    node_type,
+                    scope,
+                    project_id,
+                    content: op_resp.content.clone().unwrap_or_default(),
+                    confidence: op_resp.confidence.unwrap_or(0.5),
+                });
+            }
+            "update_node" => {
+                if let Some(id) = &op_resp.node_id {
+                    ops.push(GraphOperation::UpdateNode {
+                        id: id.clone(),
+                        confidence: op_resp.new_confidence,
+                        content: op_resp.new_content.clone(),
+                    });
+                }
+            }
+            "create_edge" => {
+                if let (Some(source), Some(target)) = (&op_resp.source_id, &op_resp.target_id) {
+                    let edge_type = op_resp.edge_type.as_deref()
+                        .and_then(EdgeType::from_str)
+                        .unwrap_or(EdgeType::Supports);
+                    ops.push(GraphOperation::CreateEdge {
+                        source_id: source.clone(),
+                        target_id: target.clone(),
+                        edge_type,
+                    });
+                }
+            }
+            "merge_nodes" => {
+                if let (Some(keep), Some(remove)) = (&op_resp.keep_id, &op_resp.remove_id) {
+                    ops.push(GraphOperation::MergeNodes {
+                        keep_id: keep.clone(),
+                        remove_id: remove.clone(),
+                    });
+                }
+            }
+            _ => {} // Skip unknown actions
+        }
+    }
+    Ok(ops)
+}
+
 fn truncate_for_error(s: &str, max: usize) -> &str {
     if s.len() <= max {
         s
@@ -588,5 +651,42 @@ mod tests {
     fn test_graph_analysis_schema_is_valid_json() {
         let _: serde_json::Value = serde_json::from_str(GRAPH_ANALYSIS_RESPONSE_SCHEMA)
             .expect("schema must be valid JSON");
+    }
+
+    #[test]
+    fn test_parse_graph_response() {
+        let json = r#"{
+            "reasoning": "Found testing pattern",
+            "operations": [
+                {
+                    "action": "create_node",
+                    "node_type": "rule",
+                    "scope": "project",
+                    "content": "Always run tests",
+                    "confidence": 0.85
+                },
+                {
+                    "action": "update_node",
+                    "node_id": "existing-1",
+                    "new_confidence": 0.9
+                }
+            ]
+        }"#;
+        let ops = parse_graph_response(json, Some("my-app")).unwrap();
+        assert_eq!(ops.len(), 2);
+        match &ops[0] {
+            GraphOperation::CreateNode { content, scope, .. } => {
+                assert_eq!(content, "Always run tests");
+                assert_eq!(*scope, NodeScope::Project);
+            }
+            _ => panic!("Expected CreateNode"),
+        }
+        match &ops[1] {
+            GraphOperation::UpdateNode { id, confidence, .. } => {
+                assert_eq!(id, "existing-1");
+                assert_eq!(*confidence, Some(0.9));
+            }
+            _ => panic!("Expected UpdateNode"),
+        }
     }
 }
