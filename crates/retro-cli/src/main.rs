@@ -1,4 +1,5 @@
 mod commands;
+mod launchd;
 
 use clap::{Parser, Subcommand};
 
