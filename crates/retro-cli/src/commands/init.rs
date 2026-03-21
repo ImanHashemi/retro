@@ -91,18 +91,68 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
         println!("  {} not in a git repository, skipping hooks", "Note".dimmed());
     }
 
+    // Create briefings directory
+    let briefings_dir = dir.join("briefings");
+    if !briefings_dir.exists() {
+        std::fs::create_dir_all(&briefings_dir).context("creating briefings dir")?;
+        println!("  {} {}", "Created".green(), shorten_path_buf(&briefings_dir));
+    }
+
+    // Install launchd scheduled runner (macOS only)
+    if cfg!(target_os = "macos") {
+        let config = Config::load(&config_path)?;
+        match crate::launchd::install_and_load(&config) {
+            Ok(()) => {
+                println!("  {} scheduled runner (every {}s)", "Started".green(), config.runner.interval_seconds);
+            }
+            Err(e) => {
+                println!("  {} could not start scheduled runner: {e}", "Warning".yellow());
+            }
+        }
+    }
+
+    // Create briefing skill if in a repo
+    if git::is_in_git_repo() {
+        let repo_root = git_root_or_cwd()?;
+        let project_id = db::generate_project_slug(&repo_root);
+        create_briefing_skill(&repo_root, &project_id)?;
+    }
+
     println!();
     println!("{}", "retro initialized successfully".green().bold());
-    println!(
-        "  Run {} to parse Claude Code sessions",
-        "retro ingest".cyan()
-    );
+    println!("  Run {} to open the dashboard", "retro dash".cyan());
 
+    Ok(())
+}
+
+fn create_briefing_skill(project_root: &str, project_id: &str) -> Result<()> {
+    let skills_dir = std::path::Path::new(project_root).join(".claude").join("skills");
+    let skill_path = skills_dir.join("retro-briefing.md");
+    if skill_path.exists() {
+        println!("  {} briefing skill: {}", "Exists".yellow(), skill_path.display());
+        return Ok(());
+    }
+    std::fs::create_dir_all(&skills_dir).context("creating .claude/skills/")?;
+    let content = format!(
+        "---\nname: retro-briefing\ndescription: Read Retro's session briefing at the start of each conversation\n---\nAt the start of each conversation, read ~/.retro/briefings/{project_id}.md\nif it exists and briefly acknowledge any new learnings or pending suggestions.\n"
+    );
+    std::fs::write(&skill_path, content).context("writing briefing skill")?;
+    println!("  {} briefing skill: {}", "Created".green(), skill_path.display());
     Ok(())
 }
 
 fn run_uninstall(purge: bool, _verbose: bool) -> Result<()> {
     println!("{}", "Uninstalling retro...".cyan());
+
+    // Unload and remove launchd plist (macOS only)
+    if cfg!(target_os = "macos") {
+        let _ = crate::launchd::unload();
+        let plist = crate::launchd::plist_path();
+        if plist.exists() {
+            let _ = std::fs::remove_file(&plist);
+            println!("  {} launchd plist", "Removed".green());
+        }
+    }
 
     // Remove git hooks from current repo
     if git::is_in_git_repo() {
