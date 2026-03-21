@@ -12,6 +12,9 @@ use retro_core::util::shorten_path;
 use super::{git_root_or_cwd, within_cooldown};
 
 pub fn run(global: bool, auto: bool, verbose: bool) -> Result<()> {
+    if auto {
+        super::warn_auto_deprecated();
+    }
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");

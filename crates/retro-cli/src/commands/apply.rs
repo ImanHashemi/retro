@@ -454,6 +454,9 @@ pub fn execute_shared_with_pr(
 
 /// CLI entry point for `retro apply`.
 pub fn run(global: bool, dry_run: bool, auto: bool, verbose: bool) -> Result<()> {
+    if auto {
+        super::warn_auto_deprecated();
+    }
     if dry_run && auto {
         anyhow::bail!("--dry-run and --auto are mutually exclusive");
     }

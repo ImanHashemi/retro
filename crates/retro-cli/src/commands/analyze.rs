@@ -15,6 +15,9 @@ use retro_core::util;
 use super::{git_root_or_cwd, within_cooldown};
 
 pub fn run(global: bool, since_days: Option<u32>, auto: bool, dry_run: bool, verbose: bool) -> Result<()> {
+    if auto {
+        super::warn_auto_deprecated();
+    }
     if dry_run && auto {
         anyhow::bail!("--dry-run and --auto cannot be used together");
     }
