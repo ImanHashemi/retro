@@ -11,7 +11,9 @@ pub mod log;
 pub mod patterns;
 pub mod review;
 pub mod run;
+pub mod start;
 pub mod status;
+pub mod stop;
 pub mod sync;
 
 use anyhow::{Context, Result};
