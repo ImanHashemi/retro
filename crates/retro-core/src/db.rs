@@ -25,6 +25,11 @@ pub fn open_db(path: &Path) -> Result<Connection, CoreError> {
     Ok(conn)
 }
 
+/// Initialize schema on an existing connection (for testing with in-memory DBs).
+pub fn init_db(conn: &Connection) -> Result<(), CoreError> {
+    migrate(conn)
+}
+
 fn migrate(conn: &Connection) -> Result<(), CoreError> {
     let current_version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
