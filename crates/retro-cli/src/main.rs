@@ -1,5 +1,6 @@
 mod commands;
 mod launchd;
+mod tui;
 
 use clap::{Parser, Subcommand};
 
