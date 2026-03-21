@@ -3,6 +3,7 @@ pub mod apply;
 pub mod audit;
 pub mod clean;
 pub mod curate;
+pub mod dash;
 pub mod diff;
 pub mod hooks;
 pub mod ingest;

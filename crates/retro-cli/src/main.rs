@@ -127,6 +127,8 @@ enum Commands {
     Stop,
     /// Sync PR status: reset patterns from closed PRs back to discoverable
     Sync,
+    /// Open the TUI dashboard
+    Dash,
     /// Manage git hooks
     Hooks {
         #[command(subcommand)]
@@ -177,6 +179,7 @@ fn main() {
         Commands::Start => commands::start::run(verbose),
         Commands::Stop => commands::stop::run(verbose),
         Commands::Sync => commands::sync::run(verbose),
+        Commands::Dash => commands::dash::run(verbose),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),
         },
