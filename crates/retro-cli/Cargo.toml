@@ -18,5 +18,7 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 colored = "2"
+crossterm = "0.28"
 libc = "0.2"
+ratatui = "0.29"
 serde_json = "1"
