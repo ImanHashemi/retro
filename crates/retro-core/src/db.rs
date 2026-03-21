@@ -1068,6 +1068,40 @@ pub fn get_nodes_by_scope(
     Ok(nodes)
 }
 
+/// Get all nodes with a given status, ordered by confidence DESC.
+pub fn get_nodes_by_status(
+    conn: &Connection,
+    status: &NodeStatus,
+) -> Result<Vec<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at
+         FROM nodes WHERE status = ?1
+         ORDER BY confidence DESC",
+    )?;
+    let rows = stmt.query_map(params![status.to_string()], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
 pub fn update_node_confidence(conn: &Connection, id: &str, confidence: f64) -> Result<(), CoreError> {
     conn.execute(
         "UPDATE nodes SET confidence = ?1, updated_at = ?2 WHERE id = ?3",
@@ -2502,5 +2536,72 @@ mod tests {
         let updated = get_node(&conn, "node-1").unwrap().unwrap();
         assert_eq!(updated.confidence, 0.8);
         assert_eq!(updated.content, "Updated content");
+    }
+
+    #[test]
+    fn test_get_nodes_by_status() {
+        let conn = test_db();
+
+        let active_node = KnowledgeNode {
+            id: "n1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Always run tests".to_string(),
+            confidence: 0.85,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let pending_node = KnowledgeNode {
+            id: "n2".to_string(),
+            node_type: NodeType::Directive,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "Use snake_case".to_string(),
+            confidence: 0.9,
+            status: NodeStatus::PendingReview,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let dismissed_node = KnowledgeNode {
+            id: "n3".to_string(),
+            node_type: NodeType::Pattern,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Old pattern".to_string(),
+            confidence: 0.5,
+            status: NodeStatus::Dismissed,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        insert_node(&conn, &active_node).unwrap();
+        insert_node(&conn, &pending_node).unwrap();
+        insert_node(&conn, &dismissed_node).unwrap();
+
+        let pending = get_nodes_by_status(&conn, &NodeStatus::PendingReview).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "n2");
+
+        let active = get_nodes_by_status(&conn, &NodeStatus::Active).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "n1");
+
+        let pending2 = KnowledgeNode {
+            id: "n4".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Project,
+            project_id: Some("other".to_string()),
+            content: "Second pending".to_string(),
+            confidence: 0.95,
+            status: NodeStatus::PendingReview,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        insert_node(&conn, &pending2).unwrap();
+        let pending_all = get_nodes_by_status(&conn, &NodeStatus::PendingReview).unwrap();
+        assert_eq!(pending_all.len(), 2);
+        assert_eq!(pending_all[0].id, "n4"); // Higher confidence first
     }
 }
