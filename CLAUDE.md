@@ -241,3 +241,10 @@ cargo test
 - For major changes, provide commands for clean install testing: retro init --uninstall --purge && cargo build --release && ./target/release/retro init
 - To release: bump version numbers in both Cargo.toml files, merge PR, then `git tag v0.X.Y && git push origin v0.X.Y`. The `.github/workflows/publish.yml` workflow handles testing, crates.io publishing, and GitHub release creation automatically.
 
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- Always run cargo test before committing changes
+
+<!-- retro:managed:end -->
