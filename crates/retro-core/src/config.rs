@@ -248,7 +248,7 @@ fn default_full_management() -> bool {
 }
 
 fn default_interval_seconds() -> u32 {
-    60
+    300
 }
 fn default_analysis_trigger() -> String {
     "sessions".to_string()
@@ -458,7 +458,7 @@ window_days = 7
     #[test]
     fn test_runner_config_defaults() {
         let config = Config::default();
-        assert_eq!(config.runner.interval_seconds, 60);
+        assert_eq!(config.runner.interval_seconds, 300);
         assert_eq!(config.runner.analysis_trigger, "sessions");
         assert_eq!(config.runner.analysis_threshold, 3);
         assert!(config.runner.active_hours.is_none());
@@ -527,7 +527,7 @@ auto_apply = false
         assert_eq!(config.analysis.window_days, 7);
         assert_eq!(config.hooks.ingest_cooldown_minutes, 10);
         // v2 sections should have defaults
-        assert_eq!(config.runner.interval_seconds, 60);
+        assert_eq!(config.runner.interval_seconds, 300);
         assert_eq!(config.trust.mode, "review");
         assert_eq!(config.knowledge.confidence_threshold, 0.7);
     }

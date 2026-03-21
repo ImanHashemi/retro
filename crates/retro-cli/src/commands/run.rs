@@ -7,8 +7,6 @@ use retro_core::db;
 use retro_core::ingest;
 use retro_core::observer;
 
-use super::git_root_or_cwd;
-
 /// Run the full v2 pipeline: observe -> ingest -> analyze -> project -> apply.
 pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
     let dir = retro_dir();
@@ -22,12 +20,60 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
 
     let config = Config::load(&config_path)?;
     let conn = db::open_db(&db_path)?;
-    let project_path = git_root_or_cwd()?;
 
+    // Rotate log if needed
+    let _ = retro_core::runner::rotate_log_if_needed(&dir);
+
+    // Check schema version
+    let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version < 4 {
+        anyhow::bail!("database schema v{version} detected — run `retro init` to migrate to v2");
+    }
+
+    match super::git_root_or_cwd() {
+        Ok(path) => {
+            // Single project mode (manual invocation from a git repo)
+            run_for_project(&conn, &config, &path, verbose, dry_run)?;
+        }
+        Err(_) => {
+            // Global mode (launchd invocation, or outside any repo)
+            let projects = db::get_all_projects(&conn)?;
+            if projects.is_empty() {
+                if verbose {
+                    println!("{}", "No known projects.".dimmed());
+                }
+                return Ok(());
+            }
+            for project in &projects {
+                if verbose {
+                    println!("  {} {}", "Project:".white(), project.id.cyan());
+                }
+                if let Err(e) = run_for_project(&conn, &config, &project.path, verbose, dry_run) {
+                    eprintln!("  {} {}: {e}", "Error".red(), project.id);
+                }
+            }
+        }
+    }
+
+    if !dry_run {
+        update_last_run(&conn)?;
+    }
+
+    Ok(())
+}
+
+/// Run the pipeline for a single project.
+fn run_for_project(
+    conn: &retro_core::db::Connection,
+    config: &Config,
+    project_path: &str,
+    verbose: bool,
+    dry_run: bool,
+) -> Result<()> {
     // Step 1: Observe — find modified sessions
     println!("{}", "Step 1/4: Observing session changes...".cyan());
     let claude_dir = config.claude_dir();
-    let last_run = db::get_metadata(&conn, "last_run_at")?;
+    let last_run = db::get_metadata(conn, "last_run_at")?;
     let since = last_run.as_ref().and_then(|ts| {
         chrono::DateTime::parse_from_rfc3339(ts)
             .ok()
@@ -44,7 +90,7 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
         if modified.len() == 1 { "" } else { "s" }
     );
 
-    if modified.is_empty() && !has_pending_work(&conn, &config) {
+    if modified.is_empty() && !has_pending_work(conn, config) {
         println!();
         println!("{}", "Nothing to do — no modified sessions and no pending work.".dimmed());
         return Ok(());
@@ -65,7 +111,7 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
             modified.len()
         );
     } else {
-        let ingest_result = ingest::ingest_project(&conn, &config, &project_path)?;
+        let ingest_result = ingest::ingest_project(conn, config, project_path)?;
         println!(
             "  {} ingested, {} skipped",
             ingest_result.sessions_ingested.to_string().green(),
@@ -83,7 +129,7 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
 
     // Check AI call budget
     let today = Utc::now().format("%Y-%m-%d").to_string();
-    let (ai_calls_today, ai_calls_date) = get_ai_call_count(&conn)?;
+    let (ai_calls_today, ai_calls_date) = get_ai_call_count(conn)?;
     let budget_remaining = if ai_calls_date == today {
         config.runner.max_ai_calls_per_day.saturating_sub(ai_calls_today)
     } else {
@@ -97,7 +143,6 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
             ai_calls_today,
             config.runner.max_ai_calls_per_day
         );
-        update_last_run(&conn)?;
         return Ok(());
     }
 
@@ -109,7 +154,7 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
     }
 
     // Check if analysis is needed based on trigger
-    let should_analyze = should_trigger_analysis(&conn, &config)?;
+    let should_analyze = should_trigger_analysis(conn, config)?;
 
     if !should_analyze {
         println!(
@@ -124,7 +169,7 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
         );
 
         if dry_run {
-            let unanalyzed = db::unanalyzed_session_count(&conn)?;
+            let unanalyzed = db::unanalyzed_session_count(conn)?;
             println!(
                 "  {} would analyze {} unanalyzed sessions",
                 "[dry-run]".yellow(),
@@ -135,9 +180,9 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
             println!("  {}", "Running AI-powered analysis...".dimmed());
             let window_days = config.analysis.window_days;
             let result = analysis::analyze(
-                &conn,
-                &config,
-                Some(project_path.as_str()),
+                conn,
+                config,
+                Some(project_path),
                 window_days,
                 |idx, total, sessions, chars| {
                     println!(
@@ -167,7 +212,7 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
 
             // Track AI calls
             let calls_used = result.batch_details.len() as u32;
-            increment_ai_calls(&conn, calls_used)?;
+            increment_ai_calls(conn, calls_used)?;
         }
     }
 
@@ -178,12 +223,9 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
         println!();
         println!("{}", "Dry run -- no changes made.".yellow().bold());
     } else {
-        // Update last_run_at
-        update_last_run(&conn)?;
-
         // Show next steps
-        let unanalyzed = db::unanalyzed_session_count(&conn).unwrap_or(0);
-        let has_unprojected = db::has_unprojected_patterns(&conn, config.analysis.confidence_threshold)
+        let unanalyzed = db::unanalyzed_session_count(conn).unwrap_or(0);
+        let has_unprojected = db::has_unprojected_patterns(conn, config.analysis.confidence_threshold)
             .unwrap_or(false);
 
         println!();
