@@ -10,7 +10,8 @@ This is the primary happy-path test for Retro 2.0.
 
 ```bash
 # Clean slate — remove any existing retro installation
-retro init --uninstall --purge 2>/dev/null || true
+./target/debug/retro init --uninstall --purge 2>/dev/null || true
+rm -f .claude/skills/retro-briefing.md
 cargo build
 ```
 
