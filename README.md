@@ -1,12 +1,12 @@
 # retro
 
-**Active context curator for AI coding agents.**
+**Your coding agent gets better after every session — automatically.**
 
 You've told your agent "always use uv, not pip" across a dozen sessions. You've corrected the same testing mistake three times this week. Your agent forgets everything between conversations, and you're the one doing the remembering.
 
-Retro fixes this. It analyzes your Claude Code session history, discovers patterns (repeated instructions, recurring mistakes, workflow conventions, explicit directives) and turns them into skills and CLAUDE.md rules automatically. Your agent gets better after every session, without you maintaining its context by hand.
+Retro fixes this. It watches your Claude Code sessions in the background, discovers patterns (repeated instructions, recurring mistakes, workflow conventions, explicit directives) and turns them into persistent context — skills and CLAUDE.md rules. Your agent improves session over session, with zero effort from you.
 
-You stay in control: every change goes through a review queue where you approve, skip, or dismiss. Shared changes are proposed as PRs.
+You stay in control: suggestions surface in a TUI dashboard where you approve or dismiss them. Shared changes are proposed as PRs.
 
 ![retro demo](docs/demo.gif)
 
@@ -16,74 +16,72 @@ You stay in control: every change goes through a review queue where you approve,
 # Install
 cargo install retro-cli
 
-# Initialize (creates ~/.retro/, installs git hooks)
+# Initialize (creates database, config, starts background watcher)
 cd your-project
 retro init
 
-# Ingest your Claude Code session history (fast, no AI)
-retro ingest
-
-# Analyze sessions to discover patterns (AI-powered)
-retro analyze
+# That's it. Retro is now watching your sessions.
+# Open the dashboard anytime to see what it's learned:
+retro dash
 ```
 
-You'll see output like:
-
-```
-  Batch 1/1: 12 sessions, 48K chars -> 892 tokens out, 3 new + 1 updated
-    Found recurring testing workflow and two explicit directives about package management...
-
-Analysis complete!
-  Sessions analyzed: 12
-  New patterns:      3
-  Tokens:            52340 in / 892 out
-```
-
-Then review and apply what retro found:
-
-```sh
-# See discovered patterns
-retro patterns
-
-# Generate content and queue for review
-retro apply
-
-# Review: approve, skip, or dismiss each suggestion
-retro review
-```
-
-After `retro init`, a post-commit hook runs the full pipeline in the background (ingest, analyze, apply) with per-stage cooldowns. Run `retro review` when you're ready to approve changes.
+After `retro init`, a background job runs every 5 minutes: ingesting new sessions, analyzing them for patterns, and queuing suggestions for your review. Open `retro dash` to approve or dismiss suggestions from a TUI dashboard.
 
 ## How It Works
 
-Retro operates as a three-stage pipeline:
+Retro runs as a scheduled background job (launchd on macOS) that processes your Claude Code sessions through a five-layer pipeline:
 
 ```
-  ┌──────────────────────────────────────────────┐
-  │  INGESTION (pure Rust, no AI)                │
-  │  Reads Claude Code session history           │
-  │  Parses into structured sessions in SQLite   │
-  └────────────────┬─────────────────────────────┘
-                   │
-  ┌────────────────▼─────────────────────────────┐
-  │  ANALYSIS (AI-powered)                       │
-  │  Discovers: repeated instructions,           │
-  │  recurring mistakes, workflow patterns,      │
-  │  explicit directives ("always"/"never")      │
-  │  Stores patterns with confidence scores      │
-  └────────────────┬─────────────────────────────┘
-                   │
-  ┌────────────────▼─────────────────────────────┐
-  │  PROJECTION (two-track, via review queue)    │
-  │  Personal: global agents (apply after review)│
-  │  Shared: CLAUDE.md rules, skills (PR after   │
-  │  review)                                     │
-  └──────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────┐
+  │  SURFACES                                        │
+  │  TUI Dashboard (retro dash) · Session Briefing   │
+  ├──────────────────────────────────────────────────┤
+  │  PROJECTORS                                      │
+  │  Claude Code: rules → CLAUDE.md, skills → files  │
+  │  (Pluggable: Gemini, Cursor planned)             │
+  ├──────────────────────────────────────────────────┤
+  │  KNOWLEDGE STORE                                 │
+  │  Graph in SQLite: nodes (rules, patterns, skills,│
+  │  preferences, directives) + edges (supports,     │
+  │  supersedes, derived_from)                       │
+  ├──────────────────────────────────────────────────┤
+  │  ANALYZERS                                       │
+  │  AI-powered pattern discovery with scope         │
+  │  classification (global vs project)              │
+  ├──────────────────────────────────────────────────┤
+  │  OBSERVERS                                       │
+  │  Session file watcher (mtime-based polling)      │
+  ├──────────────────────────────────────────────────┤
+  │  SCHEDULED RUNNER                                │
+  │  launchd periodic job (every 5 min)              │
+  └──────────────────────────────────────────────────┘
 ```
 
-- **Ingestion** is fast and runs on every commit via git hooks. No AI calls, just parsing.
-- **Analysis** uses Claude to find patterns across your sessions within a rolling window (default: 14 days). Explicit directives ("always use X", "never do Y") are detected as high-confidence patterns from a single session.
-- **Projection** turns high-confidence patterns into concrete artifacts: skills, CLAUDE.md rules, and global agents. All generated content is queued for your review before anything is written to disk or proposed as a PR.
+- **Observers** detect modified session files by polling mtimes — no filesystem watcher needed.
+- **Analyzers** use Claude to discover patterns, classify them by scope (global vs project-specific), and build a knowledge graph with confidence scores. Explicit directives ("always use X", "never do Y") are detected at high confidence from a single session.
+- **Knowledge Store** is a graph of typed nodes (rules, patterns, skills, preferences, directives, memories) with edges (supports, contradicts, supersedes). Confidence accumulates across sessions.
+- **Projectors** turn high-confidence knowledge into agent-specific output. The Claude Code projector generates CLAUDE.md rules and skill files.
+- **Surfaces** present suggestions for review. The TUI dashboard shows pending suggestions and lets you browse all stored knowledge.
+
+## TUI Dashboard
+
+`retro dash` opens a terminal UI for reviewing suggestions and browsing what Retro has learned:
+
+```
+┌─ Retro Dashboard ─────────────────────────────────────────┐
+│  Status: Active · Last run: 4 min ago · AI calls: 3/10   │
+│  [Pending Review (3)]  [Knowledge (23)]                   │
+├───────────────────────────────────────────────────────────┤
+│  > [rule]  my-rust-app  "Prefer thiserror over…"    .82   │
+│    [skill] global       "rust-error-handling"       .78   │
+│    [rule]  my-python    "Always type-hint return…"  .71   │
+│                                                           │
+│  a: approve  d: dismiss  p: preview  Tab: switch  q: quit│
+└───────────────────────────────────────────────────────────┘
+```
+
+- **Pending Review tab** — suggestions waiting for your approval. Press `a` to approve, `d` to dismiss, `p` to preview.
+- **Knowledge tab** — browse all active knowledge with scope and type filters. Press `s` to cycle scope, `t` to cycle type, `/` to search.
 
 ## What Retro Generates
 
@@ -99,75 +97,71 @@ Retro operates as a three-stage pipeline:
 
 Retro never touches content outside the managed delimiters.
 
-**Full management mode** lets retro manage your entire CLAUDE.md, not just a managed section. Enable with `full_management = true` (see Configuration). In this mode:
-- `retro apply` proposes granular edits (add, remove, reword, move) anywhere in CLAUDE.md, reviewed through the normal queue
-- `retro curate` performs an agentic full rewrite — AI explores your codebase and proposes a complete improved CLAUDE.md via PR
-- Managed section delimiters are dissolved on first run (existing rules preserved in place)
+**Full management mode** lets Retro manage your entire CLAUDE.md. Enable with `full_management = true`. In this mode, `retro apply` proposes granular edits anywhere in CLAUDE.md, and `retro curate` performs an AI-powered full rewrite via PR.
 
-**Skills** are reusable workflow patterns saved as `.claude/skills/` files. For example, a "pre-pr-checklist" skill extracted from a workflow you guided your agent through across multiple sessions: run tests, lint, format commit message.
+**Skills** are reusable workflow patterns saved as `.claude/skills/` files — extracted from patterns you've demonstrated across multiple sessions.
 
-**Global agents** are personal agent definitions at `~/.claude/agents/` for patterns that apply across all your projects.
-
-All changes go through `retro review` first. Approved shared changes (CLAUDE.md, skills) are proposed via PR on a `retro/updates-*` branch. Approved personal changes (global agents) apply directly.
+**Session briefings** are per-project files at `~/.retro/briefings/` that tell your agent what's new when it starts a session. Retro installs a skill that reads the briefing automatically.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `retro init` | Set up retro: creates `~/.retro/`, database, config, and git hooks |
+| `retro init` | Set up Retro: database, config, background watcher, briefing skill |
+| `retro dash` | Open TUI dashboard to review suggestions and browse knowledge |
+| `retro start` | Start the background watcher (launchd on macOS) |
+| `retro stop` | Stop the background watcher |
+| `retro run` | Run the full pipeline once (what the watcher runs periodically) |
+| `retro status` | Show session counts, last analysis, pattern summary |
 | `retro ingest` | Parse new sessions from Claude Code history (fast, no AI) |
 | `retro analyze` | Discover patterns across sessions (AI-powered) |
 | `retro patterns` | List discovered patterns, filterable by status |
 | `retro apply` | Generate content from patterns and queue for review |
-| `retro review` | Review pending items: approve, skip, or dismiss |
+| `retro review` | CLI-based review: approve, skip, or dismiss (alternative to `retro dash`) |
 | `retro sync` | Check PR status and reset patterns from closed PRs |
-| `retro diff` | Preview what `apply` would change (alias for `apply --dry-run`) |
-| `retro clean` | Archive stale patterns and remove their projections |
-| `retro audit` | AI-powered review of your context for redundancy and contradictions |
-| `retro curate` | AI-powered full CLAUDE.md rewrite — explores codebase and proposes changes via PR |
-| `retro status` | Show session counts, last analysis, pattern summary |
+| `retro diff` | Preview what `apply` would change |
+| `retro clean` | Archive stale patterns |
+| `retro audit` | AI-powered review for redundancy and contradictions |
+| `retro curate` | AI-powered full CLAUDE.md rewrite via PR |
 | `retro log` | Show audit log entries |
-| `retro hooks remove` | Remove retro git hooks from the current repository |
-| `retro init --uninstall` | Remove retro hooks (preserves `~/.retro/` data) |
-| `retro init --uninstall --purge` | Remove hooks and delete all retro data |
 
-Most commands are project-scoped by default. Use `--global` to operate across all projects. Use `--dry-run` on any AI-powered command to preview without making changes or API calls.
-
-## Automatic Mode
-
-After `retro init`, a single **post-commit** hook runs `retro ingest --auto` in the background. When `auto_apply = true` (the default), this chains through the full pipeline:
-
-1. **Ingest**: parse new sessions (cooldown: 5 minutes)
-2. **Analyze**: discover patterns via AI (cooldown: 24 hours)
-3. **Apply**: generate content and queue for review (cooldown: 24 hours)
-
-Each stage has its own cooldown and data trigger, so there are no unnecessary AI calls. In `--auto` mode, retro skips if another instance is running and never produces output.
-
-Auto mode does the expensive work (ingestion, analysis, content generation) in the background, but nothing is written to disk until you run `retro review`. You'll see a terminal nudge showing pending review count the next time you run any retro command interactively.
+Use `--dry-run` on any AI-powered command to preview without making changes or API calls.
 
 ## Configuration
 
 Config lives at `~/.retro/config.toml`:
 
 ```toml
-[analysis]
-window_days = 14           # How far back to analyze
-rolling_window = true      # Re-analyze all sessions in window (cross-session patterns)
-staleness_days = 28        # When to consider patterns stale
-confidence_threshold = 0.7 # Minimum confidence to act on patterns
+[runner]
+interval_seconds = 300         # How often the background watcher runs (5 min)
+analysis_trigger = "sessions"  # Trigger: "sessions" (after N new) or "always"
+analysis_threshold = 3         # Analyze after this many new sessions
+max_ai_calls_per_day = 10     # Hard cap on AI calls per day
 
-[ai]
-model = "sonnet"           # AI model (sonnet, opus, haiku)
+[trust]
+mode = "review"                # "review" (default) or "auto"
+
+[trust.auto_approve]           # Only applies when mode = "auto"
+rules = true
+skills = false
+preferences = true
+directives = true
+
+[trust.scope]                  # Only applies when mode = "auto"
+global_changes = "review"      # Always review global changes even in auto mode
+project_changes = "auto"
+
+[knowledge]
+confidence_threshold = 0.7     # Minimum confidence to suggest
+global_promotion_threshold = 0.85  # Suggest moving project knowledge to global
+
+[analysis]
+window_days = 14               # How far back to analyze
+rolling_window = true          # Re-analyze all sessions in window
+model = "sonnet"               # AI model (sonnet, opus, haiku)
 
 [claude_md]
-full_management = false    # Full CLAUDE.md management (enables retro curate + granular edits)
-
-[hooks]
-ingest_cooldown_minutes = 5    # Minimum time between auto-ingests
-analyze_cooldown_minutes = 1440 # Minimum time between auto-analyses (24h)
-apply_cooldown_minutes = 1440   # Minimum time between auto-applies (24h)
-auto_apply = true               # Enable full auto pipeline
-auto_analyze_max_sessions = 15  # Skip auto-analyze when backlog exceeds this
+full_management = false        # Full CLAUDE.md management (enables curate + granular edits)
 ```
 
 Run `retro init` to create the default config.
@@ -182,32 +176,35 @@ cargo install retro-cli
 
 ### Requirements
 
-- [Claude Code](https://claude.ai/download) for session history and the `claude` CLI (used for AI-powered analysis)
+- [Claude Code](https://claude.ai/download) for session history and the `claude` CLI (used for AI analysis)
 - Git (for hook integration and PR creation)
 - `gh` CLI (optional, for automatic PR creation and `retro sync`)
+- macOS (for background watcher via launchd — Linux systemd support planned)
 
 ## Status
 
-Retro is v0.3. The core pipeline works end-to-end and has been tested on real Claude Code session history. 160 unit tests, 12 scenario tests.
+Retro 2.0 "The Watcher". The core pipeline works end-to-end with automatic background operation. 228 unit tests.
 
-**What works well:**
+**What works:**
+- Automatic background operation — `retro init` sets everything up, the watcher runs every 5 minutes
+- TUI dashboard for reviewing suggestions and browsing knowledge
+- Knowledge graph with typed nodes, scoped knowledge (global vs project), confidence accumulation
 - Session ingestion and pattern discovery across projects
 - Explicit directive detection ("always use X", "never do Y") from single sessions
-- Rolling window analysis with per-batch reasoning summaries
-- Structured output via `--json-schema` for reliable AI response parsing
-- CLAUDE.md rule generation with managed sections (never touches your content)
-- Skill and global agent generation (two-phase: generate then validate)
-- Review queue with batch approve/skip/dismiss workflow
-- Automatic pipeline via git hooks with per-stage cooldowns
-- Context auditing for redundancy and contradictions
-- PR lifecycle management (`retro sync` detects closed PRs)
+- CLAUDE.md rule generation with managed sections
+- Skill generation (two-phase: generate then validate)
+- Full CLAUDE.md management with granular edits and agentic rewrite
+- Trust-based auto-approve configuration
+- Session briefings delivered via skill files
+- Cost control (configurable daily AI call cap)
+- PR lifecycle management
 - Dry-run mode on all AI-powered commands
-- Full CLAUDE.md management with granular edits and agentic rewrite (`retro curate`)
 
-**What's early:**
-- Skill generation quality varies (two-phase generate+validate helps but isn't perfect)
-- Pattern merging occasionally creates near-duplicates
-- Only supports Claude Code (designed to be extensible to other agents)
+**What's planned:**
+- Linux systemd support for the background watcher
+- Additional projectors (Gemini, Cursor)
+- Contradiction detection and resolution
+- Knowledge graph visualization in TUI
 
 ## Contributing
 
