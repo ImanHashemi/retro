@@ -90,7 +90,9 @@ Retro never touches content outside the managed delimiters.
 
 **Skills** are reusable workflow patterns saved as `.claude/skills/` files — extracted from patterns you've demonstrated across multiple sessions.
 
-**Session briefings** are per-project files at `~/.retro/briefings/` that tell your agent what's new when it starts a session. Retro installs a skill that reads the briefing automatically.
+**Session briefings** are per-project files at `~/.retro/briefings/` that tell your agent what's new when it starts a session. Retro installs a `SessionStart` hook that automatically delivers the briefing when you open Claude Code.
+
+![session briefing at startup](docs/screenshot-briefing.png)
 
 ## Commands
 
@@ -184,7 +186,7 @@ Retro 2.0 "The Watcher". The core pipeline works end-to-end with automatic backg
 - Skill generation (two-phase: generate then validate)
 - Full CLAUDE.md management with granular edits and agentic rewrite
 - Trust-based auto-approve configuration
-- Session briefings delivered via skill files
+- Session briefings delivered via SessionStart hook
 - Cost control (configurable daily AI call cap)
 - PR lifecycle management
 - Dry-run mode on all AI-powered commands
