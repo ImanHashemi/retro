@@ -8,7 +8,7 @@ Retro fixes this. It watches your Claude Code sessions in the background, discov
 
 You stay in control: suggestions surface in a TUI dashboard where you approve or dismiss them. Shared changes are proposed as PRs.
 
-![retro demo](docs/demo.gif)
+![retro dashboard — pending review](docs/screenshot-pending.png)
 
 ## Quick Start
 
@@ -65,23 +65,12 @@ Retro runs as a scheduled background job (launchd on macOS) that processes your 
 
 ## TUI Dashboard
 
-`retro dash` opens a terminal UI for reviewing suggestions and browsing what Retro has learned:
-
-```
-┌─ Retro Dashboard ─────────────────────────────────────────┐
-│  Status: Active · Last run: 4 min ago · AI calls: 3/10   │
-│  [Pending Review (3)]  [Knowledge (23)]                   │
-├───────────────────────────────────────────────────────────┤
-│  > [rule]  my-rust-app  "Prefer thiserror over…"    .82   │
-│    [skill] global       "rust-error-handling"       .78   │
-│    [rule]  my-python    "Always type-hint return…"  .71   │
-│                                                           │
-│  a: approve  d: dismiss  p: preview  Tab: switch  q: quit│
-└───────────────────────────────────────────────────────────┘
-```
+`retro dash` opens a terminal UI for reviewing suggestions and browsing what Retro has learned.
 
 - **Pending Review tab** — suggestions waiting for your approval. Press `a` to approve, `d` to dismiss, `p` to preview.
 - **Knowledge tab** — browse all active knowledge with scope and type filters. Press `s` to cycle scope, `t` to cycle type, `/` to search.
+
+![retro dashboard — knowledge browser](docs/screenshot-knowledge.png)
 
 ## What Retro Generates
 
