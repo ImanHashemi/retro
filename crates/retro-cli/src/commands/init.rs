@@ -111,11 +111,10 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
         }
     }
 
-    // Create briefing skill if in a repo
+    // Install SessionStart hook for briefing delivery
     if git::is_in_git_repo() {
         let repo_root = git_root_or_cwd()?;
-        let project_id = db::generate_project_slug(&repo_root);
-        create_briefing_skill(&repo_root, &project_id)?;
+        install_briefing_hook(&repo_root)?;
     }
 
     println!();
@@ -125,19 +124,84 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
     Ok(())
 }
 
-fn create_briefing_skill(project_root: &str, project_id: &str) -> Result<()> {
-    let skills_dir = std::path::Path::new(project_root).join(".claude").join("skills");
-    let skill_path = skills_dir.join("retro-briefing.md");
-    if skill_path.exists() {
-        println!("  {} briefing skill: {}", "Exists".yellow(), skill_path.display());
-        return Ok(());
+/// Install the SessionStart hook that delivers briefing content at session start.
+/// Creates .claude/hooks/retro-briefing.sh and adds the hook to .claude/settings.local.json.
+fn install_briefing_hook(project_root: &str) -> Result<()> {
+    let root = std::path::Path::new(project_root);
+    let hooks_dir = root.join(".claude").join("hooks");
+    let hook_path = hooks_dir.join("retro-briefing.sh");
+    let settings_path = root.join(".claude").join("settings.local.json");
+
+    // Write hook script
+    std::fs::create_dir_all(&hooks_dir).context("creating .claude/hooks/")?;
+
+    let hook_script = r#"#!/bin/bash
+# Retro session briefing hook — installed by `retro init`
+# Reads the project briefing file and injects it as context at session start.
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+PROJECT_SLUG=$(basename "$PROJECT_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
+BRIEFING_FILE="$HOME/.retro/briefings/${PROJECT_SLUG}.md"
+if [ -f "$BRIEFING_FILE" ]; then
+    cat "$BRIEFING_FILE"
+fi
+exit 0
+"#;
+
+    if hook_path.exists() {
+        println!("  {} briefing hook: {}", "Exists".yellow(), hook_path.display());
+    } else {
+        std::fs::write(&hook_path, hook_script).context("writing briefing hook")?;
+        // Make executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o755);
+            std::fs::set_permissions(&hook_path, perms).context("setting hook permissions")?;
+        }
+        println!("  {} briefing hook: {}", "Created".green(), hook_path.display());
     }
-    std::fs::create_dir_all(&skills_dir).context("creating .claude/skills/")?;
-    let content = format!(
-        "---\nname: retro-briefing\ndescription: Read Retro's session briefing at the start of each conversation\n---\nAt the start of each conversation, read ~/.retro/briefings/{project_id}.md\nif it exists and briefly acknowledge any new learnings or pending suggestions.\n"
-    );
-    std::fs::write(&skill_path, content).context("writing briefing skill")?;
-    println!("  {} briefing skill: {}", "Created".green(), skill_path.display());
+
+    // Add hook to settings.local.json if not already present
+    let hook_entry = r#""SessionStart""#;
+    let settings_content = if settings_path.exists() {
+        std::fs::read_to_string(&settings_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    if settings_content.contains(hook_entry) {
+        // Already has a SessionStart hook configured
+    } else {
+        // Read existing JSON or create new
+        let mut json: serde_json::Value = if settings_content.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&settings_content).unwrap_or(serde_json::json!({}))
+        };
+
+        // Add hooks.SessionStart
+        let hooks = json
+            .as_object_mut()
+            .unwrap()
+            .entry("hooks")
+            .or_insert(serde_json::json!({}));
+        let hooks_obj = hooks.as_object_mut().unwrap();
+        hooks_obj.insert(
+            "SessionStart".to_string(),
+            serde_json::json!([{
+                "matcher": "",
+                "hooks": [{
+                    "type": "command",
+                    "command": ".claude/hooks/retro-briefing.sh"
+                }]
+            }]),
+        );
+
+        let pretty = serde_json::to_string_pretty(&json).unwrap();
+        std::fs::write(&settings_path, &pretty).context("writing settings.local.json")?;
+        println!("  {} SessionStart hook in settings", "Installed".green());
+    }
+
     Ok(())
 }
 

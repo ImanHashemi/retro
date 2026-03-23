@@ -14,7 +14,7 @@ pub fn generate_briefing(
     }
 
     let mut content = String::new();
-    content.push_str("## What's new since your last session\n\n");
+    content.push_str("Retro session briefing — briefly mention these updates to the user at the start of the conversation.\n\n");
 
     for item in applied {
         content.push_str(&format!("- **Applied:** {item}\n"));
@@ -68,7 +68,7 @@ mod tests {
             &[],
             0,
         );
-        assert!(briefing.contains("What's new since your last session"));
+        assert!(briefing.contains("Retro session briefing"));
         assert!(briefing.contains("Applied"));
         assert!(briefing.contains("Always run tests"));
     }
