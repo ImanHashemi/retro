@@ -86,7 +86,7 @@ Retro runs as a scheduled background job (launchd on macOS) that processes your 
 
 Retro never touches content outside the managed delimiters.
 
-**Full management mode** lets Retro manage your entire CLAUDE.md. Enable with `full_management = true`. In this mode, `retro apply` proposes granular edits anywhere in CLAUDE.md, and `retro curate` performs an AI-powered full rewrite via PR.
+**Full management mode** lets Retro manage your entire CLAUDE.md. Enable with `full_management = true`. In this mode, discovered rules are proposed as granular edits anywhere in CLAUDE.md, and `retro curate` performs an AI-powered full rewrite via PR.
 
 **Skills** are reusable workflow patterns saved as `.claude/skills/` files — extracted from patterns you've demonstrated across multiple sessions.
 
@@ -96,25 +96,33 @@ Retro never touches content outside the managed delimiters.
 
 ## Commands
 
+### Primary
+
 | Command | Description |
 |---------|-------------|
-| `retro init` | Set up Retro: database, config, background watcher, briefing skill |
-| `retro dash` | Open TUI dashboard to review suggestions and browse knowledge |
-| `retro start` | Start the background watcher (launchd on macOS) |
-| `retro stop` | Stop the background watcher |
-| `retro run` | Run the full pipeline once (what the watcher runs periodically) |
-| `retro status` | Show session counts, last analysis, pattern summary |
-| `retro ingest` | Parse new sessions from Claude Code history (fast, no AI) |
-| `retro analyze` | Discover patterns across sessions (AI-powered) |
-| `retro patterns` | List discovered patterns, filterable by status |
-| `retro apply` | Generate content from patterns and queue for review |
-| `retro review` | CLI-based review: approve, skip, or dismiss (alternative to `retro dash`) |
-| `retro sync` | Check PR status and reset patterns from closed PRs |
-| `retro diff` | Preview what `apply` would change |
-| `retro clean` | Archive stale patterns |
-| `retro audit` | AI-powered review for redundancy and contradictions |
+| `retro init` | Set up Retro: database, config, background watcher |
+| `retro dash` | TUI dashboard: review suggestions, browse knowledge |
+| `retro start` / `retro stop` | Control the background watcher |
+| `retro run` | Run the full pipeline once (what the watcher runs) |
+| `retro status` | Show session counts and knowledge summary |
 | `retro curate` | AI-powered full CLAUDE.md rewrite via PR |
-| `retro log` | Show audit log entries |
+
+### Advanced
+
+These commands are available for manual control and debugging. In normal use, the background watcher and dashboard handle everything.
+
+| Command | Description |
+|---------|-------------|
+| `retro ingest` | Manual session ingestion |
+| `retro analyze` | Manual pattern analysis |
+| `retro apply` | Manual content generation from patterns |
+| `retro review` | CLI-based review (alternative to `retro dash`) |
+| `retro sync` | Manual PR state sync |
+| `retro patterns` | List discovered patterns |
+| `retro diff` | Preview pending changes |
+| `retro clean` | Archive stale patterns |
+| `retro audit` | AI-powered context review |
+| `retro log` | View audit log |
 
 Use `--dry-run` on any AI-powered command to preview without making changes or API calls.
 
