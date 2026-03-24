@@ -1,3 +1,6 @@
+use std::path::Path;
+
+use crate::errors::CoreError;
 use crate::models::{ClaudeMdEdit, ClaudeMdEditType};
 
 const MANAGED_START: &str = "<!-- retro:managed:start -->";
@@ -199,6 +202,33 @@ pub fn apply_edits(content: &str, edits: &[ClaudeMdEdit]) -> String {
     result
 }
 
+/// Append a single rule to a CLAUDE.md file's managed section.
+/// Creates the file and managed section if missing. Skips duplicates.
+pub fn project_rule_to_claude_md(path: &Path, rule: &str) -> Result<(), CoreError> {
+    let existing = if path.exists() {
+        std::fs::read_to_string(path)
+            .map_err(|e| CoreError::Io(format!("reading CLAUDE.md: {e}")))?
+    } else {
+        String::new()
+    };
+
+    let mut rules: Vec<String> = read_managed_section(&existing).unwrap_or_default();
+    if !rules.iter().any(|r| r == rule) {
+        rules.push(rule.to_string());
+    }
+
+    let updated = update_claude_md_content(&existing, &rules);
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| CoreError::Io(format!("creating directory: {e}")))?;
+    }
+    std::fs::write(path, &updated)
+        .map_err(|e| CoreError::Io(format!("writing CLAUDE.md: {e}")))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,6 +407,25 @@ mod tests {
         // First occurrence replaced, second left intact
         assert!(result.starts_with("# Project\n\nSync only\n"));
         assert!(result.contains("\nNo async\n"));
+    }
+
+    #[test]
+    fn test_project_rule_to_claude_md() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let claude_md_path = dir.path().join("CLAUDE.md");
+
+        // First write to a new file
+        project_rule_to_claude_md(&claude_md_path, "Always use snake_case").unwrap();
+        let content = std::fs::read_to_string(&claude_md_path).unwrap();
+        assert!(content.contains("retro:managed:start"));
+        assert!(content.contains("Always use snake_case"));
+
+        // Second write appends without duplicating
+        project_rule_to_claude_md(&claude_md_path, "Run tests before committing").unwrap();
+        let content = std::fs::read_to_string(&claude_md_path).unwrap();
+        assert!(content.contains("Always use snake_case"));
+        assert!(content.contains("Run tests before committing"));
+        assert_eq!(content.matches("retro:managed:start").count(), 1);
     }
 
     #[test]
