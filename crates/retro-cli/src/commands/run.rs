@@ -294,9 +294,53 @@ fn run_for_project(
         }
     }
 
-    // Step 5/6: Syncing PR state (placeholder — implemented in Task 8)
+    // Step 5/6: Syncing PR state
     println!("{}", "Step 5/6: Syncing PR state...".cyan());
-    println!("  {} (not yet implemented)", "Skipping:".dimmed());
+
+    let nodes_with_pr = db::get_nodes_with_pr(conn)?;
+    if nodes_with_pr.is_empty() {
+        if verbose {
+            println!("  {} no open PRs to check", "Skipping:".dimmed());
+        }
+    } else if dry_run {
+        let unique_prs: std::collections::HashSet<&str> = nodes_with_pr.iter()
+            .filter_map(|n| n.pr_url.as_deref())
+            .collect();
+        println!("  {} {} PRs to check", "[dry-run]".yellow(), unique_prs.len());
+    } else {
+        let unique_prs: std::collections::HashSet<String> = nodes_with_pr.iter()
+            .filter_map(|n| n.pr_url.clone())
+            .collect();
+
+        for pr_url in &unique_prs {
+            match retro_core::git::pr_state(pr_url) {
+                Ok(state) => {
+                    match state.as_str() {
+                        "MERGED" => {
+                            db::clear_node_pr(conn, pr_url)?;
+                            if verbose {
+                                println!("  {} PR merged: {}", "Cleared".green(), pr_url);
+                            }
+                        }
+                        "CLOSED" => {
+                            db::dismiss_nodes_for_pr(conn, pr_url)?;
+                            println!("  {} PR closed — nodes dismissed: {}", "Dismissed".yellow(), pr_url);
+                        }
+                        _ => {
+                            if verbose {
+                                println!("  {} PR open: {}", "Waiting".dimmed(), pr_url);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if verbose {
+                        eprintln!("  {} checking PR {}: {e}", "Warning".yellow(), pr_url);
+                    }
+                }
+            }
+        }
+    }
 
     // Step 6: Summary
     println!("{}", "Step 6/6: Pipeline complete.".cyan());
