@@ -1404,6 +1404,107 @@ pub fn get_project_by_remote_url(conn: &Connection, remote_url: &str) -> Result<
     Ok(result)
 }
 
+/// Get active nodes that haven't been projected yet, ordered by confidence DESC.
+pub fn get_unprojected_nodes(conn: &Connection) -> Result<Vec<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
+         FROM nodes WHERE status = 'active' AND projected_at IS NULL
+         ORDER BY confidence DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
+/// Mark a node as projected (direct write, no PR).
+pub fn mark_node_projected(conn: &Connection, id: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET projected_at = ?1 WHERE id = ?2",
+        params![Utc::now().to_rfc3339(), id],
+    )?;
+    Ok(())
+}
+
+/// Mark a node as projected via PR.
+pub fn mark_node_projected_with_pr(conn: &Connection, id: &str, pr_url: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET projected_at = ?1, pr_url = ?2 WHERE id = ?3",
+        params![Utc::now().to_rfc3339(), pr_url, id],
+    )?;
+    Ok(())
+}
+
+/// Get all nodes with an associated PR URL.
+pub fn get_nodes_with_pr(conn: &Connection) -> Result<Vec<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
+         FROM nodes WHERE pr_url IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
+/// Clear PR URL from nodes after merge.
+pub fn clear_node_pr(conn: &Connection, pr_url: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET pr_url = NULL WHERE pr_url = ?1",
+        params![pr_url],
+    )?;
+    Ok(())
+}
+
+/// Dismiss all nodes for a closed PR.
+pub fn dismiss_nodes_for_pr(conn: &Connection, pr_url: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET status = 'dismissed', pr_url = NULL WHERE pr_url = ?1",
+        params![pr_url],
+    )?;
+    Ok(())
+}
+
 pub fn get_all_projects(conn: &Connection) -> Result<Vec<KnowledgeProject>, CoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, path, remote_url, agent_type, last_seen FROM projects ORDER BY last_seen DESC",
@@ -2690,5 +2791,106 @@ mod tests {
         // Verify schema version
         let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
         assert_eq!(version, 5);
+    }
+
+    fn test_node(id: &str, status: NodeStatus, projected_at: Option<String>, pr_url: Option<String>) -> KnowledgeNode {
+        KnowledgeNode {
+            id: id.to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: format!("Content for {}", id),
+            confidence: 0.8,
+            status,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at,
+            pr_url,
+        }
+    }
+
+    #[test]
+    fn test_get_unprojected_nodes() {
+        let conn = test_db();
+
+        // Active node with no projected_at — should be returned
+        let active_unprojected = test_node("n1", NodeStatus::Active, None, None);
+        // Active node with projected_at set — should NOT be returned
+        let active_projected = test_node("n2", NodeStatus::Active, Some(Utc::now().to_rfc3339()), None);
+        // PendingReview node with no projected_at — should NOT be returned (wrong status)
+        let pending = test_node("n3", NodeStatus::PendingReview, None, None);
+
+        insert_node(&conn, &active_unprojected).unwrap();
+        insert_node(&conn, &active_projected).unwrap();
+        insert_node(&conn, &pending).unwrap();
+
+        let nodes = get_unprojected_nodes(&conn).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, "n1");
+    }
+
+    #[test]
+    fn test_mark_node_projected() {
+        let conn = test_db();
+
+        let node = test_node("n1", NodeStatus::Active, None, None);
+        insert_node(&conn, &node).unwrap();
+
+        mark_node_projected(&conn, "n1").unwrap();
+
+        let retrieved = get_node(&conn, "n1").unwrap().unwrap();
+        assert!(retrieved.projected_at.is_some());
+        assert!(retrieved.pr_url.is_none());
+    }
+
+    #[test]
+    fn test_mark_node_projected_with_pr() {
+        let conn = test_db();
+
+        let node = test_node("n1", NodeStatus::Active, None, None);
+        insert_node(&conn, &node).unwrap();
+
+        mark_node_projected_with_pr(&conn, "n1", "https://github.com/test/pull/42").unwrap();
+
+        let retrieved = get_node(&conn, "n1").unwrap().unwrap();
+        assert!(retrieved.projected_at.is_some());
+        assert_eq!(retrieved.pr_url, Some("https://github.com/test/pull/42".to_string()));
+    }
+
+    #[test]
+    fn test_dismiss_nodes_for_pr() {
+        let conn = test_db();
+
+        let pr_url = "https://github.com/test/pull/99";
+        let node1 = test_node("n1", NodeStatus::Active, Some(Utc::now().to_rfc3339()), Some(pr_url.to_string()));
+        let node2 = test_node("n2", NodeStatus::Active, Some(Utc::now().to_rfc3339()), Some(pr_url.to_string()));
+
+        insert_node(&conn, &node1).unwrap();
+        insert_node(&conn, &node2).unwrap();
+
+        dismiss_nodes_for_pr(&conn, pr_url).unwrap();
+
+        let n1 = get_node(&conn, "n1").unwrap().unwrap();
+        let n2 = get_node(&conn, "n2").unwrap().unwrap();
+
+        assert_eq!(n1.status, NodeStatus::Dismissed);
+        assert!(n1.pr_url.is_none());
+        assert_eq!(n2.status, NodeStatus::Dismissed);
+        assert!(n2.pr_url.is_none());
+    }
+
+    #[test]
+    fn test_clear_node_pr() {
+        let conn = test_db();
+
+        let pr_url = "https://github.com/test/pull/7";
+        let node = test_node("n1", NodeStatus::Active, Some(Utc::now().to_rfc3339()), Some(pr_url.to_string()));
+        insert_node(&conn, &node).unwrap();
+
+        clear_node_pr(&conn, pr_url).unwrap();
+
+        let retrieved = get_node(&conn, "n1").unwrap().unwrap();
+        assert!(retrieved.pr_url.is_none());
+        assert_eq!(retrieved.status, NodeStatus::Active);
     }
 }
