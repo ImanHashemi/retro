@@ -236,6 +236,88 @@ pub fn create_pr(title: &str, body: &str, base: &str) -> Result<String, CoreErro
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Create a retro PR: chdir → stash → branch from default → write files → commit → push → PR → restore.
+/// Returns the PR URL on success, or None if PR creation was skipped.
+pub fn create_retro_pr(
+    project_path: &str,
+    files: &[(&str, &str)],
+    commit_message: &str,
+    pr_title: &str,
+    pr_body: &str,
+) -> Result<Option<String>, CoreError> {
+    let original_dir = std::env::current_dir()
+        .map_err(|e| CoreError::Io(format!("getting cwd: {e}")))?;
+    std::env::set_current_dir(project_path)
+        .map_err(|e| CoreError::Io(format!("changing to {project_path}: {e}")))?;
+
+    let result = create_retro_pr_inner(project_path, files, commit_message, pr_title, pr_body);
+
+    // Always restore original directory
+    let _ = std::env::set_current_dir(&original_dir);
+
+    result
+}
+
+fn create_retro_pr_inner(
+    project_path: &str,
+    files: &[(&str, &str)],
+    commit_message: &str,
+    pr_title: &str,
+    pr_body: &str,
+) -> Result<Option<String>, CoreError> {
+    let original_branch = current_branch()?;
+    let default = default_branch()?;
+    let _ = fetch_branch(&default);
+
+    let stashed = stash_push()?;
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let branch_name = format!("retro/updates-{timestamp}");
+    if let Err(e) = create_branch(&branch_name, Some(&format!("origin/{default}"))) {
+        if stashed {
+            let _ = stash_pop();
+        }
+        return Err(e);
+    }
+
+    // Write files
+    for (path, content) in files {
+        let full_path = std::path::Path::new(project_path).join(path);
+        if let Some(parent) = full_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&full_path, content)
+            .map_err(|e| CoreError::Io(format!("writing {path}: {e}")))?;
+    }
+
+    // Commit
+    let file_paths: Vec<&str> = files.iter().map(|(p, _)| *p).collect();
+    commit_files(&file_paths, commit_message)?;
+
+    // Push + PR
+    let pr_url = match push_current_branch() {
+        Ok(()) => {
+            if is_gh_available() {
+                match create_pr(pr_title, pr_body, &default) {
+                    Ok(url) => Some(url),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        }
+        Err(_) => None,
+    };
+
+    // Restore branch
+    let _ = checkout_branch(&original_branch);
+    if stashed {
+        let _ = stash_pop();
+    }
+
+    Ok(pr_url)
+}
+
 /// Check the state of a PR by its URL. Returns "OPEN", "CLOSED", or "MERGED".
 pub fn pr_state(pr_url: &str) -> Result<String, CoreError> {
     let output = Command::new("gh")
