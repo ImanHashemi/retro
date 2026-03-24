@@ -71,7 +71,7 @@ fn run_for_project(
     dry_run: bool,
 ) -> Result<()> {
     // Step 1: Observe — find modified sessions
-    println!("{}", "Step 1/4: Observing session changes...".cyan());
+    println!("{}", "Step 1/6: Observing session changes...".cyan());
     let claude_dir = config.claude_dir();
     let last_run = db::get_metadata(conn, "last_run_at")?;
     let since = last_run.as_ref().and_then(|ts| {
@@ -103,7 +103,7 @@ fn run_for_project(
     }
 
     // Step 2: Ingest
-    println!("{}", "Step 2/4: Ingesting sessions...".cyan());
+    println!("{}", "Step 2/6: Ingesting sessions...".cyan());
     if dry_run {
         println!(
             "  {} {} modified session files to ingest",
@@ -125,7 +125,7 @@ fn run_for_project(
     }
 
     // Step 3: Check analysis trigger
-    println!("{}", "Step 3/4: Checking analysis trigger...".cyan());
+    println!("{}", "Step 3/6: Checking analysis trigger...".cyan());
 
     // Check AI call budget
     let today = Utc::now().format("%Y-%m-%d").to_string();
@@ -216,8 +216,90 @@ fn run_for_project(
         }
     }
 
-    // Step 4: Summary
-    println!("{}", "Step 4/4: Pipeline complete.".cyan());
+    // Step 4/6: Project approved changes
+    println!("{}", "Step 4/6: Projecting approved changes...".cyan());
+
+    let unprojected = db::get_unprojected_nodes(conn)?;
+    if unprojected.is_empty() {
+        println!("  {} no unprojected nodes", "Skipping:".dimmed());
+    } else if dry_run {
+        println!("  {} {} nodes to project", "[dry-run]".yellow(), unprojected.len());
+    } else {
+        let mut projected_count = 0usize;
+
+        // Group by scope
+        let global_rules: Vec<&retro_core::models::KnowledgeNode> = unprojected.iter()
+            .filter(|n| n.scope == retro_core::models::NodeScope::Global && n.project_id.is_none())
+            .filter(|n| matches!(n.node_type, retro_core::models::NodeType::Rule | retro_core::models::NodeType::Directive | retro_core::models::NodeType::Preference))
+            .collect();
+        let project_nodes: Vec<&retro_core::models::KnowledgeNode> = unprojected.iter()
+            .filter(|n| n.scope == retro_core::models::NodeScope::Project)
+            .filter(|n| matches!(n.node_type, retro_core::models::NodeType::Rule | retro_core::models::NodeType::Directive | retro_core::models::NodeType::Preference | retro_core::models::NodeType::Pattern))
+            .collect();
+
+        // Global rules → ~/.claude/CLAUDE.md
+        if !global_rules.is_empty() {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            let claude_md_path = std::path::PathBuf::from(&home).join(".claude").join("CLAUDE.md");
+            for node in &global_rules {
+                if retro_core::projection::claude_md::project_rule_to_claude_md(&claude_md_path, &node.content).is_ok() {
+                    db::mark_node_projected(conn, &node.id)?;
+                    projected_count += 1;
+                }
+            }
+            if verbose {
+                println!("  {} {} global rules to ~/.claude/CLAUDE.md", "Projected".green(), global_rules.len());
+            }
+        }
+
+        // Project-scoped nodes → CLAUDE.md on a PR branch
+        if !project_nodes.is_empty() {
+            let rules: Vec<String> = project_nodes.iter()
+                .map(|n| n.content.clone())
+                .collect();
+
+            let claude_md_path = format!("{}/CLAUDE.md", project_path);
+            let existing = std::fs::read_to_string(&claude_md_path).unwrap_or_default();
+            let updated = retro_core::projection::claude_md::update_claude_md_content(&existing, &rules);
+
+            match retro_core::git::create_retro_pr(
+                project_path,
+                &[("CLAUDE.md", &updated)],
+                "retro: update CLAUDE.md with discovered rules",
+                "retro: update CLAUDE.md rules",
+                &format!("Retro discovered {} rule(s) from your sessions.\n\nApproved via `retro dash`.", rules.len()),
+            ) {
+                Ok(Some(url)) => {
+                    for node in &project_nodes {
+                        let _ = db::mark_node_projected_with_pr(conn, &node.id, &url);
+                    }
+                    projected_count += project_nodes.len();
+                    println!("  {} PR: {}", "Created".green(), url.cyan());
+                }
+                Ok(None) => {
+                    for node in &project_nodes {
+                        let _ = db::mark_node_projected(conn, &node.id);
+                    }
+                    projected_count += project_nodes.len();
+                    println!("  {} committed to branch (no gh for PR)", "Projected".yellow());
+                }
+                Err(e) => {
+                    eprintln!("  {} PR creation: {e}", "Error".red());
+                }
+            }
+        }
+
+        if projected_count > 0 {
+            println!("  {} {} nodes projected", "Done:".green(), projected_count);
+        }
+    }
+
+    // Step 5/6: Syncing PR state (placeholder — implemented in Task 8)
+    println!("{}", "Step 5/6: Syncing PR state...".cyan());
+    println!("  {} (not yet implemented)", "Skipping:".dimmed());
+
+    // Step 6: Summary
+    println!("{}", "Step 6/6: Pipeline complete.".cyan());
 
     if dry_run {
         println!();
@@ -249,12 +331,15 @@ fn run_for_project(
     Ok(())
 }
 
-/// Check if there is pending work (unanalyzed sessions or unprojected patterns).
+/// Check if there is pending work (unanalyzed sessions or unprojected patterns/nodes).
 fn has_pending_work(conn: &db::Connection, config: &Config) -> bool {
     let has_unanalyzed = db::has_unanalyzed_sessions(conn).unwrap_or(false);
-    let has_unprojected = db::has_unprojected_patterns(conn, config.analysis.confidence_threshold)
+    let has_unprojected_v1 = db::has_unprojected_patterns(conn, config.analysis.confidence_threshold)
         .unwrap_or(false);
-    has_unanalyzed || has_unprojected
+    let has_unprojected_v2 = db::get_unprojected_nodes(conn)
+        .map(|nodes| !nodes.is_empty())
+        .unwrap_or(false);
+    has_unanalyzed || has_unprojected_v1 || has_unprojected_v2
 }
 
 /// Check whether analysis should be triggered based on the configured trigger and threshold.
