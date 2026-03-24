@@ -30,7 +30,7 @@ cargo run -- stop 2>/dev/null || true
 
 ## Expected
 
-- `retro run --dry-run` shows "Step 1/4", "Step 2/4", "Step 3/4", "Step 4/4" pipeline progression
+- `retro run --dry-run` shows "Step 1/6" through "Step 6/6" pipeline progression (6 steps: observe, ingest, analyze, project, sync, complete)
 - `retro run --dry-run` shows "Dry run" or "dry-run" in the output
 - `retro run --dry-run` mentions "modified session" in Step 1
 - `retro run --dry-run --verbose` shows more detail than the non-verbose version (e.g., file paths or session counts)
