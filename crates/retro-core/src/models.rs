@@ -882,6 +882,10 @@ pub struct KnowledgeNode {
     pub status: NodeStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub projected_at: Option<String>,
+    #[serde(default)]
+    pub pr_url: Option<String>,
 }
 
 /// An edge in the knowledge graph.
@@ -1090,6 +1094,8 @@ mod tests {
             status: NodeStatus::Active,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
         assert_eq!(node.node_type, NodeType::Rule);
         assert_eq!(node.scope, NodeScope::Project);

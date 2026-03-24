@@ -10,7 +10,7 @@ use rusqlite::params;
 use rusqlite::OptionalExtension;
 use std::path::Path;
 
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 
 /// Open (or create) the retro database with WAL mode enabled.
 pub fn open_db(path: &Path) -> Result<Connection, CoreError> {
@@ -122,7 +122,9 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
                 confidence REAL NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                projected_at TEXT,
+                pr_url TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_nodes_scope_project ON nodes(scope, project_id, status);
@@ -152,7 +154,22 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
         // Migrate existing v1 patterns to v2 nodes
         migrate_patterns_to_nodes(conn)?;
 
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        conn.pragma_update(None, "user_version", 4)?;
+    }
+
+    if current_version < 5 {
+        // For databases upgraded from v4, we need to add the new columns.
+        // For fresh installs, v4 CREATE TABLE already includes them.
+        let has_projected_at: bool = conn
+            .prepare("SELECT projected_at FROM nodes LIMIT 0")
+            .is_ok();
+        if !has_projected_at {
+            conn.execute_batch(
+                "ALTER TABLE nodes ADD COLUMN projected_at TEXT;
+                 ALTER TABLE nodes ADD COLUMN pr_url TEXT;"
+            )?;
+        }
+        conn.pragma_update(None, "user_version", 5)?;
     }
 
     Ok(())
@@ -972,6 +989,8 @@ pub fn migrate_patterns_to_nodes(conn: &Connection) -> Result<usize, CoreError> 
             status: NodeStatus::Active,
             created_at,
             updated_at,
+            projected_at: None,
+            pr_url: None,
         };
         insert_node(conn, &node)?;
         count += 1;
@@ -983,8 +1002,8 @@ pub fn migrate_patterns_to_nodes(conn: &Connection) -> Result<usize, CoreError> 
 
 pub fn insert_node(conn: &Connection, node: &KnowledgeNode) -> Result<(), CoreError> {
     conn.execute(
-        "INSERT INTO nodes (id, type, scope, project_id, content, confidence, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO nodes (id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             node.id,
             node.node_type.to_string(),
@@ -995,6 +1014,8 @@ pub fn insert_node(conn: &Connection, node: &KnowledgeNode) -> Result<(), CoreEr
             node.status.to_string(),
             node.created_at.to_rfc3339(),
             node.updated_at.to_rfc3339(),
+            node.projected_at,
+            node.pr_url,
         ],
     )?;
     Ok(())
@@ -1002,7 +1023,7 @@ pub fn insert_node(conn: &Connection, node: &KnowledgeNode) -> Result<(), CoreEr
 
 pub fn get_node(conn: &Connection, id: &str) -> Result<Option<KnowledgeNode>, CoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
          FROM nodes WHERE id = ?1",
     )?;
     let result = stmt.query_row(params![id], |row| {
@@ -1020,6 +1041,8 @@ pub fn get_node(conn: &Connection, id: &str) -> Result<Option<KnowledgeNode>, Co
             updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
                 .unwrap_or_default()
                 .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
         })
     }).optional()?;
     Ok(result)
@@ -1036,7 +1059,7 @@ pub fn get_nodes_by_scope(
     }
     let status_placeholders: Vec<String> = statuses.iter().enumerate().map(|(i, _)| format!("?{}", i + 3)).collect();
     let sql = format!(
-        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
          FROM nodes WHERE scope = ?1 AND (?2 IS NULL OR project_id = ?2) AND status IN ({})
          ORDER BY confidence DESC",
         status_placeholders.join(", ")
@@ -1064,6 +1087,8 @@ pub fn get_nodes_by_scope(
             updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
                 .unwrap_or_default()
                 .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
         })
     })?;
     let mut nodes = Vec::new();
@@ -1079,7 +1104,7 @@ pub fn get_nodes_by_status(
     status: &NodeStatus,
 ) -> Result<Vec<KnowledgeNode>, CoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
          FROM nodes WHERE status = ?1
          ORDER BY confidence DESC",
     )?;
@@ -1098,6 +1123,8 @@ pub fn get_nodes_by_status(
             updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
                 .unwrap_or_default()
                 .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
         })
     })?;
     let mut nodes = Vec::new();
@@ -1236,6 +1263,8 @@ pub fn apply_graph_operations(conn: &Connection, ops: &[GraphOperation]) -> Resu
                     status: NodeStatus::Active,
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
+                    projected_at: None,
+                    pr_url: None,
                 };
                 insert_node(conn, &node)?;
                 result.nodes_created += 1;
@@ -2135,7 +2164,7 @@ mod tests {
         migrate(&conn).unwrap();
 
         let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         // Verify nodes table exists with correct columns
         let count: i64 = conn.query_row(
@@ -2174,6 +2203,8 @@ mod tests {
             status: NodeStatus::Active,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
 
         insert_node(&conn, &node).unwrap();
@@ -2202,6 +2233,8 @@ mod tests {
                 status: NodeStatus::Active,
                 created_at: now,
                 updated_at: now,
+                projected_at: None,
+                pr_url: None,
             };
             insert_node(&conn, &node).unwrap();
         }
@@ -2229,6 +2262,8 @@ mod tests {
             status: NodeStatus::Active,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
         insert_node(&conn, &node).unwrap();
 
@@ -2253,6 +2288,8 @@ mod tests {
             status: NodeStatus::PendingReview,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
         insert_node(&conn, &node).unwrap();
 
@@ -2280,7 +2317,7 @@ mod tests {
         migrate(&conn).unwrap();
 
         let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         // v4 tables exist
         conn.query_row("SELECT COUNT(*) FROM nodes WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
@@ -2305,12 +2342,14 @@ mod tests {
             scope: NodeScope::Project, project_id: Some("app".to_string()),
             content: "Pattern A".to_string(), confidence: 0.5,
             status: NodeStatus::Active, created_at: now, updated_at: now,
+            projected_at: None, pr_url: None,
         };
         let node2 = KnowledgeNode {
             id: "node-2".to_string(), node_type: NodeType::Rule,
             scope: NodeScope::Project, project_id: Some("app".to_string()),
             content: "Rule B".to_string(), confidence: 0.8,
             status: NodeStatus::Active, created_at: now, updated_at: now,
+            projected_at: None, pr_url: None,
         };
         insert_node(&conn, &node1).unwrap();
         insert_node(&conn, &node2).unwrap();
@@ -2345,12 +2384,14 @@ mod tests {
             scope: NodeScope::Global, project_id: None,
             content: "Old rule".to_string(), confidence: 0.8,
             status: NodeStatus::Active, created_at: now, updated_at: now,
+            projected_at: None, pr_url: None,
         };
         let new_node = KnowledgeNode {
             id: "new".to_string(), node_type: NodeType::Rule,
             scope: NodeScope::Global, project_id: None,
             content: "New rule".to_string(), confidence: 0.85,
             status: NodeStatus::Active, created_at: now, updated_at: now,
+            projected_at: None, pr_url: None,
         };
         insert_node(&conn, &old_node).unwrap();
         insert_node(&conn, &new_node).unwrap();
@@ -2524,6 +2565,8 @@ mod tests {
             status: NodeStatus::Active,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
         insert_node(&conn, &node).unwrap();
 
@@ -2557,6 +2600,8 @@ mod tests {
             status: NodeStatus::Active,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
         let pending_node = KnowledgeNode {
             id: "n2".to_string(),
@@ -2568,6 +2613,8 @@ mod tests {
             status: NodeStatus::PendingReview,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
         let dismissed_node = KnowledgeNode {
             id: "n3".to_string(),
@@ -2579,6 +2626,8 @@ mod tests {
             status: NodeStatus::Dismissed,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
 
         insert_node(&conn, &active_node).unwrap();
@@ -2603,10 +2652,43 @@ mod tests {
             status: NodeStatus::PendingReview,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         };
         insert_node(&conn, &pending2).unwrap();
         let pending_all = get_nodes_by_status(&conn, &NodeStatus::PendingReview).unwrap();
         assert_eq!(pending_all.len(), 2);
         assert_eq!(pending_all[0].id, "n4"); // Higher confidence first
+    }
+
+    #[test]
+    fn test_migrate_v4_to_v5_adds_projection_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        // Insert a node — should support new columns
+        let node = KnowledgeNode {
+            id: "test-1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "test rule".to_string(),
+            confidence: 0.8,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        insert_node(&conn, &node).unwrap();
+
+        let retrieved = get_node(&conn, "test-1").unwrap().unwrap();
+        assert!(retrieved.projected_at.is_none());
+        assert!(retrieved.pr_url.is_none());
+
+        // Verify schema version
+        let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 5);
     }
 }

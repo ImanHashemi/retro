@@ -70,6 +70,8 @@ mod tests {
             status: NodeStatus::Active,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
         }
     }
 
