@@ -292,6 +292,34 @@ fn run_for_project(
         if projected_count > 0 {
             println!("  {} {} nodes projected", "Done:".green(), projected_count);
         }
+
+        // Regenerate briefing for this project
+        if projected_count > 0 {
+            let project_slug = retro_core::db::generate_project_slug(project_path);
+            let applied: Vec<String> = unprojected.iter()
+                .filter(|n| {
+                    // Include nodes that were just projected (check db for updated state)
+                    db::get_node(conn, &n.id)
+                        .ok()
+                        .flatten()
+                        .map(|updated| updated.projected_at.is_some())
+                        .unwrap_or(false)
+                })
+                .map(|n| format!("{}: {}", n.node_type, retro_core::util::truncate_str(&n.content, 80)))
+                .collect();
+            let pending_count = db::get_nodes_by_status(conn, &retro_core::models::NodeStatus::PendingReview)
+                .map(|nodes| nodes.iter()
+                    .filter(|n| n.project_id.as_deref() == Some(project_slug.as_str()) || n.project_id.is_none())
+                    .count())
+                .unwrap_or(0);
+            let briefing_content = retro_core::briefing::generate_briefing(
+                &project_slug, &applied, &[], pending_count,
+            );
+            let _ = retro_core::briefing::write_briefing(&project_slug, &briefing_content);
+            if verbose {
+                println!("  {} briefing for {}", "Updated".green(), project_slug);
+            }
+        }
     }
 
     // Step 5/6: Syncing PR state
