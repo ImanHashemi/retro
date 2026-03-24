@@ -56,36 +56,81 @@ pub fn handle_key(app: &mut App, key: KeyEvent, conn: &retro_core::db::Connectio
 }
 
 fn handle_pending_key(app: &mut App, key: KeyEvent, conn: &retro_core::db::Connection) -> bool {
-    let selected_id = {
-        let items = app.visible_items();
-        if items.is_empty() {
-            return false;
-        }
-        match items.get(app.selected_index) {
-            Some(node) => node.id.clone(),
-            None => return false,
-        }
-    };
     match key.code {
         KeyCode::Char('a') => {
-            if let Ok(()) = db::update_node_status(conn, &selected_id, &NodeStatus::Active) {
-                app.pending_nodes.retain(|n| n.id != selected_id);
+            let (selected_id, node_scope, node_type) = {
+                let items = app.visible_items();
+                match items.get(app.selected_index) {
+                    Some(node) => (node.id.clone(), node.scope.clone(), node.node_type.clone()),
+                    None => return false,
+                }
+            };
+
+            if db::update_node_status(conn, &selected_id, &NodeStatus::Active).is_err() {
+                return true;
+            }
+
+            // Immediate projection for global rules/directives/preferences
+            let is_global = node_scope == retro_core::models::NodeScope::Global;
+            let is_rule_type = matches!(
+                node_type,
+                retro_core::models::NodeType::Rule
+                    | retro_core::models::NodeType::Directive
+                    | retro_core::models::NodeType::Preference
+            );
+
+            if is_global && is_rule_type {
                 if let Ok(Some(node)) = db::get_node(conn, &selected_id) {
-                    app.knowledge_nodes.push(node);
-                    app.knowledge_nodes.sort_by(|a, b| {
-                        b.confidence
-                            .partial_cmp(&a.confidence)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    let home =
+                        std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+                    let claude_md_path = std::path::PathBuf::from(home)
+                        .join(".claude")
+                        .join("CLAUDE.md");
+                    if retro_core::projection::claude_md::project_rule_to_claude_md(
+                        &claude_md_path,
+                        &node.content,
+                    )
+                    .is_ok()
+                    {
+                        let _ = db::mark_node_projected(conn, &selected_id);
+                        app.set_message("Applied to ~/.claude/CLAUDE.md".to_string());
+                    } else {
+                        app.set_message(
+                            "Approved (write failed — will retry on next run)".to_string(),
+                        );
+                    }
                 }
-                if app.selected_index > 0 && app.selected_index >= app.pending_nodes.len() {
-                    app.selected_index = app.pending_nodes.len().saturating_sub(1);
-                }
-                app.set_message("Approved!".to_string());
+            } else if is_global {
+                app.set_message(
+                    "Approved — skill will be generated on next run".to_string(),
+                );
+            } else {
+                app.set_message("Approved — will be projected on next run".to_string());
+            }
+
+            // Move from pending to knowledge
+            app.pending_nodes.retain(|n| n.id != selected_id);
+            if let Ok(Some(node)) = db::get_node(conn, &selected_id) {
+                app.knowledge_nodes.push(node);
+                app.knowledge_nodes.sort_by(|a, b| {
+                    b.confidence
+                        .partial_cmp(&a.confidence)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+            if app.selected_index > 0 && app.selected_index >= app.pending_nodes.len() {
+                app.selected_index = app.pending_nodes.len().saturating_sub(1);
             }
             true
         }
         KeyCode::Char('d') => {
+            let selected_id = {
+                let items = app.visible_items();
+                match items.get(app.selected_index) {
+                    Some(node) => node.id.clone(),
+                    None => return false,
+                }
+            };
             if let Ok(()) = db::update_node_status(conn, &selected_id, &NodeStatus::Dismissed) {
                 app.pending_nodes.retain(|n| n.id != selected_id);
                 if app.selected_index > 0 && app.selected_index >= app.pending_nodes.len() {
