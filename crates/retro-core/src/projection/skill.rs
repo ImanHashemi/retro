@@ -1,9 +1,48 @@
 use crate::analysis::backend::AnalysisBackend;
 use crate::errors::CoreError;
-use crate::models::{Pattern, SkillDraft, SkillValidation};
+use crate::models::{
+    KnowledgeNode, NodeType, Pattern, PatternStatus, PatternType, SkillDraft, SkillValidation,
+    SuggestedTarget,
+};
 use crate::util;
 
 const MAX_RETRIES: usize = 2;
+
+/// Convert a v2 KnowledgeNode to a v1 Pattern for skill generation.
+pub fn node_to_pattern(node: &KnowledgeNode) -> Pattern {
+    let pattern_type = match node.node_type {
+        NodeType::Skill => PatternType::WorkflowPattern,
+        NodeType::Rule | NodeType::Directive => PatternType::RepetitiveInstruction,
+        NodeType::Pattern => PatternType::RecurringMistake,
+        NodeType::Preference | NodeType::Memory => PatternType::WorkflowPattern,
+    };
+    let suggested_target = match node.node_type {
+        NodeType::Skill => SuggestedTarget::Skill,
+        NodeType::Rule
+        | NodeType::Directive
+        | NodeType::Pattern
+        | NodeType::Preference
+        | NodeType::Memory => SuggestedTarget::ClaudeMd,
+    };
+
+    Pattern {
+        id: node.id.clone(),
+        pattern_type,
+        description: node.content.clone(),
+        confidence: node.confidence,
+        times_seen: 1,
+        first_seen: node.created_at,
+        last_seen: node.updated_at,
+        last_projected: None,
+        status: PatternStatus::Active,
+        source_sessions: vec![],
+        related_files: vec![],
+        suggested_content: node.content.clone(),
+        suggested_target,
+        project: node.project_id.clone(),
+        generation_failed: false,
+    }
+}
 
 /// JSON schema for constrained decoding of skill validation responses.
 const SKILL_VALIDATION_SCHEMA: &str = r#"{"type":"object","properties":{"valid":{"type":"boolean"},"feedback":{"type":"string"}},"required":["valid","feedback"],"additionalProperties":false}"#;
@@ -297,5 +336,31 @@ mod tests {
             skill_path("/home/user/project", "run-tests"),
             "/home/user/project/.claude/skills/run-tests/SKILL.md"
         );
+    }
+
+    #[test]
+    fn test_node_to_pattern() {
+        use crate::models::*;
+        use chrono::Utc;
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Skill,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "Pre-PR checklist: run tests, lint, format, commit".to_string(),
+            confidence: 0.78,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+
+        let pattern = node_to_pattern(&node);
+        assert_eq!(pattern.id, "node-1");
+        assert_eq!(pattern.description, node.content);
+        assert_eq!(pattern.suggested_content, node.content);
+        assert_eq!(pattern.confidence, 0.78);
+        assert_eq!(pattern.suggested_target, SuggestedTarget::Skill);
     }
 }

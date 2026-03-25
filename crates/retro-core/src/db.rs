@@ -1,12 +1,16 @@
 use crate::errors::CoreError;
-use crate::models::{IngestedSession, Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget};
+use crate::models::{
+    IngestedSession, KnowledgeEdge, KnowledgeNode, KnowledgeProject,
+    EdgeType, GraphOperation, NodeScope, NodeStatus, NodeType,
+    Pattern, PatternStatus, PatternType, Projection, ProjectionStatus, SuggestedTarget,
+};
 use chrono::{DateTime, Utc};
 pub use rusqlite::Connection;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
 use std::path::Path;
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 5;
 
 /// Open (or create) the retro database with WAL mode enabled.
 pub fn open_db(path: &Path) -> Result<Connection, CoreError> {
@@ -19,6 +23,11 @@ pub fn open_db(path: &Path) -> Result<Connection, CoreError> {
     migrate(&conn)?;
 
     Ok(conn)
+}
+
+/// Initialize schema on an existing connection (for testing with in-memory DBs).
+pub fn init_db(conn: &Connection) -> Result<(), CoreError> {
+    migrate(conn)
 }
 
 fn migrate(conn: &Connection) -> Result<(), CoreError> {
@@ -98,7 +107,69 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
         conn.execute_batch(
             "ALTER TABLE projections ADD COLUMN status TEXT NOT NULL DEFAULT 'applied';",
         )?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        conn.pragma_update(None, "user_version", 3)?;
+    }
+
+    if current_version < 4 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS nodes (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                project_id TEXT,
+                content TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                projected_at TEXT,
+                pr_url TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_nodes_scope_project ON nodes(scope, project_id, status);
+            CREATE INDEX IF NOT EXISTS idx_nodes_type_status ON nodes(type, status);
+
+            CREATE TABLE IF NOT EXISTS edges (
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (source_id, target_id, type)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id, type);
+            CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id, type);
+
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL,
+                remote_url TEXT,
+                agent_type TEXT NOT NULL DEFAULT 'claude_code',
+                last_seen TEXT NOT NULL
+            );
+            ",
+        )?;
+
+        // Migrate existing v1 patterns to v2 nodes
+        migrate_patterns_to_nodes(conn)?;
+
+        conn.pragma_update(None, "user_version", 4)?;
+    }
+
+    if current_version < 5 {
+        // For databases upgraded from v4, we need to add the new columns.
+        // For fresh installs, v4 CREATE TABLE already includes them.
+        let has_projected_at: bool = conn
+            .prepare("SELECT projected_at FROM nodes LIMIT 0")
+            .is_ok();
+        if !has_projected_at {
+            conn.execute_batch(
+                "ALTER TABLE nodes ADD COLUMN projected_at TEXT;
+                 ALTER TABLE nodes ADD COLUMN pr_url TEXT;"
+            )?;
+        }
+        conn.pragma_update(None, "user_version", 5)?;
     }
 
     Ok(())
@@ -286,6 +357,27 @@ pub fn set_last_nudge_at(conn: &Connection, timestamp: &DateTime<Utc>) -> Result
     conn.execute(
         "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_nudge_at', ?1)",
         params![timestamp.to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Get a value from the metadata table by key.
+pub fn get_metadata(conn: &Connection, key: &str) -> Result<Option<String>, CoreError> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM metadata WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(result)
+}
+
+/// Set a value in the metadata table (insert or replace).
+pub fn set_metadata(conn: &Connection, key: &str, value: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+        params![key, value],
     )?;
     Ok(())
 }
@@ -834,6 +926,605 @@ pub fn update_projection_pr_url(
         params![projection_id, pr_url],
     )?;
     Ok(())
+}
+
+// ── Knowledge graph: Migration ──
+
+/// Migrate v1 patterns to v2 knowledge nodes. Returns number of nodes created.
+/// Safe to call multiple times — skips patterns that already have corresponding nodes.
+pub fn migrate_patterns_to_nodes(conn: &Connection) -> Result<usize, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, pattern_type, description, confidence, status, suggested_content, suggested_target, project, first_seen, last_seen
+         FROM patterns",
+    )?;
+    let patterns: Vec<(String, String, String, f64, String, String, String, Option<String>, String, String)> = stmt.query_map([], |row| {
+        Ok((
+            row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+            row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
+            row.get(8)?, row.get(9)?,
+        ))
+    })?.filter_map(|r| r.ok()).collect();
+
+    let mut count = 0;
+    for (id, pattern_type, description, confidence, _status, suggested_content, suggested_target, project, first_seen, last_seen) in &patterns {
+        let node_id = format!("migrated-{id}");
+
+        // Skip if already migrated
+        if get_node(conn, &node_id)?.is_some() {
+            continue;
+        }
+
+        // Determine node type using the spec's deterministic mapping
+        let content_lower = suggested_content.to_lowercase();
+        let has_directive_keyword = content_lower.contains("always") || content_lower.contains("never");
+        let node_type = if *confidence >= 0.85 && has_directive_keyword {
+            NodeType::Directive
+        } else {
+            match (pattern_type.as_str(), suggested_target.as_str()) {
+                ("repetitive_instruction", "claude_md") => NodeType::Rule,
+                ("repetitive_instruction", "skill") => NodeType::Directive,
+                ("recurring_mistake", _) => NodeType::Pattern,
+                ("workflow_pattern", "skill") => NodeType::Skill,
+                ("workflow_pattern", "claude_md") => NodeType::Rule,
+                ("stale_context", _) => NodeType::Memory,
+                ("redundant_context", _) => NodeType::Memory,
+                _ => NodeType::Pattern,
+            }
+        };
+
+        let created_at = DateTime::parse_from_rfc3339(first_seen)
+            .unwrap_or_default()
+            .with_timezone(&Utc);
+        let updated_at = DateTime::parse_from_rfc3339(last_seen)
+            .unwrap_or_default()
+            .with_timezone(&Utc);
+
+        let node = KnowledgeNode {
+            id: node_id,
+            node_type,
+            scope: NodeScope::Project,
+            project_id: project.clone(),
+            content: description.clone(),
+            confidence: *confidence,
+            status: NodeStatus::Active,
+            created_at,
+            updated_at,
+            projected_at: None,
+            pr_url: None,
+        };
+        insert_node(conn, &node)?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+// ── Knowledge graph: Node operations ──
+
+pub fn insert_node(conn: &Connection, node: &KnowledgeNode) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT INTO nodes (id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            node.id,
+            node.node_type.to_string(),
+            node.scope.to_string(),
+            node.project_id,
+            node.content,
+            node.confidence,
+            node.status.to_string(),
+            node.created_at.to_rfc3339(),
+            node.updated_at.to_rfc3339(),
+            node.projected_at,
+            node.pr_url,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_node(conn: &Connection, id: &str) -> Result<Option<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
+         FROM nodes WHERE id = ?1",
+    )?;
+    let result = stmt.query_row(params![id], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
+        })
+    }).optional()?;
+    Ok(result)
+}
+
+pub fn get_nodes_by_scope(
+    conn: &Connection,
+    scope: &NodeScope,
+    project_id: Option<&str>,
+    statuses: &[NodeStatus],
+) -> Result<Vec<KnowledgeNode>, CoreError> {
+    if statuses.is_empty() {
+        return Ok(Vec::new());
+    }
+    let status_placeholders: Vec<String> = statuses.iter().enumerate().map(|(i, _)| format!("?{}", i + 3)).collect();
+    let sql = format!(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
+         FROM nodes WHERE scope = ?1 AND (?2 IS NULL OR project_id = ?2) AND status IN ({})
+         ORDER BY confidence DESC",
+        status_placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+        Box::new(scope.to_string()),
+        Box::new(project_id.map(|s| s.to_string())),
+    ];
+    for s in statuses {
+        params_vec.push(Box::new(s.to_string()));
+    }
+    let rows = stmt.query_map(rusqlite::params_from_iter(params_vec.iter().map(|p| p.as_ref())), |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
+/// Get all nodes with a given status, ordered by confidence DESC.
+pub fn get_nodes_by_status(
+    conn: &Connection,
+    status: &NodeStatus,
+) -> Result<Vec<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
+         FROM nodes WHERE status = ?1
+         ORDER BY confidence DESC",
+    )?;
+    let rows = stmt.query_map(params![status.to_string()], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
+pub fn update_node_confidence(conn: &Connection, id: &str, confidence: f64) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET confidence = ?1, updated_at = ?2 WHERE id = ?3",
+        params![confidence, Utc::now().to_rfc3339(), id],
+    )?;
+    Ok(())
+}
+
+pub fn update_node_status(conn: &Connection, id: &str, status: &NodeStatus) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        params![status.to_string(), Utc::now().to_rfc3339(), id],
+    )?;
+    Ok(())
+}
+
+pub fn update_node_content(conn: &Connection, id: &str, content: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET content = ?1, updated_at = ?2 WHERE id = ?3",
+        params![content, Utc::now().to_rfc3339(), id],
+    )?;
+    Ok(())
+}
+
+// ── Knowledge graph: Edge operations ──
+
+pub fn insert_edge(conn: &Connection, edge: &KnowledgeEdge) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT OR IGNORE INTO edges (source_id, target_id, type, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![
+            edge.source_id,
+            edge.target_id,
+            edge.edge_type.to_string(),
+            edge.created_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_edges_from(conn: &Connection, source_id: &str) -> Result<Vec<KnowledgeEdge>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT source_id, target_id, type, created_at FROM edges WHERE source_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![source_id], |row| {
+        Ok(KnowledgeEdge {
+            source_id: row.get(0)?,
+            target_id: row.get(1)?,
+            edge_type: EdgeType::from_str(&row.get::<_, String>(2)?).unwrap_or(EdgeType::Supports),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    })?;
+    let mut edges = Vec::new();
+    for row in rows {
+        edges.push(row?);
+    }
+    Ok(edges)
+}
+
+pub fn get_edges_to(conn: &Connection, target_id: &str) -> Result<Vec<KnowledgeEdge>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT source_id, target_id, type, created_at FROM edges WHERE target_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![target_id], |row| {
+        Ok(KnowledgeEdge {
+            source_id: row.get(0)?,
+            target_id: row.get(1)?,
+            edge_type: EdgeType::from_str(&row.get::<_, String>(2)?).unwrap_or(EdgeType::Supports),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    })?;
+    let mut edges = Vec::new();
+    for row in rows {
+        edges.push(row?);
+    }
+    Ok(edges)
+}
+
+pub fn delete_edge(conn: &Connection, source_id: &str, target_id: &str, edge_type: &EdgeType) -> Result<(), CoreError> {
+    conn.execute(
+        "DELETE FROM edges WHERE source_id = ?1 AND target_id = ?2 AND type = ?3",
+        params![source_id, target_id, edge_type.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Mark new_id as superseding old_id: archives old node and creates supersedes edge.
+pub fn supersede_node(conn: &Connection, new_id: &str, old_id: &str) -> Result<(), CoreError> {
+    update_node_status(conn, old_id, &NodeStatus::Archived)?;
+    let edge = KnowledgeEdge {
+        source_id: new_id.to_string(),
+        target_id: old_id.to_string(),
+        edge_type: EdgeType::Supersedes,
+        created_at: Utc::now(),
+    };
+    insert_edge(conn, &edge)?;
+    Ok(())
+}
+
+/// Result of applying a batch of graph operations.
+#[derive(Debug, Clone, Default)]
+pub struct ApplyGraphResult {
+    pub nodes_created: usize,
+    pub nodes_updated: usize,
+    pub edges_created: usize,
+    pub nodes_merged: usize,
+}
+
+/// Apply a batch of graph operations to the database.
+pub fn apply_graph_operations(conn: &Connection, ops: &[GraphOperation]) -> Result<ApplyGraphResult, CoreError> {
+    let mut result = ApplyGraphResult::default();
+
+    for op in ops {
+        match op {
+            GraphOperation::CreateNode { node_type, scope, project_id, content, confidence } => {
+                let node = KnowledgeNode {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_type: node_type.clone(),
+                    scope: scope.clone(),
+                    project_id: project_id.clone(),
+                    content: content.clone(),
+                    confidence: *confidence,
+                    status: NodeStatus::Active,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    projected_at: None,
+                    pr_url: None,
+                };
+                insert_node(conn, &node)?;
+                result.nodes_created += 1;
+            }
+            GraphOperation::UpdateNode { id, confidence, content } => {
+                if let Some(conf) = confidence {
+                    update_node_confidence(conn, id, *conf)?;
+                }
+                if let Some(cont) = content {
+                    update_node_content(conn, id, cont)?;
+                }
+                result.nodes_updated += 1;
+            }
+            GraphOperation::CreateEdge { source_id, target_id, edge_type } => {
+                let edge = KnowledgeEdge {
+                    source_id: source_id.clone(),
+                    target_id: target_id.clone(),
+                    edge_type: edge_type.clone(),
+                    created_at: Utc::now(),
+                };
+                insert_edge(conn, &edge)?;
+                result.edges_created += 1;
+            }
+            GraphOperation::MergeNodes { keep_id, remove_id } => {
+                supersede_node(conn, keep_id, remove_id)?;
+                result.nodes_merged += 1;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+// ── Knowledge graph: Project operations ──
+
+/// Generate a human-readable slug from a repository path.
+pub fn generate_project_slug(repo_path: &str) -> String {
+    let name = std::path::Path::new(repo_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unnamed-project");
+
+    let slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        "unnamed-project".to_string()
+    } else {
+        // Collapse consecutive hyphens
+        let mut result = String::new();
+        let mut prev_hyphen = false;
+        for c in slug.chars() {
+            if c == '-' {
+                if !prev_hyphen {
+                    result.push(c);
+                }
+                prev_hyphen = true;
+            } else {
+                result.push(c);
+                prev_hyphen = false;
+            }
+        }
+        result
+    }
+}
+
+/// Generate a unique project slug, appending -2, -3, etc. if needed.
+pub fn generate_unique_project_slug(conn: &Connection, repo_path: &str) -> Result<String, CoreError> {
+    let base = generate_project_slug(repo_path);
+    if get_project(conn, &base)?.is_none() {
+        return Ok(base);
+    }
+    for i in 2..100 {
+        let candidate = format!("{base}-{i}");
+        if get_project(conn, &candidate)?.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Ok(format!("{base}-{}", &uuid::Uuid::new_v4().to_string()[..8]))
+}
+
+pub fn upsert_project(conn: &Connection, project: &KnowledgeProject) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT INTO projects (id, path, remote_url, agent_type, last_seen)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+             path = excluded.path,
+             remote_url = COALESCE(excluded.remote_url, projects.remote_url),
+             last_seen = excluded.last_seen",
+        params![
+            project.id,
+            project.path,
+            project.remote_url,
+            project.agent_type,
+            project.last_seen.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_project(conn: &Connection, id: &str) -> Result<Option<KnowledgeProject>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, remote_url, agent_type, last_seen FROM projects WHERE id = ?1",
+    )?;
+    let result = stmt.query_row(params![id], |row| {
+        Ok(KnowledgeProject {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            remote_url: row.get(2)?,
+            agent_type: row.get(3)?,
+            last_seen: DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    }).optional()?;
+    Ok(result)
+}
+
+pub fn get_project_by_remote_url(conn: &Connection, remote_url: &str) -> Result<Option<KnowledgeProject>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, remote_url, agent_type, last_seen FROM projects WHERE remote_url = ?1",
+    )?;
+    let result = stmt.query_row(params![remote_url], |row| {
+        Ok(KnowledgeProject {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            remote_url: row.get(2)?,
+            agent_type: row.get(3)?,
+            last_seen: DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    }).optional()?;
+    Ok(result)
+}
+
+/// Get active nodes that haven't been projected yet, ordered by confidence DESC.
+pub fn get_unprojected_nodes(conn: &Connection) -> Result<Vec<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
+         FROM nodes WHERE status = 'active' AND projected_at IS NULL
+         ORDER BY confidence DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
+/// Mark a node as projected (direct write, no PR).
+pub fn mark_node_projected(conn: &Connection, id: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET projected_at = ?1 WHERE id = ?2",
+        params![Utc::now().to_rfc3339(), id],
+    )?;
+    Ok(())
+}
+
+/// Mark a node as projected via PR.
+pub fn mark_node_projected_with_pr(conn: &Connection, id: &str, pr_url: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET projected_at = ?1, pr_url = ?2 WHERE id = ?3",
+        params![Utc::now().to_rfc3339(), pr_url, id],
+    )?;
+    Ok(())
+}
+
+/// Get all nodes with an associated PR URL.
+pub fn get_nodes_with_pr(conn: &Connection) -> Result<Vec<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
+         FROM nodes WHERE pr_url IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
+/// Clear PR URL from nodes after merge.
+pub fn clear_node_pr(conn: &Connection, pr_url: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET pr_url = NULL WHERE pr_url = ?1",
+        params![pr_url],
+    )?;
+    Ok(())
+}
+
+/// Dismiss all nodes for a closed PR.
+pub fn dismiss_nodes_for_pr(conn: &Connection, pr_url: &str) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE nodes SET status = 'dismissed', pr_url = NULL WHERE pr_url = ?1",
+        params![pr_url],
+    )?;
+    Ok(())
+}
+
+pub fn get_all_projects(conn: &Connection) -> Result<Vec<KnowledgeProject>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, remote_url, agent_type, last_seen FROM projects ORDER BY last_seen DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(KnowledgeProject {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            remote_url: row.get(2)?,
+            agent_type: row.get(3)?,
+            last_seen: DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    })?;
+    let mut projects = Vec::new();
+    for row in rows {
+        projects.push(row?);
+    }
+    Ok(projects)
 }
 
 #[cfg(test)]
@@ -1565,5 +2256,641 @@ mod tests {
 
         // Pattern already has a pending_review projection — should NOT be "unprojected"
         assert!(!has_unprojected_patterns(&conn, 0.0).unwrap());
+    }
+
+    #[test]
+    fn test_v4_migration_creates_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 5);
+
+        // Verify nodes table exists with correct columns
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE 1=0", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 0);
+
+        // Verify edges table exists
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM edges WHERE 1=0", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 0);
+
+        // Verify projects table exists
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM projects WHERE 1=0", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    // ── Node CRUD tests ──
+
+    #[test]
+    fn test_insert_and_get_node() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Always run tests".to_string(),
+            confidence: 0.85,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+
+        insert_node(&conn, &node).unwrap();
+        let retrieved = get_node(&conn, "node-1").unwrap().unwrap();
+        assert_eq!(retrieved.content, "Always run tests");
+        assert_eq!(retrieved.node_type, NodeType::Rule);
+        assert_eq!(retrieved.scope, NodeScope::Project);
+        assert_eq!(retrieved.confidence, 0.85);
+    }
+
+    #[test]
+    fn test_get_nodes_by_scope_and_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let now = Utc::now();
+        for (i, scope) in [NodeScope::Global, NodeScope::Project, NodeScope::Global].iter().enumerate() {
+            let node = KnowledgeNode {
+                id: format!("node-{i}"),
+                node_type: NodeType::Rule,
+                scope: scope.clone(),
+                project_id: if *scope == NodeScope::Project { Some("my-app".to_string()) } else { None },
+                content: format!("Rule {i}"),
+                confidence: 0.8,
+                status: NodeStatus::Active,
+                created_at: now,
+                updated_at: now,
+                projected_at: None,
+                pr_url: None,
+            };
+            insert_node(&conn, &node).unwrap();
+        }
+
+        let global_nodes = get_nodes_by_scope(&conn, &NodeScope::Global, None, &[NodeStatus::Active]).unwrap();
+        assert_eq!(global_nodes.len(), 2);
+
+        let project_nodes = get_nodes_by_scope(&conn, &NodeScope::Project, Some("my-app"), &[NodeStatus::Active]).unwrap();
+        assert_eq!(project_nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_update_node_confidence() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Pattern,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Forgets tests".to_string(),
+            confidence: 0.5,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        insert_node(&conn, &node).unwrap();
+
+        update_node_confidence(&conn, "node-1", 0.75).unwrap();
+        let updated = get_node(&conn, "node-1").unwrap().unwrap();
+        assert_eq!(updated.confidence, 0.75);
+    }
+
+    #[test]
+    fn test_update_node_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "Use snake_case".to_string(),
+            confidence: 0.9,
+            status: NodeStatus::PendingReview,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        insert_node(&conn, &node).unwrap();
+
+        update_node_status(&conn, "node-1", &NodeStatus::Active).unwrap();
+        let updated = get_node(&conn, "node-1").unwrap().unwrap();
+        assert_eq!(updated.status, NodeStatus::Active);
+    }
+
+    #[test]
+    fn test_v4_migration_from_v3() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+
+        // Manually create a v3-state database (v1+v2+v3 tables, user_version=3)
+        conn.execute_batch("
+            CREATE TABLE patterns (id TEXT PRIMARY KEY, pattern_type TEXT NOT NULL, description TEXT NOT NULL, confidence REAL NOT NULL, times_seen INTEGER NOT NULL DEFAULT 1, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, last_projected TEXT, status TEXT NOT NULL DEFAULT 'discovered', source_sessions TEXT NOT NULL, related_files TEXT NOT NULL, suggested_content TEXT NOT NULL, suggested_target TEXT NOT NULL, project TEXT, generation_failed INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE projections (id TEXT PRIMARY KEY, pattern_id TEXT NOT NULL, target_type TEXT NOT NULL, target_path TEXT NOT NULL, content TEXT NOT NULL, applied_at TEXT NOT NULL, pr_url TEXT, nudged INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'applied');
+            CREATE TABLE analyzed_sessions (session_id TEXT PRIMARY KEY, project TEXT NOT NULL, analyzed_at TEXT NOT NULL);
+            CREATE TABLE ingested_sessions (session_id TEXT PRIMARY KEY, project TEXT NOT NULL, session_path TEXT NOT NULL, file_size INTEGER NOT NULL, file_mtime TEXT NOT NULL, ingested_at TEXT NOT NULL);
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        ").unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+
+        // Now run migrate — should only add v4 tables
+        migrate(&conn).unwrap();
+
+        let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 5);
+
+        // v4 tables exist
+        conn.query_row("SELECT COUNT(*) FROM nodes WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
+        conn.query_row("SELECT COUNT(*) FROM edges WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
+        conn.query_row("SELECT COUNT(*) FROM projects WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
+
+        // Old tables still exist
+        conn.query_row("SELECT COUNT(*) FROM patterns WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
+    }
+
+    // ── Edge CRUD tests ──
+
+    #[test]
+    fn test_insert_and_get_edges() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let now = Utc::now();
+        let node1 = KnowledgeNode {
+            id: "node-1".to_string(), node_type: NodeType::Pattern,
+            scope: NodeScope::Project, project_id: Some("app".to_string()),
+            content: "Pattern A".to_string(), confidence: 0.5,
+            status: NodeStatus::Active, created_at: now, updated_at: now,
+            projected_at: None, pr_url: None,
+        };
+        let node2 = KnowledgeNode {
+            id: "node-2".to_string(), node_type: NodeType::Rule,
+            scope: NodeScope::Project, project_id: Some("app".to_string()),
+            content: "Rule B".to_string(), confidence: 0.8,
+            status: NodeStatus::Active, created_at: now, updated_at: now,
+            projected_at: None, pr_url: None,
+        };
+        insert_node(&conn, &node1).unwrap();
+        insert_node(&conn, &node2).unwrap();
+
+        let edge = KnowledgeEdge {
+            source_id: "node-1".to_string(),
+            target_id: "node-2".to_string(),
+            edge_type: EdgeType::DerivedFrom,
+            created_at: now,
+        };
+        insert_edge(&conn, &edge).unwrap();
+
+        let edges = get_edges_from(&conn, "node-1").unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].target_id, "node-2");
+        assert_eq!(edges[0].edge_type, EdgeType::DerivedFrom);
+
+        let edges_to = get_edges_to(&conn, "node-2").unwrap();
+        assert_eq!(edges_to.len(), 1);
+        assert_eq!(edges_to[0].source_id, "node-1");
+    }
+
+    #[test]
+    fn test_supersede_node_archives_old() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let now = Utc::now();
+        let old_node = KnowledgeNode {
+            id: "old".to_string(), node_type: NodeType::Rule,
+            scope: NodeScope::Global, project_id: None,
+            content: "Old rule".to_string(), confidence: 0.8,
+            status: NodeStatus::Active, created_at: now, updated_at: now,
+            projected_at: None, pr_url: None,
+        };
+        let new_node = KnowledgeNode {
+            id: "new".to_string(), node_type: NodeType::Rule,
+            scope: NodeScope::Global, project_id: None,
+            content: "New rule".to_string(), confidence: 0.85,
+            status: NodeStatus::Active, created_at: now, updated_at: now,
+            projected_at: None, pr_url: None,
+        };
+        insert_node(&conn, &old_node).unwrap();
+        insert_node(&conn, &new_node).unwrap();
+
+        supersede_node(&conn, "new", "old").unwrap();
+
+        let old = get_node(&conn, "old").unwrap().unwrap();
+        assert_eq!(old.status, NodeStatus::Archived);
+
+        let edges = get_edges_from(&conn, "new").unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].edge_type, EdgeType::Supersedes);
+        assert_eq!(edges[0].target_id, "old");
+    }
+
+    // ── Project CRUD tests ──
+
+    #[test]
+    fn test_upsert_and_get_project() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let project = KnowledgeProject {
+            id: "my-app".to_string(),
+            path: "/home/user/my-app".to_string(),
+            remote_url: Some("git@github.com:user/my-app.git".to_string()),
+            agent_type: "claude_code".to_string(),
+            last_seen: Utc::now(),
+        };
+        upsert_project(&conn, &project).unwrap();
+
+        let retrieved = get_project(&conn, "my-app").unwrap().unwrap();
+        assert_eq!(retrieved.path, "/home/user/my-app");
+        assert_eq!(retrieved.remote_url.unwrap(), "git@github.com:user/my-app.git");
+    }
+
+    #[test]
+    fn test_get_project_by_remote_url() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let project = KnowledgeProject {
+            id: "my-app".to_string(),
+            path: "/old/path".to_string(),
+            remote_url: Some("git@github.com:user/my-app.git".to_string()),
+            agent_type: "claude_code".to_string(),
+            last_seen: Utc::now(),
+        };
+        upsert_project(&conn, &project).unwrap();
+
+        let found = get_project_by_remote_url(&conn, "git@github.com:user/my-app.git").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, "my-app");
+    }
+
+    #[test]
+    fn test_get_all_projects() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        for name in ["app-1", "app-2"] {
+            let project = KnowledgeProject {
+                id: name.to_string(),
+                path: format!("/home/{name}"),
+                remote_url: None,
+                agent_type: "claude_code".to_string(),
+                last_seen: Utc::now(),
+            };
+            upsert_project(&conn, &project).unwrap();
+        }
+
+        let projects = get_all_projects(&conn).unwrap();
+        assert_eq!(projects.len(), 2);
+    }
+
+    #[test]
+    fn test_generate_project_slug() {
+        assert_eq!(generate_project_slug("/home/user/my-rust-app"), "my-rust-app");
+        assert_eq!(generate_project_slug("/home/user/My App"), "my-app");
+        assert_eq!(generate_project_slug("/"), "unnamed-project");
+    }
+
+    #[test]
+    fn test_migrate_patterns_to_nodes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        // Insert v1 patterns
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO patterns (id, pattern_type, description, confidence, times_seen, first_seen, last_seen, status, source_sessions, related_files, suggested_content, suggested_target, project, generation_failed)
+             VALUES (?1, ?2, ?3, ?4, 2, ?5, ?5, 'active', '[]', '[]', 'content', ?6, ?7, 0)",
+            params!["p1", "repetitive_instruction", "Always run tests", 0.85, &now, "claude_md", "my-app"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO patterns (id, pattern_type, description, confidence, times_seen, first_seen, last_seen, status, source_sessions, related_files, suggested_content, suggested_target, project, generation_failed)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5, 'discovered', '[]', '[]', 'content', ?6, ?7, 0)",
+            params!["p2", "recurring_mistake", "Forgets imports", 0.6, &now, "skill", "my-app"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO patterns (id, pattern_type, description, confidence, times_seen, first_seen, last_seen, status, source_sessions, related_files, suggested_content, suggested_target, project, generation_failed)
+             VALUES (?1, ?2, ?3, ?4, 3, ?5, ?5, 'active', '[]', '[]', 'Always use snake_case', ?6, ?7, 0)",
+            params!["p3", "repetitive_instruction", "Always use snake_case", 0.9, &now, "claude_md", "my-app"],
+        ).unwrap();
+
+        let count = migrate_patterns_to_nodes(&conn).unwrap();
+        assert_eq!(count, 3);
+
+        // p1: RepetitiveInstruction + ClaudeMd -> rule
+        let node1 = get_node(&conn, "migrated-p1").unwrap().unwrap();
+        assert_eq!(node1.node_type, NodeType::Rule);
+        assert_eq!(node1.scope, NodeScope::Project);
+
+        // p2: RecurringMistake -> pattern
+        let node2 = get_node(&conn, "migrated-p2").unwrap().unwrap();
+        assert_eq!(node2.node_type, NodeType::Pattern);
+
+        // p3: confidence >= 0.85 + "always" in content -> directive (override)
+        let node3 = get_node(&conn, "migrated-p3").unwrap().unwrap();
+        assert_eq!(node3.node_type, NodeType::Directive);
+    }
+
+    #[test]
+    fn test_apply_graph_operations() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let ops = vec![
+            GraphOperation::CreateNode {
+                node_type: NodeType::Rule,
+                scope: NodeScope::Project,
+                project_id: Some("my-app".to_string()),
+                content: "Always run tests".to_string(),
+                confidence: 0.85,
+            },
+            GraphOperation::CreateNode {
+                node_type: NodeType::Pattern,
+                scope: NodeScope::Global,
+                project_id: None,
+                content: "Prefers TDD".to_string(),
+                confidence: 0.6,
+            },
+        ];
+
+        let result = apply_graph_operations(&conn, &ops).unwrap();
+        assert_eq!(result.nodes_created, 2);
+
+        let nodes = get_nodes_by_scope(&conn, &NodeScope::Project, Some("my-app"), &[NodeStatus::Active]).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].content, "Always run tests");
+    }
+
+    #[test]
+    fn test_apply_graph_operations_update() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        let node = KnowledgeNode {
+            id: "node-1".to_string(),
+            node_type: NodeType::Pattern,
+            scope: NodeScope::Project,
+            project_id: Some("app".to_string()),
+            content: "Old content".to_string(),
+            confidence: 0.5,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        insert_node(&conn, &node).unwrap();
+
+        let ops = vec![
+            GraphOperation::UpdateNode {
+                id: "node-1".to_string(),
+                confidence: Some(0.8),
+                content: Some("Updated content".to_string()),
+            },
+        ];
+
+        let result = apply_graph_operations(&conn, &ops).unwrap();
+        assert_eq!(result.nodes_updated, 1);
+
+        let updated = get_node(&conn, "node-1").unwrap().unwrap();
+        assert_eq!(updated.confidence, 0.8);
+        assert_eq!(updated.content, "Updated content");
+    }
+
+    #[test]
+    fn test_get_nodes_by_status() {
+        let conn = test_db();
+
+        let active_node = KnowledgeNode {
+            id: "n1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Always run tests".to_string(),
+            confidence: 0.85,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        let pending_node = KnowledgeNode {
+            id: "n2".to_string(),
+            node_type: NodeType::Directive,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "Use snake_case".to_string(),
+            confidence: 0.9,
+            status: NodeStatus::PendingReview,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        let dismissed_node = KnowledgeNode {
+            id: "n3".to_string(),
+            node_type: NodeType::Pattern,
+            scope: NodeScope::Project,
+            project_id: Some("my-app".to_string()),
+            content: "Old pattern".to_string(),
+            confidence: 0.5,
+            status: NodeStatus::Dismissed,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+
+        insert_node(&conn, &active_node).unwrap();
+        insert_node(&conn, &pending_node).unwrap();
+        insert_node(&conn, &dismissed_node).unwrap();
+
+        let pending = get_nodes_by_status(&conn, &NodeStatus::PendingReview).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "n2");
+
+        let active = get_nodes_by_status(&conn, &NodeStatus::Active).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "n1");
+
+        let pending2 = KnowledgeNode {
+            id: "n4".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Project,
+            project_id: Some("other".to_string()),
+            content: "Second pending".to_string(),
+            confidence: 0.95,
+            status: NodeStatus::PendingReview,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        insert_node(&conn, &pending2).unwrap();
+        let pending_all = get_nodes_by_status(&conn, &NodeStatus::PendingReview).unwrap();
+        assert_eq!(pending_all.len(), 2);
+        assert_eq!(pending_all[0].id, "n4"); // Higher confidence first
+    }
+
+    #[test]
+    fn test_migrate_v4_to_v5_adds_projection_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        migrate(&conn).unwrap();
+
+        // Insert a node — should support new columns
+        let node = KnowledgeNode {
+            id: "test-1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "test rule".to_string(),
+            confidence: 0.8,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        insert_node(&conn, &node).unwrap();
+
+        let retrieved = get_node(&conn, "test-1").unwrap().unwrap();
+        assert!(retrieved.projected_at.is_none());
+        assert!(retrieved.pr_url.is_none());
+
+        // Verify schema version
+        let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 5);
+    }
+
+    fn test_node(id: &str, status: NodeStatus, projected_at: Option<String>, pr_url: Option<String>) -> KnowledgeNode {
+        KnowledgeNode {
+            id: id.to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: format!("Content for {}", id),
+            confidence: 0.8,
+            status,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at,
+            pr_url,
+        }
+    }
+
+    #[test]
+    fn test_get_unprojected_nodes() {
+        let conn = test_db();
+
+        // Active node with no projected_at — should be returned
+        let active_unprojected = test_node("n1", NodeStatus::Active, None, None);
+        // Active node with projected_at set — should NOT be returned
+        let active_projected = test_node("n2", NodeStatus::Active, Some(Utc::now().to_rfc3339()), None);
+        // PendingReview node with no projected_at — should NOT be returned (wrong status)
+        let pending = test_node("n3", NodeStatus::PendingReview, None, None);
+
+        insert_node(&conn, &active_unprojected).unwrap();
+        insert_node(&conn, &active_projected).unwrap();
+        insert_node(&conn, &pending).unwrap();
+
+        let nodes = get_unprojected_nodes(&conn).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, "n1");
+    }
+
+    #[test]
+    fn test_mark_node_projected() {
+        let conn = test_db();
+
+        let node = test_node("n1", NodeStatus::Active, None, None);
+        insert_node(&conn, &node).unwrap();
+
+        mark_node_projected(&conn, "n1").unwrap();
+
+        let retrieved = get_node(&conn, "n1").unwrap().unwrap();
+        assert!(retrieved.projected_at.is_some());
+        assert!(retrieved.pr_url.is_none());
+    }
+
+    #[test]
+    fn test_mark_node_projected_with_pr() {
+        let conn = test_db();
+
+        let node = test_node("n1", NodeStatus::Active, None, None);
+        insert_node(&conn, &node).unwrap();
+
+        mark_node_projected_with_pr(&conn, "n1", "https://github.com/test/pull/42").unwrap();
+
+        let retrieved = get_node(&conn, "n1").unwrap().unwrap();
+        assert!(retrieved.projected_at.is_some());
+        assert_eq!(retrieved.pr_url, Some("https://github.com/test/pull/42".to_string()));
+    }
+
+    #[test]
+    fn test_dismiss_nodes_for_pr() {
+        let conn = test_db();
+
+        let pr_url = "https://github.com/test/pull/99";
+        let node1 = test_node("n1", NodeStatus::Active, Some(Utc::now().to_rfc3339()), Some(pr_url.to_string()));
+        let node2 = test_node("n2", NodeStatus::Active, Some(Utc::now().to_rfc3339()), Some(pr_url.to_string()));
+
+        insert_node(&conn, &node1).unwrap();
+        insert_node(&conn, &node2).unwrap();
+
+        dismiss_nodes_for_pr(&conn, pr_url).unwrap();
+
+        let n1 = get_node(&conn, "n1").unwrap().unwrap();
+        let n2 = get_node(&conn, "n2").unwrap().unwrap();
+
+        assert_eq!(n1.status, NodeStatus::Dismissed);
+        assert!(n1.pr_url.is_none());
+        assert_eq!(n2.status, NodeStatus::Dismissed);
+        assert!(n2.pr_url.is_none());
+    }
+
+    #[test]
+    fn test_clear_node_pr() {
+        let conn = test_db();
+
+        let pr_url = "https://github.com/test/pull/7";
+        let node = test_node("n1", NodeStatus::Active, Some(Utc::now().to_rfc3339()), Some(pr_url.to_string()));
+        insert_node(&conn, &node).unwrap();
+
+        clear_node_pr(&conn, pr_url).unwrap();
+
+        let retrieved = get_node(&conn, "n1").unwrap().unwrap();
+        assert!(retrieved.pr_url.is_none());
+        assert_eq!(retrieved.status, NodeStatus::Active);
     }
 }

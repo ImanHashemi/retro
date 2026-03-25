@@ -3,6 +3,7 @@ pub mod apply;
 pub mod audit;
 pub mod clean;
 pub mod curate;
+pub mod dash;
 pub mod diff;
 pub mod hooks;
 pub mod ingest;
@@ -10,7 +11,10 @@ pub mod init;
 pub mod log;
 pub mod patterns;
 pub mod review;
+pub mod run;
+pub mod start;
 pub mod status;
+pub mod stop;
 pub mod sync;
 
 use anyhow::{Context, Result};
@@ -321,6 +325,18 @@ pub fn check_and_display_nudge() {
 
     // Update last nudge timestamp
     let _ = retro_core::db::set_last_nudge_at(&conn, &Utc::now());
+}
+
+/// Print a deprecation warning for --auto flag.
+/// Only prints when stdin is a TTY (skips when invoked from git hooks).
+pub fn warn_auto_deprecated() {
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        eprintln!(
+            "{}",
+            "warning: --auto is deprecated in Retro 2.0. Use `retro start` for automatic background operation."
+        );
+    }
 }
 
 /// Check if a timestamp (RFC 3339) is within the cooldown window.

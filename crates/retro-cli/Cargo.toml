@@ -1,6 +1,6 @@
 [package]
 name = "retro-cli"
-version = "0.3.5"
+version = "2.0.0"
 edition = "2024"
 description = "Active context curator for AI coding agents: analyzes Claude Code sessions and generates skills and rules"
 license = "MIT"
@@ -13,9 +13,12 @@ name = "retro"
 path = "src/main.rs"
 
 [dependencies]
-retro-core = { version = "0.3.5", path = "../retro-core" }
+retro-core = { version = "2.0.0", path = "../retro-core" }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 colored = "2"
+crossterm = "0.28"
+libc = "0.2"
+ratatui = "0.29"
 serde_json = "1"

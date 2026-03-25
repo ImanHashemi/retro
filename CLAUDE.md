@@ -1,18 +1,39 @@
 # Retro — Active Context Curator for AI Coding Agents
 
-Rust CLI tool that analyzes Claude Code session history to discover repetitive instructions, recurring mistakes, workflow patterns, and explicit directives — then projects them into skills and CLAUDE.md rules.
+Rust CLI tool that watches your coding agent sessions, discovers what you keep repeating, and turns those patterns into persistent context — automatically. Session over session, your agent gets better without you maintaining its context by hand.
 
 ## Architecture
 
-Three-stage pipeline: **Ingestion** (pure Rust, no AI) → **Analysis** (AI-powered, pluggable backend) → **Projection** (two-track: personal auto-apply, shared via PR).
+### v2 "The Watcher" (primary)
 
-Storage lives in `~/.retro/` (SQLite WAL mode + JSONL audit log + config.toml).
+Five-layer pipeline, data flows upward:
+
+```
+Surfaces        (TUI dashboard, in-session briefing, CLI)
+Projectors      (Claude Code — pluggable for other agents)
+Knowledge Store (graph-modeled in SQLite: nodes + edges)
+Analyzers       (pattern discovery, scope classification)
+Observers       (session watcher via mtime polling)
+Scheduled Runner (launchd periodic job)
+```
+
+`retro run` executes the full pipeline. `retro start` installs a launchd job that runs it every 5 minutes. `retro dash` opens the TUI dashboard for reviewing suggestions and browsing knowledge.
+
+### v1 (legacy, still functional)
+
+Three-stage pipeline: **Ingestion** → **Analysis** → **Projection**. Driven by post-commit hooks (`--auto` flag, now deprecated). All v1 commands still work.
+
+### Storage
+
+`~/.retro/` contains: SQLite DB (WAL mode, schema v4), JSONL audit log, config.toml, `briefings/` directory, `runner.log`.
 
 ## Repo Structure
 
 Cargo workspace with two crates:
-- `crates/retro-core/` — library crate (all logic)
-- `crates/retro-cli/` — binary crate (clap commands)
+- `crates/retro-core/` — library crate (all logic, models, DB, analysis, knowledge graph, observers, runner helpers)
+- `crates/retro-cli/` — binary crate (clap commands, TUI dashboard, launchd integration)
+  - `src/tui/` — TUI module (app state, rendering, event handling)
+  - `src/launchd.rs` — macOS launchd plist generation and management
 - `tests/` — fixtures and integration tests
 - `scenarios/` — scenario-based integration tests (see [scenarios/README.md](scenarios/README.md))
 
@@ -30,13 +51,27 @@ cargo test
 
 # Always run tests before committing
 cargo test && cargo run -- --help  # verify build
+
+# Clean install testing
+retro init --uninstall --purge && cargo build --release && ./target/release/retro init
 ```
 
 ## Commands Overview
 
+### v2 Commands (new)
+
 | Command | Purpose |
 |---------|---------|
-| `retro init` | Initialize retro (creates DB, installs hooks) |
+| `retro run [--dry-run]` | Run the full v2 pipeline (observe → ingest → analyze → project) |
+| `retro start` | Start the scheduled runner (launchd on macOS) |
+| `retro stop` | Stop the scheduled runner |
+| `retro dash` | Open the TUI dashboard (review suggestions, browse knowledge) |
+
+### Core Commands
+
+| Command | Purpose |
+|---------|---------|
+| `retro init` | Initialize retro (creates DB, config, launchd job, briefing skill) |
 | `retro ingest [--auto]` | Scan Claude Code session files and save to DB |
 | `retro analyze [--dry-run] [--auto]` | AI-powered pattern discovery from sessions |
 | `retro patterns` | List discovered patterns |
@@ -50,7 +85,9 @@ cargo test && cargo run -- --help  # verify build
 | `retro audit [--dry-run]` | Context audit (detects inconsistencies) |
 | `retro log [--since <days>]` | View audit log entries |
 | `retro hooks remove` | Remove git hooks |
-| `retro init --uninstall [--purge]` | Uninstall retro |
+| `retro init --uninstall [--purge]` | Uninstall retro (removes launchd plist, hooks, optionally data) |
+
+Note: `--auto` flag is deprecated in v2. Use `retro start` for automatic background operation.
 
 ## Key Design Decisions
 
@@ -65,7 +102,7 @@ cargo test && cargo run -- --help  # verify build
 
 - **Sync trait** — `AnalysisBackend` trait with `json_schema: Option<&str>` parameter.
 - **Primary impl** — `ClaudeCliBackend` uses `claude -p - --output-format json` (prompt piped via stdin to avoid ARG_MAX issues).
-- **Structured output** — JSON-producing calls pass `--json-schema` for constrained decoding (guaranteed valid JSON, no sanitization needed). Schema constants: `ANALYSIS_RESPONSE_SCHEMA` (analysis/mod.rs), `SKILL_VALIDATION_SCHEMA` (projection/skill.rs), `AUDIT_RESPONSE_SCHEMA` (curator.rs).
+- **Structured output** — JSON-producing calls pass `--json-schema` for constrained decoding (guaranteed valid JSON, no sanitization needed). Schema constants: `ANALYSIS_RESPONSE_SCHEMA` (analysis/mod.rs), `SKILL_VALIDATION_SCHEMA` (projection/skill.rs), `AUDIT_RESPONSE_SCHEMA` (curator.rs), `GRAPH_ANALYSIS_RESPONSE_SCHEMA` (analysis/mod.rs).
 - **CLI quirks**:
   - `--json-schema` conflicts with `--tools ""` on large prompts — only pass `--tools ""` when NOT using `--json-schema`.
   - `--json-schema` uses an internal tool call for constrained decoding, so model needs extra turns — `--max-turns 5` gives headroom (observed max 4 turns).
@@ -74,6 +111,40 @@ cargo test && cargo run -- --help  # verify build
   - Output appears in `structured_output` field (parsed JSON), NOT `result` (empty string). `ClaudeCliOutput` checks `structured_output` first, serializes to string, falls back to `result`.
   - Token counts nest inside `usage` object — never assume top-level fields exist (use nested struct with `#[serde(default)]`). Sum `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` for total input.
 - **YAML-producing calls** — skill/agent generation passes `None` for json_schema (free-form output).
+
+### Knowledge Store (v2)
+
+- **Graph-modeled in SQLite** — `nodes` table (knowledge items) + `edges` table (relationships) + `projects` table.
+- **Node types** — `preference`, `pattern`, `rule`, `skill`, `memory`, `directive`. Memory nodes are context-only (not projected to output files).
+- **Edge types** — `supports`, `contradicts`, `supersedes`, `derived_from`, `applies_to`.
+- **Scopes** — `global` (travels across projects) vs `project` (local). Project scope overrides global on conflicts.
+- **Confidence model** — single-session observations at 0.4–0.5, recurrence bumps confidence, explicit directives at 0.7–0.85. Threshold (default 0.7) gates projection.
+- **Node status** — `Active`, `PendingReview`, `Dismissed`, `Archived`. `supersedes` edges auto-archive the old node.
+- **Project identity** — human-readable slug from repo directory name (e.g., `my-rust-app`), stable once assigned. `remote_url` for reconnection after repo moves.
+
+### Session Observer (v2)
+
+- **Mtime-based polling** — `find_modified_sessions()` scans `~/.claude/projects/` for session files modified since last check.
+- **No filesystem watching** — simple, like the existing `glob`-based approach. The scheduled runner polls periodically.
+
+### Scheduled Runner (v2)
+
+- **launchd (macOS only)** — plist at `~/Library/LaunchAgents/com.retro.runner.plist`. systemd (Linux) deferred.
+- **Modern launchctl API** — uses `launchctl bootstrap`/`bootout` (not deprecated `load`/`unload`).
+- **Default interval** — 300 seconds (5 minutes). Configurable via `runner.interval_seconds`.
+- **`retro run` global mode** — when invoked without project context (launchd), iterates all known projects. Error in one project doesn't block others.
+- **Cost control** — `max_ai_calls_per_day` (default 10), tracked in metadata table, resets daily.
+- **Log rotation** — `runner.log` rotated at 1 MB, keeps 1 backup (`runner.log.1`).
+- **Schema check** — `retro run` requires schema v4. Bails with migration prompt if v3 detected.
+
+### TUI Dashboard (v2)
+
+- **`retro dash`** — ratatui + crossterm terminal UI.
+- **Two tabs** — Pending Review (approve/dismiss nodes) and Knowledge (browse all active nodes with scope/type filters and search).
+- **Status bar** — runner active/stopped, last run time, AI calls today.
+- **Keyboard-driven** — vim-style (j/k/g/G), Tab to switch panels, `/` to search, `a`/`d` to approve/dismiss, `s`/`t` to cycle filters.
+- **Minimum terminal size** — 60x15. Prints error and exits if too small.
+- **DB updates** — approve/dismiss write to DB immediately, remove from list, show transient message.
 
 ### Pattern Discovery
 
@@ -90,7 +161,7 @@ cargo test && cargo run -- --help  # verify build
 - **CLAUDE.md protection** — only write within `<!-- retro:managed:start/end -->` delimiters, never touch user content.
 - **MEMORY.md** — read-only input, never write. Claude Code owns it.
 - **Skill generation** — one skill per AI call (quality over cost), two-phase: generate then validate.
-- **Review queue** — `retro apply` generates content and saves as `PendingReview` (no file writes or PRs). `retro review` is the gate: displays numbered list, user batch-selects apply/skip/dismiss (e.g., `1a 2a 3d` or `all:a`). Preview with `{N}p`.
+- **Review queue** — `retro apply` generates content and saves as `PendingReview` (no file writes or PRs). `retro review` is the gate: displays numbered list, user batch-selects apply/skip/dismiss (e.g., `1a 2a 3d` or `all:a`). Preview with `{N}p`. In v2, `retro dash` provides TUI-based review as an alternative.
 - **Sync** — `retro sync` checks PR state via `gh pr view --json state` — resets patterns from closed PRs to `Discovered`. Both `retro apply` and `retro review` run sync first.
 - **Two-track classification** — personal actions (skills, MEMORY.md edits) apply on current branch; shared actions (CLAUDE.md edits) create new `retro/updates-{YYYYMMDD-HHMMSS}` branch.
 - **PR creation flow** — detect default branch via `gh repo view` → `git fetch origin <default>` → `git checkout -b retro/... origin/<default>` → write/commit → `git push -u origin HEAD` → `gh pr create --base <default>`. Always push before `gh pr create` (remote branch must exist).
@@ -106,27 +177,25 @@ cargo test && cargo run -- --help  # verify build
 - **Delimiter dissolution** — `dissolve_if_needed()` removes `<!-- retro:managed:start/end -->` markers when full management is first enabled, preserving rule content in place. Backs up to `~/.retro/backups/`.
 - **Edit types** — `ClaudeMdEdit` (Add/Remove/Reword/Move) in `models.rs`. `apply_edit()`/`apply_edits()` in `projection/claude_md.rs`. Review command shows icons: `[rule+]`, `[rule-]`, `[rule~]`, `[rule>]`.
 
-### Auto-Apply Pipeline
+### Runtime Models
 
-- **Single hook** — post-commit hook orchestrates full pipeline (`retro ingest --auto` chains analyze + apply).
-- **Per-stage cooldowns** — `ingest_cooldown_minutes` (5), `analyze_cooldown_minutes` (1440), `apply_cooldown_minutes` (1440) — each stage matches its cost profile.
-- **Data triggers** — prevent unnecessary runs (e.g., skip analyze if no unanalyzed sessions).
-- **Session cap** — `auto_analyze_max_sessions` (default 15) skips auto-analyze when backlog exceeds cap.
-- **Hook stderr** — `2>>~/.retro/hook-stderr.log` (not `/dev/null`) — captures parse warnings, panics. `retro init` truncates it.
-- **Auto-apply config** — `auto_apply` (default `true`) gates whether apply stage runs automatically.
-- **Orchestration lock** — prevents concurrent analyze runs.
+**v2 Scheduled Runner (primary):** `retro start` installs a launchd periodic job. `retro run` executes the full pipeline each invocation. No long-running daemon — launchd handles scheduling, lifecycle. Lockfile prevents concurrent runs.
+
+**v1 Git Hooks (deprecated):** Post-commit hook runs `retro ingest --auto` which chains analyze + apply. Per-stage cooldowns (`ingest_cooldown_minutes`, `analyze_cooldown_minutes`, `apply_cooldown_minutes`). Session cap (`auto_analyze_max_sessions`). `--auto` flag prints deprecation warning in v2 directing users to `retro start`.
 
 ### Observability
 
-- **Audit log** — append-only JSONL at `~/.retro/audit.jsonl`. Every auto-mode decision gets an entry: `ingest` (success), `analyze_skipped` (session_cap or cooldown_or_no_data), `analyze_error`, `apply_skipped` (no_qualifying_patterns), `apply_error`, enriched `apply` (with `pr_url`).
-- **Terminal nudge** — `check_and_display_nudge()` runs before interactive commands, reads audit entries since `last_nudge_at` (stored in `metadata` table), groups within 60s as one run, displays colored multi-line status block, updates `last_nudge_at`. Shows pending review count alongside auto-run summaries.
+- **Audit log** — append-only JSONL at `~/.retro/audit.jsonl`. Every auto-mode decision gets an entry.
+- **Terminal nudge** — `check_and_display_nudge()` runs before interactive commands, shows colored status block with pending review count.
 - **Token tracking** — `BackendResponse` carries `input_tokens`/`output_tokens` (not dollar cost).
+- **Runner log** — `~/.retro/runner.log` captures stdout/stderr from scheduled `retro run` invocations. Rotated at 1 MB.
 
 ### Data Models
 
-- **Domain types** — all in `retro-core/src/models.rs`.
-- **DB schema** — v3, all operations in `retro-core/src/db.rs`. `projections` table has `status` column (`TEXT NOT NULL DEFAULT 'applied'` for migration compatibility). `metadata` table stores `last_nudge_at`.
-- **ProjectionStatus enum** — `PendingReview`, `Applied`, `Dismissed` (tracks review queue lifecycle).
+- **Domain types** — all in `retro-core/src/models.rs`. Both v1 (`Pattern`, `Projection`) and v2 (`KnowledgeNode`, `KnowledgeEdge`, `KnowledgeProject`, `GraphOperation`) types coexist.
+- **DB schema** — v4. Adds `nodes`, `edges`, `projects` tables alongside existing v1 tables. `PRAGMA user_version = 4`. Migration from v3 is deterministic (no AI calls).
+- **v2 node types** — `NodeType` (Rule, Directive, Pattern, Skill, Memory, Preference), `NodeScope` (Global, Project), `NodeStatus` (Active, PendingReview, Dismissed, Archived).
+- **v1 types preserved** — `Pattern`, `Projection`, `ProjectionStatus`, `ApplyAction`, `ApplyTrack`, `ApplyPlan`. Used by existing v1 commands.
 - **ToolResultContent enum** — `Text(String)` | `Blocks(Vec<Value>)` (tool results can be string or array).
 
 ## Dependencies
@@ -138,13 +207,15 @@ cargo test && cargo run -- --help  # verify build
 | serde + serde_json | JSON/JSONL parsing |
 | anyhow + thiserror | Error handling |
 | chrono | Timestamps, rolling window |
-| uuid | Pattern/projection IDs |
+| uuid | Pattern/projection IDs, knowledge node IDs |
 | glob | Finding session files |
 | colored | Terminal output |
 | regex | Sensitive data scrubbing |
-| libc | Portable process-alive check (kill signal 0) |
+| libc | Process-alive check (kill signal 0), launchd UID |
 | toml | Config file parsing |
-| tempfile | Test-only: temporary directories for hook tests |
+| ratatui | TUI dashboard rendering (retro-cli only) |
+| crossterm | Terminal backend for ratatui (retro-cli only) |
+| tempfile | Test-only: temporary directories |
 
 ## Coding Conventions
 
@@ -152,9 +223,12 @@ cargo test && cargo run -- --help  # verify build
 
 - All domain types in `retro-core/src/models.rs`
 - All DB operations in `retro-core/src/db.rs`
+- Platform-independent runner helpers in `retro-core/src/runner.rs` (log rotation, state queries)
+- Platform-specific launchd integration in `retro-cli/src/launchd.rs`
+- TUI module in `retro-cli/src/tui/` (app.rs, ui.rs, event.rs)
 - Shared helpers:
   - `git_root_or_cwd()` lives in `retro-cli/src/commands/mod.rs` — use `super::git_root_or_cwd`
-  - `strip_code_fences()` lives in `retro-core/src/util.rs` — use `crate::util::strip_code_fences`
+  - `truncate_str()` lives in `retro-core/src/util.rs` — safe UTF-8 truncation
   - `build_curate_prompt()` lives in `analysis/prompts.rs`
   - `run_claude_child()` shared helper in `analysis/claude_cli.rs`
 - CLI commands that share logic should expose a shared entry point (e.g., `run_apply()` with `DisplayMode` enum) rather than duplicating code
@@ -173,7 +247,7 @@ cargo test && cargo run -- --help  # verify build
 
 ### String Handling
 
-- String truncation must use `char_boundary()` helper — never slice at arbitrary byte offsets (UTF-8 panic risk)
+- String truncation must use `truncate_str()` helper — never slice at arbitrary byte offsets (UTF-8 panic risk)
 - Path decoding uses `recover_project_path()` which reads `cwd` from session files — naive decode breaks on paths with hyphens
 
 ### Process Management
@@ -181,21 +255,25 @@ cargo test && cargo run -- --help  # verify build
 - Process-alive checks use `libc::kill(pid, 0)` — portable across Linux and macOS (not `/proc/` which is Linux-only)
 - AI prompts must be piped via stdin (`-p -`), never as CLI arguments (ARG_MAX risk with 150K prompts)
 - Git/gh shell-outs use `Command::new().args()` (not shell strings) — each arg passed directly to `execve()`, safe from injection
+- Launchd management uses modern `launchctl bootstrap`/`bootout` API (not deprecated `load`/`unload`)
 
 ### Git Hooks
 
 - Hook format: marker comment (`# retro hook - do not remove`) + command on next line; removal is line-pair based
 - `install_hook_lines` returns `HookInstallResult` (Installed/Updated/UpToDate)
 - `retro init` updates existing hooks to new redirect format (remove+re-add)
+- v2: hooks are supplementary. The scheduled runner (`retro start`) is the primary automation mechanism.
 
 ### Database
 
 - Batch DB queries into HashSets when filtering (avoid N+1 queries in loops)
 - Re-export internal types from retro-core when CLI crate needs them (e.g., `pub use rusqlite::Connection` in `db.rs`) — avoid adding transitive deps to retro-cli
+- `init_db()` public wrapper over `migrate()` for in-memory test DBs
 
 ### User Interaction
 
 - Confirmation prompts use `stdin` y/N pattern (not dialoguer) — keep it simple
+- TUI uses ratatui alternate screen + raw mode with proper cleanup on exit
 
 ### Testing
 
@@ -211,19 +289,21 @@ cargo test && cargo run -- --help  # verify build
 
 ## Implementation Status
 
-All core features complete and tested. Current focus: quality improvements and user experience polish.
+### v1 (retro 0.1–0.3)
 
-- **Phase 1: DONE** — Skeleton + Ingestion. `retro init`, `retro ingest`, `retro status` working.
-- **Phase 2: DONE** — Analysis Backend + Pattern Discovery. `retro analyze`, `retro patterns` working. ClaudeCliBackend, prompt builder, pattern merging.
-- **Phase 3: DONE** — Projection + Apply. Two-phase skill gen (draft+validate), CLAUDE.md managed section, global agent generation, projection CRUD.
-- **Phase 4: DONE** — Full Apply + Clean + Audit + Git. Git branch/PR management, `retro clean`, `retro audit`, `retro log`, hook removal, uninstall.
-- **Phase 5: DONE** — Hooks + Polish. `--auto` mode, `--verbose` flag, progress indicators, lockfile, `analyze --dry-run`.
-- **Phase 6: DONE** — Auto-Apply Pipeline. Single hook orchestration, per-stage cooldowns, `auto_apply` config, old hook cleanup.
-- **Phase 7: DONE** — Review Queue. `retro apply` → PendingReview, `retro review` command, `retro sync` PR state detection, nudge shows pending count.
-- **Pattern discovery quality: DONE** — `--json-schema` structured output, analysis reasoning field, session filtering, explicit directives, confidence-based projection gate, rolling window analysis.
-- **Full CLAUDE.md management: DONE** — `[claude_md] full_management` config. Granular edits (add/remove/reword/move) through apply pipeline with `full_management_analysis_schema()`. Agentic rewrite via `retro curate` with `execute_agentic()`. `dissolve_if_needed()` for delimiter removal. Edit type icons in review. Two scenario tests (curate-dry-run, curate-real-ai-call).
+All core features complete and tested.
 
-Test coverage: 160 unit tests, 12 scenario tests.
+- **Phase 1–7: DONE** — Full v1 pipeline: ingestion, analysis, projection, apply, clean, audit, review queue, hooks, auto-apply.
+- **Pattern discovery quality: DONE** — Structured output, session filtering, explicit directives, confidence-based gating, rolling window.
+- **Full CLAUDE.md management: DONE** — Granular edits, agentic rewrite via `retro curate`, delimiter dissolution.
+
+### v2 "The Watcher" (retro 2.0)
+
+- **Plan 1: DONE** — Foundation. v2 domain types (KnowledgeNode, KnowledgeEdge, etc.), config evolution (runner, trust, knowledge sections), schema v4 (nodes, edges, projects tables), node/edge/project CRUD, v3→v4 data migration.
+- **Plan 2: DONE** — Pipeline. Session observer, graph analysis (prompt builder + response parser), Claude Code projector (rules → CLAUDE.md), briefing file generation, trust-based auto-approve, `retro run` command.
+- **Plan 3: DONE** — Surfaces. TUI dashboard (`retro dash`), launchd scheduled runner (`retro start`/`retro stop`), `retro init` evolution (launchd + briefing skill), `--auto` deprecation, runner log rotation, default interval 300s, `retro run` global mode.
+
+Test coverage: 228 unit tests.
 
 ## Testing
 
@@ -232,12 +312,9 @@ Always run tests before committing:
 cargo test
 ```
 
-
-
 - Before completing any implementation work, run all scenario tests to verify nothing broke. Use the run-scenarios skill.
 - When debugging issues, always investigate and identify the root cause before proposing fixes. Do not implement symptom-based patches or workarounds without understanding why the problem occurs.
-- After completing implementation work, always check if documentation (CLAUDE.md, README.md) needs updates to reflect the changes
-- When AI operations return unexpected or counterintuitive results (e.g., 0 patterns found, empty responses), include a `reasoning` field in the response schema and display it to the user. This helps debug AI behavior and understand why certain decisions were made.
-- For major changes, provide commands for clean install testing: retro init --uninstall --purge && cargo build --release && ./target/release/retro init
-- To release: bump version numbers in both Cargo.toml files, merge PR, then `git tag v0.X.Y && git push origin v0.X.Y`. The `.github/workflows/publish.yml` workflow handles testing, crates.io publishing, and GitHub release creation automatically.
-
+- After completing implementation work, always check if documentation (CLAUDE.md, README.md) needs updates to reflect the changes.
+- When AI operations return unexpected or counterintuitive results (e.g., 0 patterns found, empty responses), include a `reasoning` field in the response schema and display it to the user.
+- For major changes, provide commands for clean install testing: `retro init --uninstall --purge && cargo build --release && ./target/release/retro init`
+- To release: bump version numbers in both Cargo.toml files, merge PR, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The `.github/workflows/publish.yml` workflow handles testing, crates.io publishing, and GitHub release creation automatically.

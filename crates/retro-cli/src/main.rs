@@ -1,4 +1,6 @@
 mod commands;
+mod launchd;
+mod tui;
 
 use clap::{Parser, Subcommand};
 
@@ -110,8 +112,23 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Run the full v2 pipeline (observe -> ingest -> analyze -> project -> apply)
+    Run {
+        /// Show detailed output
+        #[arg(long)]
+        verbose: bool,
+        /// Preview only, don't make changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Start the scheduled runner (launchd on macOS)
+    Start,
+    /// Stop the scheduled runner
+    Stop,
     /// Sync PR status: reset patterns from closed PRs back to discoverable
     Sync,
+    /// Open the TUI dashboard
+    Dash,
     /// Manage git hooks
     Hooks {
         #[command(subcommand)]
@@ -158,7 +175,11 @@ fn main() {
         Commands::Log { since } => commands::log::run(since),
         Commands::Review { global, dry_run } => commands::review::run(global, dry_run, verbose),
         Commands::Curate { dry_run } => commands::curate::run(dry_run, verbose),
+        Commands::Run { verbose: run_verbose, dry_run } => commands::run::run(verbose || run_verbose, dry_run),
+        Commands::Start => commands::start::run(verbose),
+        Commands::Stop => commands::stop::run(verbose),
         Commands::Sync => commands::sync::run(verbose),
+        Commands::Dash => commands::dash::run(verbose),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),
         },

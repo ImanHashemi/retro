@@ -1,5 +1,6 @@
 use crate::models::{
-    CompactPattern, CompactSession, CompactUserMessage, ContextSnapshot, Pattern, Session,
+    CompactPattern, CompactSession, CompactUserMessage, ContextSnapshot, KnowledgeNode, Pattern,
+    Session,
 };
 
 const MAX_USER_MSG_LEN: usize = 500;
@@ -451,6 +452,72 @@ These patterns were discovered by analyzing the developer's Claude Code session 
 
 5. **Output format**: Return ONLY the new CLAUDE.md content — raw markdown, no wrapping code fences, no explanation before or after. Your entire response should be the new CLAUDE.md file content, ready to write to disk."#
     )
+}
+
+/// Build the v2 analysis prompt with graph context and scope classification instructions.
+pub fn build_graph_analysis_prompt(
+    sessions: &[CompactSession],
+    existing_nodes: &[KnowledgeNode],
+    project: Option<&str>,
+) -> String {
+    let mut prompt = String::new();
+
+    prompt.push_str("You are analyzing coding session transcripts to discover patterns, rules, preferences, and skills.\n\n");
+
+    prompt.push_str("## Scope Classification\n\n");
+    prompt.push_str("For each piece of knowledge, classify its scope:\n");
+    prompt.push_str("- **global**: Personal style, communication preferences, general coding habits (e.g., 'always use snake_case', 'prefer concise responses')\n");
+    prompt.push_str("- **project**: Code-specific conventions, architecture decisions, project tooling (e.g., 'this project uses SQLite WAL mode', 'run cargo test before committing')\n");
+    prompt.push_str("- When ambiguous, default to **project**\n\n");
+
+    prompt.push_str("## Node Types\n\n");
+    prompt.push_str("- **preference**: How the user likes things done\n");
+    prompt.push_str("- **pattern**: Observed recurring behavior\n");
+    prompt.push_str("- **rule**: An explicit directive from the user\n");
+    prompt.push_str("- **skill**: A reusable capability or workflow\n");
+    prompt.push_str("- **memory**: Factual context about the project or user\n");
+    prompt.push_str("- **directive**: Strong instruction ('always'/'never'/'must')\n\n");
+
+    // Include existing knowledge for dedup and relationship detection
+    if !existing_nodes.is_empty() {
+        prompt.push_str("## Existing Knowledge\n\n");
+        for node in existing_nodes.iter().take(50) {
+            prompt.push_str(&format!(
+                "- [{}] {} ({}) conf={:.2}: {}\n",
+                node.id,
+                node.node_type,
+                node.scope,
+                node.confidence,
+                crate::util::truncate_str(&node.content, 200),
+            ));
+        }
+        prompt.push_str("\n");
+        prompt.push_str("If a session reinforces existing knowledge, emit an update_node with higher confidence.\n");
+        prompt.push_str("If new knowledge contradicts existing, note it but still create the new node.\n");
+        prompt.push_str("If new knowledge is semantically identical to existing, emit merge_nodes.\n\n");
+    }
+
+    // Include sessions
+    prompt.push_str("## Sessions to Analyze\n\n");
+    let sessions_json = serde_json::to_string_pretty(&sessions).unwrap_or_default();
+    prompt.push_str(&sessions_json);
+    prompt.push_str("\n\n");
+
+    if let Some(proj) = project {
+        prompt.push_str(&format!("Current project: {proj}\n\n"));
+    }
+
+    prompt.push_str("## Instructions\n\n");
+    prompt.push_str("Analyze these sessions and emit graph operations:\n");
+    prompt.push_str("- create_node: New knowledge discovered\n");
+    prompt.push_str("- update_node: Existing knowledge reinforced (bump confidence)\n");
+    prompt.push_str("- create_edge: Relationship between nodes (supports, derived_from)\n");
+    prompt.push_str("- merge_nodes: Duplicate knowledge detected\n\n");
+    prompt.push_str("Be selective. Only emit operations for clear, actionable knowledge. Prefer fewer high-quality nodes over many weak ones.\n");
+    prompt.push_str("Explicit user directives ('always', 'never', 'must') get confidence 0.7-0.85.\n");
+    prompt.push_str("Single-session observations get confidence 0.4-0.5.\n");
+
+    prompt
 }
 
 fn to_compact_session(session: &Session) -> CompactSession {

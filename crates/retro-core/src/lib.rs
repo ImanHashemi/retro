@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod audit_log;
+pub mod briefing;
 pub mod config;
 pub mod curator;
 pub mod db;
@@ -8,6 +9,9 @@ pub mod git;
 pub mod ingest;
 pub mod lock;
 pub mod models;
+pub mod observer;
 pub mod projection;
+pub mod runner;
 pub mod scrub;
+pub mod trust;
 pub mod util;
