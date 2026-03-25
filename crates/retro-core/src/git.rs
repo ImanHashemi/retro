@@ -280,6 +280,28 @@ fn create_retro_pr_inner(
         return Err(e);
     }
 
+    // All operations from here must restore state on error
+    let result = do_pr_work(project_path, files, commit_message, pr_title, pr_body, &default);
+
+    // Always restore original branch and stash
+    let _ = checkout_branch(&original_branch);
+    if stashed {
+        let _ = stash_pop();
+    }
+
+    result
+}
+
+/// Helper that performs the file write → commit → push → PR work.
+/// Separated so that `create_retro_pr_inner` can always restore branch/stash on error.
+fn do_pr_work(
+    project_path: &str,
+    files: &[(&str, &str)],
+    commit_message: &str,
+    pr_title: &str,
+    pr_body: &str,
+    default: &str,
+) -> Result<Option<String>, CoreError> {
     // Write files
     for (path, content) in files {
         let full_path = std::path::Path::new(project_path).join(path);
@@ -298,7 +320,7 @@ fn create_retro_pr_inner(
     let pr_url = match push_current_branch() {
         Ok(()) => {
             if is_gh_available() {
-                match create_pr(pr_title, pr_body, &default) {
+                match create_pr(pr_title, pr_body, default) {
                     Ok(url) => Some(url),
                     Err(_) => None,
                 }
@@ -308,12 +330,6 @@ fn create_retro_pr_inner(
         }
         Err(_) => None,
     };
-
-    // Restore branch
-    let _ = checkout_branch(&original_branch);
-    if stashed {
-        let _ = stash_pop();
-    }
 
     Ok(pr_url)
 }

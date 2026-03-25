@@ -180,12 +180,15 @@ exit 0
         };
 
         // Add hooks.SessionStart
-        let hooks = json
+        let obj = json
             .as_object_mut()
-            .unwrap()
+            .ok_or_else(|| anyhow::anyhow!("settings.local.json is not a JSON object"))?;
+        let hooks = obj
             .entry("hooks")
             .or_insert(serde_json::json!({}));
-        let hooks_obj = hooks.as_object_mut().unwrap();
+        let hooks_obj = hooks
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("settings.local.json 'hooks' field is not a JSON object"))?;
         hooks_obj.insert(
             "SessionStart".to_string(),
             serde_json::json!([{
@@ -197,7 +200,7 @@ exit 0
             }]),
         );
 
-        let pretty = serde_json::to_string_pretty(&json).unwrap();
+        let pretty = serde_json::to_string_pretty(&json)?;
         std::fs::write(&settings_path, &pretty).context("writing settings.local.json")?;
         println!("  {} SessionStart hook in settings", "Installed".green());
     }

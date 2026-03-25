@@ -12,13 +12,23 @@ pub fn plist_path() -> PathBuf {
         .join(format!("{PLIST_LABEL}.plist"))
 }
 
+/// Escape special XML characters in a string for safe interpolation into XML/plist.
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 pub fn generate_plist(config: &Config) -> Result<String> {
-    let binary = std::env::current_exe()
-        .context("resolving retro binary path")?
-        .to_string_lossy()
-        .to_string();
+    let binary = escape_xml(
+        &std::env::current_exe()
+            .context("resolving retro binary path")?
+            .to_string_lossy()
+            .to_string(),
+    );
     let retro_dir = retro_dir();
-    let log_path = retro_dir.join("runner.log");
+    let log = escape_xml(&retro_dir.join("runner.log").display().to_string());
 
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -44,7 +54,7 @@ pub fn generate_plist(config: &Config) -> Result<String> {
 </plist>
 "#,
         interval = config.runner.interval_seconds,
-        log = log_path.display(),
+        log = log,
     ))
 }
 
@@ -151,5 +161,17 @@ mod tests {
     fn test_get_uid_returns() {
         let uid = get_uid();
         let _ = uid; // Just check it doesn't panic
+    }
+
+    #[test]
+    fn test_escape_xml() {
+        assert_eq!(escape_xml("normal"), "normal");
+        assert_eq!(escape_xml("a&b"), "a&amp;b");
+        assert_eq!(escape_xml("<tag>"), "&lt;tag&gt;");
+        assert_eq!(escape_xml(r#"key="val""#), "key=&quot;val&quot;");
+        assert_eq!(
+            escape_xml("/path/to/a&b<c>d"),
+            "/path/to/a&amp;b&lt;c&gt;d"
+        );
     }
 }

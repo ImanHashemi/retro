@@ -271,14 +271,18 @@ fn run_for_project(
             ) {
                 Ok(Some(url)) => {
                     for node in &project_nodes {
-                        let _ = db::mark_node_projected_with_pr(conn, &node.id, &url);
+                        if let Err(e) = db::mark_node_projected_with_pr(conn, &node.id, &url) {
+                            eprintln!("  {} marking node projected: {e}", "Warning".yellow());
+                        }
                     }
                     projected_count += project_nodes.len();
                     println!("  {} PR: {}", "Created".green(), url.cyan());
                 }
                 Ok(None) => {
                     for node in &project_nodes {
-                        let _ = db::mark_node_projected(conn, &node.id);
+                        if let Err(e) = db::mark_node_projected(conn, &node.id) {
+                            eprintln!("  {} marking node projected: {e}", "Warning".yellow());
+                        }
                     }
                     projected_count += project_nodes.len();
                     println!("  {} committed to branch (no gh for PR)", "Projected".yellow());
