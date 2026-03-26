@@ -30,6 +30,11 @@ pub fn generate_plist(config: &Config) -> Result<String> {
     let retro_dir = retro_dir();
     let log = escape_xml(&retro_dir.join("runner.log").display().to_string());
 
+    // Capture the current PATH so launchd can find claude CLI and other tools.
+    // Launchd runs with a minimal environment that doesn't include user-installed paths
+    // like ~/.local/bin (claude), ~/.cargo/bin (retro), /opt/homebrew/bin, etc.
+    let path = escape_xml(&std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string()));
+
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -50,11 +55,19 @@ pub fn generate_plist(config: &Config) -> Result<String> {
     <string>{log}</string>
     <key>RunAtLoad</key>
     <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{path}</string>
+    </dict>
 </dict>
 </plist>
 "#,
         interval = config.runner.interval_seconds,
         log = log,
+        path = path,
     ))
 }
 
@@ -137,6 +150,10 @@ mod tests {
         assert!(xml.contains("<key>StandardOutPath</key>"));
         assert!(xml.contains("<key>StandardErrorPath</key>"));
         assert!(xml.contains("runner.log"));
+        assert!(xml.contains("<key>ProcessType</key>"));
+        assert!(xml.contains("<string>Background</string>"));
+        assert!(xml.contains("<key>EnvironmentVariables</key>"));
+        assert!(xml.contains("<key>PATH</key>"));
     }
 
     #[test]
