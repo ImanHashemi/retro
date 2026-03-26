@@ -83,7 +83,7 @@ fn run_for_project(
             })
     });
 
-    let modified = observer::find_modified_sessions(&claude_dir, since);
+    let modified = observer::find_modified_sessions(&claude_dir, since, &[project_path.to_string()]);
     println!(
         "  {} modified session file{}",
         modified.len().to_string().cyan(),
