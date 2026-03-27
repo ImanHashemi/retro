@@ -176,10 +176,9 @@ fn run_for_project(
                 unanalyzed
             );
         } else {
-            // Run analysis (v1 for now)
             println!("  {}", "Running AI-powered analysis...".dimmed());
             let window_days = config.analysis.window_days;
-            let result = analysis::analyze(
+            let result = analysis::analyze_v2(
                 conn,
                 config,
                 Some(project_path),
@@ -197,10 +196,10 @@ fn run_for_project(
             )?;
 
             println!(
-                "  {} sessions analyzed, {} new patterns, {} updated",
+                "  {} sessions analyzed, {} nodes created, {} updated",
                 result.sessions_analyzed.to_string().cyan(),
-                result.new_patterns.to_string().green(),
-                result.updated_patterns.to_string().yellow()
+                result.nodes_created.to_string().green(),
+                result.nodes_updated.to_string().yellow()
             );
 
             if verbose {
@@ -211,7 +210,7 @@ fn run_for_project(
             }
 
             // Track AI calls
-            let calls_used = result.batch_details.len() as u32;
+            let calls_used = result.batch_count as u32;
             increment_ai_calls(conn, calls_used)?;
         }
     }

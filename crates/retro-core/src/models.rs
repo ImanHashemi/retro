@@ -590,6 +590,19 @@ pub struct AnalyzeResult {
     pub batch_details: Vec<BatchDetail>,
 }
 
+/// Result of a v2 graph-based analysis run.
+#[derive(Debug, Clone)]
+pub struct AnalyzeV2Result {
+    pub sessions_analyzed: usize,
+    pub nodes_created: usize,
+    pub nodes_updated: usize,
+    pub edges_created: usize,
+    pub nodes_merged: usize,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub batch_count: usize,
+}
+
 /// Compact session format for serialization to AI prompts.
 #[derive(Debug, Clone, Serialize)]
 pub struct CompactSession {
