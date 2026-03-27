@@ -24,9 +24,11 @@ impl ClaudeCliBackend {
 
     /// Check if the claude CLI is available on PATH.
     pub fn is_available() -> bool {
+        let safe_cwd = crate::config::retro_dir();
         Command::new("claude")
             .arg("--version")
             .env_remove("CLAUDECODE")
+            .current_dir(&safe_cwd)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -39,9 +41,11 @@ impl ClaudeCliBackend {
     /// This prevents the infinite StructuredOutput retry loop that occurs
     /// when --json-schema is used with an expired/missing auth token.
     pub fn check_auth() -> Result<(), CoreError> {
+        let safe_cwd = crate::config::retro_dir();
         let output = Command::new("claude")
             .args(["-p", "ping", "--output-format", "json", "--max-turns", "1", "--tools", ""])
             .env_remove("CLAUDECODE")
+            .current_dir(&safe_cwd)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -262,11 +266,18 @@ impl AnalysisBackend for ClaudeCliBackend {
             args.push("--tools");
             args.push("");
         }
+        // Set cwd to ~/.retro/ when spawning claude CLI. This prevents the claude
+        // CLI from traversing the filesystem root or protected macOS directories
+        // (Documents, Desktop, Photos, network volumes) when launched by launchd
+        // where the default cwd is /. macOS TCC attributes child process file access
+        // to the parent (retro), causing spurious permission dialogs.
+        let safe_cwd = crate::config::retro_dir();
         let child = Command::new("claude")
             .args(&args)
             // Clear CLAUDECODE to avoid nested-session rejection when retro
             // is invoked from a post-commit hook inside a Claude Code session.
             .env_remove("CLAUDECODE")
+            .current_dir(&safe_cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

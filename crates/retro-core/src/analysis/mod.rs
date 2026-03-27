@@ -8,8 +8,9 @@ use crate::db;
 use crate::errors::CoreError;
 use crate::ingest::{context, session};
 use crate::models::{
-    AnalysisResponse, AnalyzeResult, BatchDetail, EdgeType, GraphAnalysisResponse, GraphOperation,
-    NodeScope, NodeType, Pattern, PatternStatus, PatternType, SuggestedTarget,
+    AnalysisResponse, AnalyzeResult, AnalyzeV2Result, BatchDetail, EdgeType,
+    GraphAnalysisResponse, GraphOperation, NodeScope, NodeStatus, NodeType, Pattern,
+    PatternStatus, PatternType, SuggestedTarget,
 };
 use crate::scrub;
 use chrono::{Duration, Utc};
@@ -378,6 +379,184 @@ where
         input_tokens: total_input_tokens,
         output_tokens: total_output_tokens,
         batch_details,
+    })
+}
+
+/// v2 analysis: re-parse sessions, scrub, call AI with graph prompt/schema, write to knowledge graph.
+///
+/// `on_batch_start` is called before each AI call with (batch_index, total_batches, session_count, prompt_chars).
+pub fn analyze_v2<F>(
+    conn: &Connection,
+    config: &Config,
+    project: Option<&str>,
+    window_days: u32,
+    on_batch_start: F,
+) -> Result<AnalyzeV2Result, CoreError>
+where
+    F: Fn(usize, usize, usize, usize),
+{
+    // Check claude CLI availability and auth
+    if !ClaudeCliBackend::is_available() {
+        return Err(CoreError::Analysis(
+            "claude CLI not found on PATH. Install Claude Code CLI to use analysis.".to_string(),
+        ));
+    }
+    ClaudeCliBackend::check_auth()?;
+
+    let since = Utc::now() - Duration::days(window_days as i64);
+
+    // Get sessions to analyze — rolling_window=true re-analyzes all sessions in window,
+    // false only picks up sessions not yet analyzed.
+    let rolling = config.analysis.rolling_window;
+    let sessions_to_analyze = db::get_sessions_for_analysis(conn, project, &since, rolling)?;
+
+    if sessions_to_analyze.is_empty() {
+        return Ok(AnalyzeV2Result {
+            sessions_analyzed: 0,
+            nodes_created: 0,
+            nodes_updated: 0,
+            edges_created: 0,
+            nodes_merged: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            batch_count: 0,
+        });
+    }
+
+    // Re-parse session files from disk to get full content
+    let mut parsed_sessions = Vec::new();
+    for ingested in &sessions_to_analyze {
+        let path = Path::new(&ingested.session_path);
+        if !path.exists() {
+            eprintln!(
+                "warning: session file not found: {}",
+                ingested.session_path
+            );
+            continue;
+        }
+
+        match session::parse_session_file(path, &ingested.session_id, &ingested.project) {
+            Ok(mut s) => {
+                if config.privacy.scrub_secrets {
+                    scrub::scrub_session(&mut s);
+                }
+                parsed_sessions.push(s);
+            }
+            Err(e) => {
+                eprintln!(
+                    "warning: failed to re-parse session {}: {e}",
+                    ingested.session_id
+                );
+            }
+        }
+    }
+
+    // Filter out low-signal sessions (single-message = programmatic claude -p calls)
+    let before_filter = parsed_sessions.len();
+    parsed_sessions.retain(|s| s.user_messages.len() >= 2);
+    let filtered_out = before_filter - parsed_sessions.len();
+    if filtered_out > 0 {
+        eprintln!(
+            "  Skipped {} single-message session{} (no pattern signal)",
+            filtered_out,
+            if filtered_out == 1 { "" } else { "s" }
+        );
+    }
+
+    let analyzed_count = parsed_sessions.len();
+
+    if parsed_sessions.is_empty() {
+        // Still record all sessions as analyzed so we don't re-process low-signal ones
+        for ingested in &sessions_to_analyze {
+            db::record_analyzed_session(conn, &ingested.session_id, &ingested.project)?;
+        }
+        return Ok(AnalyzeV2Result {
+            sessions_analyzed: 0,
+            nodes_created: 0,
+            nodes_updated: 0,
+            edges_created: 0,
+            nodes_merged: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            batch_count: 0,
+        });
+    }
+
+    // Convert parsed sessions to compact format for the prompt
+    let compact_sessions: Vec<_> = parsed_sessions
+        .iter()
+        .map(prompts::to_compact_session)
+        .collect();
+
+    // Load existing knowledge nodes for dedup context
+    let existing_nodes = db::get_nodes_by_status(conn, &NodeStatus::Active).unwrap_or_default();
+
+    // Resolve project slug for the prompt
+    let project_slug = project.map(db::generate_project_slug);
+
+    // Create AI backend
+    let backend = ClaudeCliBackend::new(&config.ai);
+
+    let mut total_input_tokens: u64 = 0;
+    let mut total_output_tokens: u64 = 0;
+    let mut total_nodes_created: usize = 0;
+    let mut total_nodes_updated: usize = 0;
+    let mut total_edges_created: usize = 0;
+    let mut total_nodes_merged: usize = 0;
+
+    // Process in batches
+    let total_batches = (compact_sessions.len() + BATCH_SIZE - 1) / BATCH_SIZE;
+    let mut batch_count: usize = 0;
+
+    for (batch_idx, batch) in compact_sessions.chunks(BATCH_SIZE).enumerate() {
+        // Build v2 prompt
+        let prompt = prompts::build_graph_analysis_prompt(
+            batch,
+            &existing_nodes,
+            project_slug.as_deref(),
+        );
+        let prompt_chars = prompt.len();
+
+        on_batch_start(batch_idx, total_batches, batch.len(), prompt_chars);
+
+        // Call AI with v2 schema
+        let response = backend.execute(&prompt, Some(GRAPH_ANALYSIS_RESPONSE_SCHEMA))?;
+        total_input_tokens += response.input_tokens;
+        total_output_tokens += response.output_tokens;
+
+        // Parse response into graph operations
+        let ops = parse_graph_response(&response.text, project_slug.as_deref()).map_err(|e| {
+            CoreError::Analysis(format!(
+                "{e}\n(prompt_chars={}, output_tokens={}, result_chars={})",
+                prompt_chars,
+                response.output_tokens,
+                response.text.len()
+            ))
+        })?;
+
+        // Apply to knowledge graph
+        let graph_result = db::apply_graph_operations(conn, &ops)?;
+        total_nodes_created += graph_result.nodes_created;
+        total_nodes_updated += graph_result.nodes_updated;
+        total_edges_created += graph_result.edges_created;
+        total_nodes_merged += graph_result.nodes_merged;
+        batch_count += 1;
+    }
+
+    // Record all sessions as analyzed
+    for ingested in &sessions_to_analyze {
+        db::record_analyzed_session(conn, &ingested.session_id, &ingested.project)?;
+    }
+
+    Ok(AnalyzeV2Result {
+        sessions_analyzed: analyzed_count,
+        nodes_created: total_nodes_created,
+        nodes_updated: total_nodes_updated,
+        edges_created: total_edges_created,
+        nodes_merged: total_nodes_merged,
+        input_tokens: total_input_tokens,
+        output_tokens: total_output_tokens,
+        batch_count,
     })
 }
 

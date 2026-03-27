@@ -520,7 +520,7 @@ pub fn build_graph_analysis_prompt(
     prompt
 }
 
-fn to_compact_session(session: &Session) -> CompactSession {
+pub fn to_compact_session(session: &Session) -> CompactSession {
     let user_messages: Vec<CompactUserMessage> = session
         .user_messages
         .iter()
