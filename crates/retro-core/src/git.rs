@@ -26,6 +26,20 @@ pub fn is_gh_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Get the git remote origin URL, if available.
+pub fn remote_url() -> Option<String> {
+    let output = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if url.is_empty() { None } else { Some(url) }
+    } else {
+        None
+    }
+}
+
 /// Get the git repository root directory.
 pub fn git_root() -> Result<String, CoreError> {
     let output = Command::new("git")
