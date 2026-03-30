@@ -30,9 +30,9 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
         anyhow::bail!("database schema v{version} detected — run `retro init` to migrate to v2");
     }
 
-    match super::git_root_or_cwd() {
+    match retro_core::git::git_root() {
         Ok(path) => {
-            // Single project mode (manual invocation from a git repo)
+            // Single project mode (manual invocation from inside a git repo)
             // Ensure project is registered (catches projects initialized before this fix)
             if !dry_run {
                 let slug = db::generate_unique_project_slug(&conn, &path)?;
