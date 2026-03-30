@@ -1400,6 +1400,51 @@ pub fn get_project(conn: &Connection, id: &str) -> Result<Option<KnowledgeProjec
     Ok(result)
 }
 
+/// Find an existing project by its filesystem path.
+pub fn get_project_by_path(conn: &Connection, path: &str) -> Result<Option<KnowledgeProject>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, remote_url, agent_type, last_seen FROM projects WHERE path = ?1",
+    )?;
+    let result = stmt.query_row(params![path], |row| {
+        Ok(KnowledgeProject {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            remote_url: row.get(2)?,
+            agent_type: row.get(3)?,
+            last_seen: DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+        })
+    }).optional()?;
+    Ok(result)
+}
+
+/// Register a project if not already registered (by path). Returns the project ID.
+/// If already registered, updates last_seen and remote_url.
+pub fn ensure_project_registered(conn: &Connection, path: &str) -> Result<String, CoreError> {
+    // Check if already registered by path
+    if let Some(existing) = get_project_by_path(conn, path)? {
+        // Update last_seen
+        let mut updated = existing.clone();
+        updated.last_seen = Utc::now();
+        updated.remote_url = crate::git::remote_url().or(existing.remote_url);
+        upsert_project(conn, &updated)?;
+        return Ok(existing.id);
+    }
+
+    // New project — generate slug and register
+    let slug = generate_unique_project_slug(conn, path)?;
+    let project = KnowledgeProject {
+        id: slug.clone(),
+        path: path.to_string(),
+        remote_url: crate::git::remote_url(),
+        agent_type: "claude_code".to_string(),
+        last_seen: Utc::now(),
+    };
+    upsert_project(conn, &project)?;
+    Ok(slug)
+}
+
 pub fn get_project_by_remote_url(conn: &Connection, remote_url: &str) -> Result<Option<KnowledgeProject>, CoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, path, remote_url, agent_type, last_seen FROM projects WHERE remote_url = ?1",
