@@ -116,15 +116,7 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
         let repo_root = git_root_or_cwd()?;
 
         // Register project in the DB so the watcher knows about it
-        let project_id = db::generate_unique_project_slug(&conn, &repo_root)?;
-        let project = retro_core::models::KnowledgeProject {
-            id: project_id.clone(),
-            path: repo_root.clone(),
-            remote_url: git::remote_url(),
-            agent_type: "claude_code".to_string(),
-            last_seen: chrono::Utc::now(),
-        };
-        db::upsert_project(&conn, &project)?;
+        let project_id = db::ensure_project_registered(&conn, &repo_root)?;
         println!("  {} project: {} ({})", "Registered".green(), project_id, repo_root);
 
         install_briefing_hook(&repo_root)?;

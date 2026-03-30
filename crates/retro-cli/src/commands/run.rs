@@ -35,15 +35,7 @@ pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
             // Single project mode (manual invocation from inside a git repo)
             // Ensure project is registered (catches projects initialized before this fix)
             if !dry_run {
-                let slug = db::generate_unique_project_slug(&conn, &path)?;
-                let project = retro_core::models::KnowledgeProject {
-                    id: slug,
-                    path: path.clone(),
-                    remote_url: retro_core::git::remote_url(),
-                    agent_type: "claude_code".to_string(),
-                    last_seen: chrono::Utc::now(),
-                };
-                let _ = db::upsert_project(&conn, &project);
+                let _ = db::ensure_project_registered(&conn, &path);
             }
             run_for_project(&conn, &config, &path, verbose, dry_run)?;
         }
