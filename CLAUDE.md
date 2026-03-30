@@ -322,12 +322,7 @@ cargo test
 <!-- retro:managed:start -->
 ## Retro-Discovered Patterns
 
-- User follows a strict PR workflow: implement changes → create PR → run /review → run /security-review → address feedback → merge → publish new version. Both /review and /security-review are run before every merge. Seen in 6+ sessions consistently.
-- Always run scenario/e2e tests before claiming work is complete. User asks 'Did you run the scenarios?', 'Did you do an end-to-end test?' in nearly every implementation session. The project uses markdown scenario files in scenarios/ dir, executed via the run-scenarios skill.
-- After merging PRs, user typically wants to immediately publish a new version to crates.io. They say 'lets publish a new version' or 'release a new version'. A GitHub Actions workflow now handles publish-on-tag automatically.
-- User cares deeply about documentation quality. After features land, they ask 'did you update claude.md?' and 'do we need to update any documentation?'. They want thoughtful, well-designed doc updates — not just appending info. 'take proper time thinking and designing the documentation updates to make sure the quality of the docs stay really good'.
-- User wants retro built primarily for Claude Code but with an open architecture that can extend to other agents (Gemini, Open Code, etc). 'build for Claude Code but keep it open so we can easily extend in the future'. Also wants retro to be language-agnostic, not hardcoded to any specific language.
-- User wants retro to feel automatic (not like a chore to run manually) while maintaining a sense of user control and insight. Key quote: 'I want to be in control but have it automatically become better'. Knowledge browser in TUI helps with 'feeling in control'.
-- For fixes and small features, user prefers branching from main: 'fix it, in a branch from main and create a pr for it'. Feature work uses feature branches with worktree isolation.
+- User actively verifies releases by installing and testing locally after publishing. They install via cargo, run commands (retro dash, retro status, retro init), and report issues they find. Seen across multiple release cycles (v0.3.3, v2.0, v2.1.x). Often discovers real bugs this way (dashboard showing 0, observer scanning wrong directories, launchd errors). **How to apply:** After publishing, expect the user to immediately test and report issues.
+- User wants database schema and data changes to be done via proper migrations, not manual SQL commands. Quote: 'Should the thing you just did not be part of a migration?' **Why:** Ensures changes are reproducible and applied consistently for all users. **How to apply:** When modifying the retro SQLite database, create migration code rather than running ad-hoc SQL.
 
 <!-- retro:managed:end -->
