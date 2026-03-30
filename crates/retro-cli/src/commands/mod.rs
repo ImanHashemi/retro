@@ -300,21 +300,24 @@ pub fn check_and_display_nudge() {
         display_auto_run(run);
     }
 
-    // Check for pending review items
-    let has_pending = if let Ok(pending) = retro_core::db::get_pending_review_projections(&conn) {
-        if !pending.is_empty() {
-            use colored::Colorize;
-            println!(
-                "  {} {} — run {}",
-                "retro:".dimmed(),
-                format!("{} items pending review", pending.len()).yellow(),
-                "`retro review`".cyan()
-            );
-            println!();
-            true
-        } else {
-            false
-        }
+    // Check for pending review items (v2 nodes + v1 projections)
+    let v2_pending = retro_core::db::get_nodes_by_status(&conn, &retro_core::models::NodeStatus::PendingReview)
+        .map(|n| n.len())
+        .unwrap_or(0);
+    let v1_pending = retro_core::db::get_pending_review_projections(&conn)
+        .map(|p| p.len())
+        .unwrap_or(0);
+    let total_pending = v2_pending + v1_pending;
+    let has_pending = if total_pending > 0 {
+        use colored::Colorize;
+        println!(
+            "  {} {} — run {}",
+            "retro:".dimmed(),
+            format!("{} items pending review", total_pending).yellow(),
+            "`retro dash`".cyan()
+        );
+        println!();
+        true
     } else {
         false
     };
@@ -337,6 +340,13 @@ pub fn warn_auto_deprecated() {
             "warning: --auto is deprecated in Retro 2.0. Use `retro start` for automatic background operation."
         );
     }
+}
+
+/// Print a deprecation warning for a v1 command replaced by a v2 equivalent.
+pub fn warn_command_deprecated(command: &str, replacement: &str) {
+    eprintln!(
+        "warning: `retro {command}` is deprecated in Retro 2.0. Use `{replacement}` instead."
+    );
 }
 
 /// Check if a timestamp (RFC 3339) is within the cooldown window.
