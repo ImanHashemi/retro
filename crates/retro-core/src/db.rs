@@ -2279,7 +2279,7 @@ mod tests {
         migrate(&conn).unwrap();
 
         let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
 
         // Verify nodes table exists with correct columns
         let count: i64 = conn.query_row(
@@ -2432,7 +2432,7 @@ mod tests {
         migrate(&conn).unwrap();
 
         let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
 
         // v4 tables exist
         conn.query_row("SELECT COUNT(*) FROM nodes WHERE 1=0", [], |row| row.get::<_, i64>(0)).unwrap();
@@ -2804,7 +2804,7 @@ mod tests {
 
         // Verify schema version
         let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
     }
 
     fn test_node(id: &str, status: NodeStatus, projected_at: Option<String>, pr_url: Option<String>) -> KnowledgeNode {
