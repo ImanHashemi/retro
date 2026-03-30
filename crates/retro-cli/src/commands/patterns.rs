@@ -7,6 +7,7 @@ use retro_core::util::shorten_path;
 use super::git_root_or_cwd;
 
 pub fn run(status_filter: Option<String>, global: bool) -> Result<()> {
+    super::warn_command_deprecated("patterns", "retro dash");
     let dir = retro_dir();
     let db_path = dir.join("retro.db");
 

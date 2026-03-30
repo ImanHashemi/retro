@@ -18,6 +18,7 @@ enum ReviewAction {
 }
 
 pub fn run(global: bool, dry_run: bool, verbose: bool) -> Result<()> {
+    super::warn_command_deprecated("review", "retro dash");
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");

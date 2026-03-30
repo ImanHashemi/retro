@@ -8,6 +8,7 @@ use retro_core::models::PatternStatus;
 
 /// Run sync: check PR status for applied projections and reset patterns from closed PRs.
 pub fn run(verbose: bool) -> Result<()> {
+    super::warn_command_deprecated("sync", "retro run");
     let dir = retro_dir();
     let db_path = dir.join("retro.db");
     let audit_path = dir.join("audit.jsonl");
