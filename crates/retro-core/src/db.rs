@@ -172,6 +172,20 @@ fn migrate(conn: &Connection) -> Result<(), CoreError> {
         conn.pragma_update(None, "user_version", 5)?;
     }
 
+    if current_version < 6 {
+        // v6: Clean up v1 leftovers now that v2 pipeline is primary.
+        // - Archive all v1 patterns (they've been migrated to nodes in v4)
+        // - Delete pending_review projections (v2 uses nodes table for review)
+        // - Remove bogus project entries with path "/" (from sessions ingested without project context)
+        conn.execute_batch(
+            "UPDATE patterns SET status = 'archived' WHERE status IN ('discovered', 'active');
+             DELETE FROM projections WHERE status = 'pending_review';
+             DELETE FROM projects WHERE path = '/';
+             DELETE FROM ingested_sessions WHERE project = '/';"
+        )?;
+        conn.pragma_update(None, "user_version", 6)?;
+    }
+
     Ok(())
 }
 
