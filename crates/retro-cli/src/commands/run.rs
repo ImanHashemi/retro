@@ -257,20 +257,28 @@ fn run_for_project(
 
         // Project-scoped nodes → CLAUDE.md on a PR branch
         if !project_nodes.is_empty() {
-            let rules: Vec<String> = project_nodes.iter()
+            let new_rules: Vec<String> = project_nodes.iter()
                 .map(|n| n.content.clone())
                 .collect();
 
+            // Read existing managed section rules and APPEND new ones (don't replace)
             let claude_md_path = format!("{}/CLAUDE.md", project_path);
             let existing = std::fs::read_to_string(&claude_md_path).unwrap_or_default();
-            let updated = retro_core::projection::claude_md::update_claude_md_content(&existing, &rules);
+            let mut all_rules = retro_core::projection::claude_md::read_managed_section(&existing)
+                .unwrap_or_default();
+            for rule in &new_rules {
+                if !all_rules.iter().any(|r| r == rule) {
+                    all_rules.push(rule.clone());
+                }
+            }
+            let updated = retro_core::projection::claude_md::update_claude_md_content(&existing, &all_rules);
 
             match retro_core::git::create_retro_pr(
                 project_path,
                 &[("CLAUDE.md", &updated)],
                 "retro: update CLAUDE.md with discovered rules",
                 "retro: update CLAUDE.md rules",
-                &format!("Retro discovered {} rule(s) from your sessions.\n\nApproved via `retro dash`.", rules.len()),
+                &format!("Retro discovered {} rule(s) from your sessions.\n\nApproved via `retro dash`.", new_rules.len()),
             ) {
                 Ok(Some(url)) => {
                     for node in &project_nodes {
