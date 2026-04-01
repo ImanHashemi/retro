@@ -318,3 +318,10 @@ cargo test
 - When AI operations return unexpected or counterintuitive results (e.g., 0 patterns found, empty responses), include a `reasoning` field in the response schema and display it to the user.
 - For major changes, provide commands for clean install testing: `retro init --uninstall --purge && cargo build --release && ./target/release/retro init`
 - To release: bump version numbers in both Cargo.toml files, merge PR, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The `.github/workflows/publish.yml` workflow handles testing, crates.io publishing, and GitHub release creation automatically.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- User wants retro insights to surface automatically when starting new Claude Code sessions, not requiring manual commands. Asked: 'Is there a hook we can use to make sure it always looks at this or how can we make sure something happens when I start Claude up?' and 'nothing happens when I start a Claude Code session'. Led to creation of retro-briefing skill and CLAUDE.md instructions for session-start briefing. **Why:** The core Retro 2.0 philosophy is automatic improvement without manual intervention. **How to apply:** Session-start hooks and CLAUDE.md instructions should ensure retro context is surfaced without user action.
+
+<!-- retro:managed:end -->
