@@ -241,8 +241,11 @@ fn run_for_project(
             .filter(|n| n.scope == retro_core::models::NodeScope::Global && n.project_id.is_none())
             .filter(|n| matches!(n.node_type, retro_core::models::NodeType::Rule | retro_core::models::NodeType::Directive | retro_core::models::NodeType::Preference))
             .collect();
+        // Filter project-scoped nodes to ONLY this project (by slug match)
+        let current_project_slug = db::generate_project_slug(project_path);
         let project_nodes: Vec<&retro_core::models::KnowledgeNode> = unprojected.iter()
             .filter(|n| n.scope == retro_core::models::NodeScope::Project)
+            .filter(|n| n.project_id.as_deref() == Some(current_project_slug.as_str()))
             .filter(|n| matches!(n.node_type, retro_core::models::NodeType::Rule | retro_core::models::NodeType::Directive | retro_core::models::NodeType::Preference | retro_core::models::NodeType::Pattern))
             .collect();
 
