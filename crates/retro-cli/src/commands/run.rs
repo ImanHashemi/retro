@@ -147,7 +147,7 @@ fn run_for_project(
             ai_calls_today,
             config.runner.max_ai_calls_per_day
         );
-        return Ok(());
+        // Don't return early — projection and sync steps below don't need AI calls
     }
 
     if verbose {
@@ -160,12 +160,16 @@ fn run_for_project(
     // Check if analysis is needed based on trigger
     let should_analyze = should_trigger_analysis(conn, config)?;
 
-    if !should_analyze {
-        println!(
-            "  {} analysis threshold not met (need {} unanalyzed sessions)",
-            "Skipping:".dimmed(),
-            config.runner.analysis_threshold
-        );
+    if !should_analyze || budget_remaining == 0 {
+        if budget_remaining == 0 {
+            // Already printed budget message above
+        } else {
+            println!(
+                "  {} analysis threshold not met (need {} unanalyzed sessions)",
+                "Skipping:".dimmed(),
+                config.runner.analysis_threshold
+            );
+        }
     } else {
         println!(
             "  {} analysis threshold met",
@@ -182,11 +186,13 @@ fn run_for_project(
         } else {
             println!("  {}", "Running AI-powered analysis...".dimmed());
             let window_days = config.analysis.window_days;
+            let max_batches = batches_within_budget(usize::MAX, budget_remaining);
             let result = analysis::analyze_v2(
                 conn,
                 config,
                 Some(project_path),
                 window_days,
+                max_batches,
                 |idx, total, sessions, chars| {
                     println!(
                         "    {} batch {}/{} ({} sessions, ~{}K chars)...",
@@ -479,4 +485,47 @@ fn update_last_run(conn: &db::Connection) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     db::set_metadata(conn, "last_run_at", &now)?;
     Ok(())
+}
+
+/// Calculate how many AI call batches can run given the remaining budget.
+/// Returns 0 if budget is exhausted.
+fn batches_within_budget(total_batches: usize, budget_remaining: u32) -> usize {
+    if budget_remaining == 0 {
+        return 0;
+    }
+    total_batches.min(budget_remaining as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_batches_within_budget_zero_budget() {
+        // Bug: when budget is 0, pipeline should still run projection/sync
+        // but analysis should get 0 batches
+        assert_eq!(batches_within_budget(4, 0), 0);
+    }
+
+    #[test]
+    fn test_batches_within_budget_sufficient() {
+        // Budget covers all batches
+        assert_eq!(batches_within_budget(4, 10), 4);
+    }
+
+    #[test]
+    fn test_batches_within_budget_limited() {
+        // Bug: 4 batches but only 2 budget remaining should cap at 2, not run all 4
+        assert_eq!(batches_within_budget(4, 2), 2);
+    }
+
+    #[test]
+    fn test_batches_within_budget_exact() {
+        assert_eq!(batches_within_budget(3, 3), 3);
+    }
+
+    #[test]
+    fn test_batches_within_budget_one_remaining() {
+        assert_eq!(batches_within_budget(5, 1), 1);
+    }
 }

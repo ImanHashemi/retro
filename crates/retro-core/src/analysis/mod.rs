@@ -385,11 +385,13 @@ where
 /// v2 analysis: re-parse sessions, scrub, call AI with graph prompt/schema, write to knowledge graph.
 ///
 /// `on_batch_start` is called before each AI call with (batch_index, total_batches, session_count, prompt_chars).
+/// `max_batches` limits the number of AI calls (for budget enforcement). 0 means unlimited.
 pub fn analyze_v2<F>(
     conn: &Connection,
     config: &Config,
     project: Option<&str>,
     window_days: u32,
+    max_batches: usize,
     on_batch_start: F,
 ) -> Result<AnalyzeV2Result, CoreError>
 where
@@ -504,11 +506,15 @@ where
     let mut total_edges_created: usize = 0;
     let mut total_nodes_merged: usize = 0;
 
-    // Process in batches
+    // Process in batches (limited by max_batches for budget enforcement)
     let total_batches = (compact_sessions.len() + BATCH_SIZE - 1) / BATCH_SIZE;
+    let effective_batches = if max_batches == 0 { total_batches } else { total_batches.min(max_batches) };
     let mut batch_count: usize = 0;
 
     for (batch_idx, batch) in compact_sessions.chunks(BATCH_SIZE).enumerate() {
+        if batch_idx >= effective_batches {
+            break;
+        }
         // Build v2 prompt
         let prompt = prompts::build_graph_analysis_prompt(
             batch,
