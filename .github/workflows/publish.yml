@@ -33,8 +33,11 @@ jobs:
           fi
           echo "Publishing version $TAG_VERSION"
 
+      - name: Update Cargo.lock for workspace version
+        run: cargo update --workspace
+
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test
 
       - name: Publish retro-core
         run: cargo publish -p retro-core
