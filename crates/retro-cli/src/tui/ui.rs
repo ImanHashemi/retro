@@ -100,14 +100,20 @@ fn draw_pending_list(frame: &mut Frame, app: &App, area: Rect) {
         let marker = if i == app.selected_index { "> " } else { "  " };
         let type_str = format_node_type(&node.node_type);
         let scope_str = format_scope(node);
-        let content = truncate(&node.content, area.width as usize - 40);
+        let scope_display = if scope_str.len() > 12 {
+            format!("{}...", &scope_str[..9])
+        } else {
+            scope_str
+        };
         let conf = format!("{:.2}", node.confidence);
+        let fixed_cols = 2 + 14 + 14 + 6; // marker + [type] + scope + conf + spaces
+        let content_width = (area.width as usize).saturating_sub(fixed_cols);
+        let content = truncate(&node.content, content_width);
         ListItem::new(Line::from(vec![
             Span::raw(marker),
             Span::styled(format!("[{type_str}]"), Style::default().fg(type_color(&node.node_type))),
             Span::raw(" "),
-            Span::styled(scope_str, Style::default().fg(Color::DarkGray)),
-            Span::raw("  "),
+            Span::styled(format!("{scope_display:<14}"), Style::default().fg(Color::DarkGray)),
             Span::raw(content),
             Span::raw("  "),
             Span::styled(conf, Style::default().fg(Color::Yellow)),
@@ -157,12 +163,20 @@ fn draw_knowledge_list(frame: &mut Frame, app: &App, area: Rect) {
         let marker = if i == app.selected_index { "> " } else { "  " };
         let type_str = format_node_type(&node.node_type);
         let scope_str = format_scope(node);
-        let content = truncate(&node.content, chunks[1].width as usize - 40);
-        let conf = format!(".{}", (node.confidence * 100.0) as u32);
+        // Truncate scope to 12 chars max for clean columns
+        let scope_display = if scope_str.len() > 12 {
+            format!("{}...", &scope_str[..9])
+        } else {
+            scope_str
+        };
+        let conf = format!("{:.2}", node.confidence);
+        let fixed_cols = 2 + 12 + 14 + 6; // marker + type + scope + conf + spaces
+        let content_width = (chunks[1].width as usize).saturating_sub(fixed_cols);
+        let content = truncate(&node.content, content_width);
         ListItem::new(Line::from(vec![
             Span::raw(marker),
-            Span::styled(format!("{type_str:<10}"), Style::default().fg(type_color(&node.node_type))),
-            Span::styled(format!("{scope_str:<14}"), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{type_str:<12}"), Style::default().fg(type_color(&node.node_type))),
+            Span::styled(format!("{scope_display:<14}"), Style::default().fg(Color::DarkGray)),
             Span::raw(content),
             Span::raw("  "),
             Span::styled(conf, Style::default().fg(Color::Yellow)),
