@@ -318,3 +318,11 @@ cargo test
 - When AI operations return unexpected or counterintuitive results (e.g., 0 patterns found, empty responses), include a `reasoning` field in the response schema and display it to the user.
 - For major changes, provide commands for clean install testing: `retro init --uninstall --purge && cargo build --release && ./target/release/retro init`
 - To release: bump version numbers in both Cargo.toml files, merge PR, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The `.github/workflows/publish.yml` workflow handles testing, crates.io publishing, and GitHub release creation automatically.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- User validates retro's own data integrity by checking whether projected knowledge nodes actually exist in both the database and target files. In session 2b626ce8: 'Investigation: please check for all of these entries whether they actually exist at the place that they should exist and whether they're also in the knowledge base like in a database.' Also checks dashboard accuracy against retro status output. **Why:** Retro is a new tool with evolving data pipelines; bugs in projection/sync can silently lose knowledge. **How to apply:** When debugging retro dashboard or projection issues, verify data exists at all layers (DB → knowledge graph → projected files).
+- User manages retro-generated PRs across multiple projects, reviewing which are valuable vs stale. Closes outdated PRs and asks about the implications: 'I have a lot of PRs now that are removing old rules and conflicting, should I close them all? What happens if I do?', 'If they are set to dismissed, will they never be added again?', 'Can you close them for me? Please check all projects and check which prs are good and which arent'. **Why:** Retro auto-generates PRs; without curation these accumulate and conflict. **How to apply:** When working with retro PRs, help user triage across all registered projects.
+
+<!-- retro:managed:end -->
