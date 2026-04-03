@@ -318,3 +318,10 @@ cargo test
 - When AI operations return unexpected or counterintuitive results (e.g., 0 patterns found, empty responses), include a `reasoning` field in the response schema and display it to the user.
 - For major changes, provide commands for clean install testing: `retro init --uninstall --purge && cargo build --release && ./target/release/retro init`
 - To release: bump version numbers in both Cargo.toml files, merge PR, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The `.github/workflows/publish.yml` workflow handles testing, crates.io publishing, and GitHub release creation automatically.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- Retro-projected PRs must only contain knowledge relevant to the target project. No cross-project leakage of retro-specific rules into other repositories. User explicitly flagged: 'This is a PR for the AI core repository. It doesn't have anything to do with retro so why are there retro-specific things in this PR?' **Why:** Retro creates PRs to update CLAUDE.md in registered projects; those PRs must only include rules/knowledge applicable to that project's domain. **How to apply:** When projecting knowledge into project PRs, filter out retro-internal rules and ensure each projected item is relevant to the target repository's domain.
+
+<!-- retro:managed:end -->
