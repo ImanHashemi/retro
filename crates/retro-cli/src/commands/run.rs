@@ -150,6 +150,33 @@ fn run_for_project(
         // Don't return early — projection and sync steps below don't need AI calls
     }
 
+    // Check minimum interval between analysis runs
+    let interval_ok = if config.runner.min_analysis_interval_minutes > 0 && budget_remaining > 0 {
+        let last_analysis = db::get_metadata(conn, "last_analysis_at")?;
+        match last_analysis.and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok()) {
+            Some(last) => {
+                let elapsed = Utc::now().signed_duration_since(last);
+                let min_interval = chrono::Duration::minutes(config.runner.min_analysis_interval_minutes as i64);
+                if elapsed < min_interval {
+                    let remaining_mins = (min_interval - elapsed).num_minutes();
+                    println!(
+                        "  {} analysis cooldown — next in ~{} min ({}/{})",
+                        "Skipping:".yellow(),
+                        remaining_mins,
+                        ai_calls_today,
+                        config.runner.max_ai_calls_per_day
+                    );
+                    false
+                } else {
+                    true
+                }
+            }
+            None => true, // No previous analysis, proceed
+        }
+    } else {
+        true // No interval configured or budget exhausted
+    };
+
     if verbose {
         eprintln!(
             "[verbose] AI budget: {}/{} calls remaining today",
@@ -160,9 +187,9 @@ fn run_for_project(
     // Check if analysis is needed based on trigger
     let should_analyze = should_trigger_analysis(conn, config)?;
 
-    if !should_analyze || budget_remaining == 0 {
-        if budget_remaining == 0 {
-            // Already printed budget message above
+    if !should_analyze || budget_remaining == 0 || !interval_ok {
+        if budget_remaining == 0 || !interval_ok {
+            // Already printed budget/interval message above
         } else {
             println!(
                 "  {} analysis threshold not met (need {} unanalyzed sessions)",
@@ -219,9 +246,10 @@ fn run_for_project(
                 );
             }
 
-            // Track AI calls
+            // Track AI calls and last analysis time
             let calls_used = result.batch_count as u32;
             increment_ai_calls(conn, calls_used)?;
+            db::set_metadata(conn, "last_analysis_at", &Utc::now().to_rfc3339())?;
         }
     }
 
