@@ -110,6 +110,8 @@ pub struct RunnerConfig {
     pub active_hours: Option<String>,
     #[serde(default = "default_max_ai_calls_per_day")]
     pub max_ai_calls_per_day: u32,
+    #[serde(default)]
+    pub min_analysis_interval_minutes: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +284,7 @@ fn default_runner() -> RunnerConfig {
         analysis_threshold: default_analysis_threshold(),
         active_hours: None,
         max_ai_calls_per_day: default_max_ai_calls_per_day(),
+        min_analysis_interval_minutes: 0,
     }
 }
 
