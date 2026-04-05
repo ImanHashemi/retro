@@ -270,6 +270,28 @@ pub fn skill_path(project_root: &str, name: &str) -> String {
     format!("{project_root}/.claude/skills/{name}/SKILL.md")
 }
 
+/// Check if superpowers plugin is installed by examining a specific plugins file.
+/// Testable helper — takes the file path as a parameter.
+fn check_superpowers_in_file(path: &std::path::Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else { return false };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else { return false };
+    json.get("plugins")
+        .and_then(|p| p.as_object())
+        .map(|plugins| plugins.keys().any(|k| k.contains("superpowers")))
+        .unwrap_or(false)
+}
+
+/// Check if the superpowers plugin is installed globally.
+/// Reads `~/.claude/plugins/installed_plugins.json`.
+pub fn is_superpowers_installed() -> bool {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = std::path::PathBuf::from(home)
+        .join(".claude")
+        .join("plugins")
+        .join("installed_plugins.json");
+    check_superpowers_in_file(&path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,5 +384,36 @@ mod tests {
         assert_eq!(pattern.suggested_content, node.content);
         assert_eq!(pattern.confidence, 0.78);
         assert_eq!(pattern.suggested_target, SuggestedTarget::Skill);
+    }
+
+    #[test]
+    fn test_is_superpowers_installed_with_valid_json() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plugins_path = dir.path().join("installed_plugins.json");
+        std::fs::write(&plugins_path, r#"{"version":2,"plugins":{"superpowers@marketplace":[{"scope":"user"}]}}"#).unwrap();
+        assert!(check_superpowers_in_file(&plugins_path));
+    }
+
+    #[test]
+    fn test_is_superpowers_installed_no_superpowers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plugins_path = dir.path().join("installed_plugins.json");
+        std::fs::write(&plugins_path, r#"{"version":2,"plugins":{"other-plugin@marketplace":[]}}"#).unwrap();
+        assert!(!check_superpowers_in_file(&plugins_path));
+    }
+
+    #[test]
+    fn test_is_superpowers_installed_missing_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plugins_path = dir.path().join("nonexistent.json");
+        assert!(!check_superpowers_in_file(&plugins_path));
+    }
+
+    #[test]
+    fn test_is_superpowers_installed_invalid_json() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plugins_path = dir.path().join("installed_plugins.json");
+        std::fs::write(&plugins_path, "not json").unwrap();
+        assert!(!check_superpowers_in_file(&plugins_path));
     }
 }
