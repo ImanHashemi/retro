@@ -1,4 +1,5 @@
 use crate::analysis::backend::AnalysisBackend;
+use crate::analysis::claude_cli::ClaudeCliBackend;
 use crate::errors::CoreError;
 use crate::models::{
     KnowledgeNode, NodeType, Pattern, PatternStatus, PatternType, SkillDraft, SkillValidation,
@@ -389,6 +390,137 @@ pub fn skill_target_dir(node: &KnowledgeNode, project_path: Option<&str>) -> std
     }
 }
 
+/// Result of an agentic skill generation attempt.
+pub struct SkillGenerationResult {
+    /// Whether the skill file was created successfully.
+    pub created: bool,
+    /// The path where the skill was expected/created.
+    pub skill_path: std::path::PathBuf,
+    /// Token usage from the agentic call.
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// Build the agentic prompt for skill generation, optionally including writing-skills instructions.
+fn build_agentic_skill_prompt_with_instructions(
+    node_content: &str,
+    confidence: f64,
+    target_dir: &str,
+    writing_skills_content: Option<&str>,
+) -> String {
+    let instructions_section = match writing_skills_content {
+        Some(content) => format!(
+            "\n---BEGIN WRITING-SKILLS INSTRUCTIONS---\n{content}\n---END WRITING-SKILLS INSTRUCTIONS---\n"
+        ),
+        None => String::new(),
+    };
+
+    format!(
+        r#"You are an expert at writing Claude Code skills. A skill is a reusable instruction file that Claude Code discovers and applies automatically.
+{instructions_section}
+## Task
+
+Create a skill based on the following observed pattern (confidence: {confidence}):
+
+{node_content}
+
+## Instructions
+
+1. Choose a descriptive kebab-case skill name (lowercase letters, numbers, hyphens only).
+2. Write the skill to: `{target_dir}/{{skill-name}}/SKILL.md`
+   - Replace `{{skill-name}}` with the actual name you choose.
+3. The skill file MUST have YAML frontmatter with:
+   - `name`: the kebab-case skill name
+   - `description`: MUST start with "Use when..." and describe triggering conditions
+4. The body should be concise, actionable instructions.
+
+## Format Example
+
+```
+---
+name: run-tests-before-commit
+description: Use when making code changes, modifying source files, or preparing to commit.
+---
+
+Always run the test suite before committing:
+
+1. Run `cargo test` in the workspace root
+2. Fix any failing tests before proceeding
+```
+
+Write the skill file now using your file writing tools."#,
+        confidence = confidence,
+        node_content = node_content,
+        target_dir = target_dir,
+    )
+}
+
+/// Find the most recently modified SKILL.md under the given skills directory.
+fn find_created_skill(skills_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let pattern = skills_dir.join("*").join("SKILL.md");
+    let pattern_str = pattern.to_string_lossy();
+    glob::glob(&pattern_str)
+        .ok()?
+        .filter_map(|r| r.ok())
+        .max_by_key(|p| {
+            std::fs::metadata(p)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        })
+}
+
+/// Generate a skill agentically: spawn the Claude CLI with full tool access so it can
+/// write the skill file directly.
+pub fn generate_skill_agentic(
+    backend: &ClaudeCliBackend,
+    node: &KnowledgeNode,
+    project_path: Option<&str>,
+) -> Result<SkillGenerationResult, CoreError> {
+    // Step 1: Try to find writing-skills instructions (None is fine)
+    let writing_skills_content = find_writing_skills_content();
+
+    // Step 2: Determine target skills directory
+    let target_dir = skill_target_dir(node, project_path);
+
+    // Step 3: Ensure the target directory exists
+    std::fs::create_dir_all(&target_dir).map_err(|e| {
+        CoreError::Analysis(format!(
+            "failed to create skills directory {}: {e}",
+            target_dir.display()
+        ))
+    })?;
+
+    // Step 4: Build the prompt
+    let target_dir_str = target_dir.to_string_lossy();
+    let prompt = build_agentic_skill_prompt_with_instructions(
+        &node.content,
+        node.confidence,
+        &target_dir_str,
+        writing_skills_content.as_deref(),
+    );
+
+    // Step 5: Determine working directory (project scope → use project_path, global → None)
+    let cwd = match node.scope {
+        crate::models::NodeScope::Project => project_path,
+        crate::models::NodeScope::Global => None,
+    };
+
+    // Step 6: Execute agentic call
+    let response = backend.execute_agentic(&prompt, cwd)?;
+
+    // Step 7: Check if a skill file was created
+    let found = find_created_skill(&target_dir);
+    let created = found.is_some();
+    let skill_path = found.unwrap_or_else(|| target_dir.join("unknown").join("SKILL.md"));
+
+    Ok(SkillGenerationResult {
+        created,
+        skill_path,
+        input_tokens: response.input_tokens,
+        output_tokens: response.output_tokens,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -640,5 +772,60 @@ mod tests {
         };
         let dir = skill_target_dir(&node, Some("/home/user/my-project"));
         assert_eq!(dir, std::path::PathBuf::from("/home/user/my-project/.claude/skills"));
+    }
+
+    #[test]
+    fn test_build_agentic_skill_prompt_with_instructions() {
+        let prompt = build_agentic_skill_prompt_with_instructions(
+            "Always run tests before committing",
+            0.85,
+            "/home/user/.claude/skills",
+            Some("# Writing Skills Instructions\nDo this and that."),
+        );
+        assert!(prompt.contains("---BEGIN WRITING-SKILLS INSTRUCTIONS---"));
+        assert!(prompt.contains("---END WRITING-SKILLS INSTRUCTIONS---"));
+        assert!(prompt.contains("Always run tests before committing"));
+        assert!(prompt.contains("0.85"));
+        assert!(prompt.contains("/home/user/.claude/skills"));
+        assert!(prompt.contains("Do this and that."));
+    }
+
+    #[test]
+    fn test_build_agentic_skill_prompt_without_instructions() {
+        let prompt = build_agentic_skill_prompt_with_instructions(
+            "test content",
+            0.7,
+            "/tmp/skills",
+            None,
+        );
+        assert!(prompt.contains("test content"));
+        assert!(prompt.contains("/tmp/skills"));
+        assert!(!prompt.contains("WRITING-SKILLS INSTRUCTIONS"));
+    }
+
+    #[test]
+    fn test_find_created_skill_finds_most_recent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // Create two skill subdirectories
+        let skill1_dir = dir.path().join("skill-one");
+        let skill2_dir = dir.path().join("skill-two");
+        std::fs::create_dir_all(&skill1_dir).unwrap();
+        std::fs::create_dir_all(&skill2_dir).unwrap();
+        std::fs::write(skill1_dir.join("SKILL.md"), "skill one content").unwrap();
+        // Small sleep to ensure different mtime
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::fs::write(skill2_dir.join("SKILL.md"), "skill two content").unwrap();
+
+        let result = find_created_skill(dir.path());
+        assert!(result.is_some());
+        let found = result.unwrap();
+        assert!(found.to_string_lossy().contains("skill-two"));
+    }
+
+    #[test]
+    fn test_find_created_skill_returns_none_when_empty() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = find_created_skill(dir.path());
+        assert!(result.is_none());
     }
 }
