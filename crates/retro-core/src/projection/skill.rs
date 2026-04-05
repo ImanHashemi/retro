@@ -360,6 +360,19 @@ pub fn is_superpowers_installed() -> bool {
     check_superpowers_in_file(&path)
 }
 
+/// Generate a kebab-case slug from node content for use as a skill directory name.
+/// Splits on all non-alphanumeric characters (including hyphens), filters words >= 2 chars,
+/// takes first 4, joins with hyphens, and lowercases the result.
+pub fn generate_skill_slug(content: &str) -> String {
+    content
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 2)
+        .take(4)
+        .collect::<Vec<_>>()
+        .join("-")
+        .to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,5 +544,45 @@ mod tests {
         let plugins_path = dir.path().join("installed_plugins.json");
         std::fs::write(&plugins_path, "not json").unwrap();
         assert!(!check_superpowers_in_file(&plugins_path));
+    }
+
+    #[test]
+    fn test_generate_skill_slug_basic() {
+        assert_eq!(
+            generate_skill_slug("Pre-PR checklist: run tests, lint, format"),
+            "pre-pr-checklist-run"
+        );
+    }
+
+    #[test]
+    fn test_generate_skill_slug_short_words() {
+        assert_eq!(
+            generate_skill_slug("CI check failures before merging"),
+            "ci-check-failures-before"
+        );
+    }
+
+    #[test]
+    fn test_generate_skill_slug_single_char_filtered() {
+        assert_eq!(
+            generate_skill_slug("Run a test before commit"),
+            "run-test-before-commit"
+        );
+    }
+
+    #[test]
+    fn test_generate_skill_slug_uppercase() {
+        assert_eq!(
+            generate_skill_slug("Rust Error Handling Pattern"),
+            "rust-error-handling-pattern"
+        );
+    }
+
+    #[test]
+    fn test_generate_skill_slug_already_kebab() {
+        assert_eq!(
+            generate_skill_slug("pre-commit-hook"),
+            "pre-commit-hook"
+        );
     }
 }
