@@ -445,9 +445,7 @@ fn run_for_project(
                                 match retro_core::git::create_retro_pr(
                                     project_path,
                                     &[(&relative_path, &skill_content)],
-                                    &format!(
-                                        "retro: add skill from discovered pattern"
-                                    ),
+                                    "retro: add skill from discovered pattern",
                                     "retro: add discovered skill",
                                     &format!(
                                         "Retro generated a skill from an observed pattern.\n\n**Skill:** `{}`\n\nApproved via `retro dash`.",
