@@ -393,122 +393,131 @@ fn run_for_project(
                     "  {} superpowers plugin not installed — skipping skill projection",
                     "Skipping:".yellow()
                 );
-            } else if budget_remaining == 0 {
-                if verbose {
-                    println!(
-                        "  {} AI budget exhausted — skipping skill projection",
-                        "Skipping:".yellow()
-                    );
-                }
             } else {
-                // Pick the first skill node (highest confidence, already sorted by DB query)
-                let node = skill_nodes[0];
-                println!(
-                    "  {} generating skill for: {}",
-                    "Skill:".cyan(),
-                    retro_core::util::truncate_str(&node.content, 60)
-                );
+                // Re-read budget from DB since analysis may have consumed calls
+                let (ai_calls_now, ai_calls_date_now) = get_ai_call_count(conn)?;
+                let skill_budget = if ai_calls_date_now == today {
+                    config.runner.max_ai_calls_per_day.saturating_sub(ai_calls_now)
+                } else {
+                    config.runner.max_ai_calls_per_day
+                };
+                if skill_budget == 0 {
+                    if verbose {
+                        println!(
+                            "  {} AI budget exhausted — skipping skill projection",
+                            "Skipping:".yellow()
+                        );
+                    }
+                } else {
+                    // Pick the first skill node (highest confidence, already sorted by DB query)
+                    let node = skill_nodes[0];
+                    println!(
+                        "  {} generating skill for: {}",
+                        "Skill:".cyan(),
+                        retro_core::util::truncate_str(&node.content, 60)
+                    );
 
-                let backend =
-                    retro_core::analysis::claude_cli::ClaudeCliBackend::new(&config.ai);
-                match retro_core::projection::skill::generate_skill_agentic(
-                    &backend,
-                    node,
-                    Some(project_path),
-                ) {
-                    Ok(result) if result.created => {
-                        match node.scope {
-                            retro_core::models::NodeScope::Global => {
-                                db::mark_node_projected(conn, &node.id)?;
-                                println!(
-                                    "  {} skill created at {}",
-                                    "Created".green(),
-                                    result.skill_path.display()
-                                );
-                            }
-                            retro_core::models::NodeScope::Project => {
-                                // Read the created skill file for PR
-                                let skill_content =
-                                    std::fs::read_to_string(&result.skill_path)
-                                        .unwrap_or_default();
-                                let relative_path = result
-                                    .skill_path
-                                    .strip_prefix(project_path)
-                                    .map(|p| p.to_string_lossy().into_owned())
-                                    .unwrap_or_else(|_| {
-                                        result.skill_path.to_string_lossy().into_owned()
-                                    });
-
-                                // Remove the file created by agentic call (PR will recreate it)
-                                let _ = std::fs::remove_file(&result.skill_path);
-
-                                match retro_core::git::create_retro_pr(
-                                    project_path,
-                                    &[(&relative_path, &skill_content)],
-                                    "retro: add skill from discovered pattern",
-                                    "retro: add discovered skill",
-                                    &format!(
-                                        "Retro generated a skill from an observed pattern.\n\n**Skill:** `{}`\n\nApproved via `retro dash`.",
+                    let backend =
+                        retro_core::analysis::claude_cli::ClaudeCliBackend::new(&config.ai);
+                    match retro_core::projection::skill::generate_skill_agentic(
+                        &backend,
+                        node,
+                        Some(project_path),
+                    ) {
+                        Ok(result) if result.created => {
+                            match node.scope {
+                                retro_core::models::NodeScope::Global => {
+                                    db::mark_node_projected(conn, &node.id)?;
+                                    println!(
+                                        "  {} skill created at {}",
+                                        "Created".green(),
                                         result.skill_path.display()
-                                    ),
-                                ) {
-                                    Ok(Some(url)) => {
-                                        if let Err(e) = db::mark_node_projected_with_pr(
-                                            conn, &node.id, &url,
-                                        ) {
-                                            eprintln!(
-                                                "  {} marking skill node projected: {e}",
-                                                "Warning".yellow()
+                                    );
+                                }
+                                retro_core::models::NodeScope::Project => {
+                                    // Read the created skill file for PR
+                                    let skill_content =
+                                        std::fs::read_to_string(&result.skill_path)
+                                            .unwrap_or_default();
+                                    let relative_path = result
+                                        .skill_path
+                                        .strip_prefix(project_path)
+                                        .map(|p| p.to_string_lossy().into_owned())
+                                        .unwrap_or_else(|_| {
+                                            result.skill_path.to_string_lossy().into_owned()
+                                        });
+
+                                    // Remove the file created by agentic call (PR will recreate it)
+                                    let _ = std::fs::remove_file(&result.skill_path);
+
+                                    match retro_core::git::create_retro_pr(
+                                        project_path,
+                                        &[(&relative_path, &skill_content)],
+                                        "retro: add skill from discovered pattern",
+                                        "retro: add discovered skill",
+                                        &format!(
+                                            "Retro generated a skill from an observed pattern.\n\n**Skill:** `{}`\n\nApproved via `retro dash`.",
+                                            result.skill_path.display()
+                                        ),
+                                    ) {
+                                        Ok(Some(url)) => {
+                                            if let Err(e) = db::mark_node_projected_with_pr(
+                                                conn, &node.id, &url,
+                                            ) {
+                                                eprintln!(
+                                                    "  {} marking skill node projected: {e}",
+                                                    "Warning".yellow()
+                                                );
+                                            }
+                                            println!(
+                                                "  {} skill PR: {}",
+                                                "Created".green(),
+                                                url.cyan()
                                             );
                                         }
-                                        println!(
-                                            "  {} skill PR: {}",
-                                            "Created".green(),
-                                            url.cyan()
-                                        );
-                                    }
-                                    Ok(None) => {
-                                        if let Err(e) =
-                                            db::mark_node_projected(conn, &node.id)
-                                        {
-                                            eprintln!(
-                                                "  {} marking skill node projected: {e}",
-                                                "Warning".yellow()
+                                        Ok(None) => {
+                                            if let Err(e) =
+                                                db::mark_node_projected(conn, &node.id)
+                                            {
+                                                eprintln!(
+                                                    "  {} marking skill node projected: {e}",
+                                                    "Warning".yellow()
+                                                );
+                                            }
+                                            println!(
+                                                "  {} skill committed to branch (no gh for PR)",
+                                                "Projected".yellow()
                                             );
                                         }
-                                        println!(
-                                            "  {} skill committed to branch (no gh for PR)",
-                                            "Projected".yellow()
-                                        );
-                                    }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "  {} skill PR creation: {e}",
-                                            "Error".red()
-                                        );
+                                        Err(e) => {
+                                            eprintln!(
+                                                "  {} skill PR creation: {e}",
+                                                "Error".red()
+                                            );
+                                        }
                                     }
                                 }
                             }
+                            increment_ai_calls(conn, 1)?;
+                            if verbose {
+                                eprintln!(
+                                    "[verbose] skill tokens: {} in / {} out",
+                                    result.input_tokens, result.output_tokens
+                                );
+                            }
                         }
-                        increment_ai_calls(conn, 1)?;
-                        if verbose {
-                            eprintln!(
-                                "[verbose] skill tokens: {} in / {} out",
-                                result.input_tokens, result.output_tokens
+                        Ok(_) => {
+                            println!(
+                                "  {} skill generation did not create file — will retry next run",
+                                "Warning:".yellow()
                             );
                         }
-                    }
-                    Ok(_) => {
-                        println!(
-                            "  {} skill generation did not create file — will retry next run",
-                            "Warning:".yellow()
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "  {} skill generation: {e}",
-                            "Error".red()
-                        );
+                        Err(e) => {
+                            eprintln!(
+                                "  {} skill generation: {e}",
+                                "Error".red()
+                            );
+                        }
                     }
                 }
             }

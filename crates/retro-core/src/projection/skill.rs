@@ -462,18 +462,26 @@ Write the skill file now using your file writing tools."#,
     )
 }
 
-/// Find the most recently modified SKILL.md under the given skills directory.
-fn find_created_skill(skills_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+/// Snapshot all existing SKILL.md files under a skills directory.
+fn snapshot_existing_skills(skills_dir: &std::path::Path) -> std::collections::HashSet<std::path::PathBuf> {
+    let pattern = skills_dir.join("*").join("SKILL.md");
+    let pattern_str = pattern.to_string_lossy();
+    glob::glob(&pattern_str)
+        .map(|paths| paths.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+}
+
+/// Find a newly created SKILL.md that wasn't in the pre-call snapshot.
+fn find_created_skill(
+    skills_dir: &std::path::Path,
+    before: &std::collections::HashSet<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
     let pattern = skills_dir.join("*").join("SKILL.md");
     let pattern_str = pattern.to_string_lossy();
     glob::glob(&pattern_str)
         .ok()?
         .filter_map(|r| r.ok())
-        .max_by_key(|p| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        })
+        .find(|p| !before.contains(p))
 }
 
 /// Generate a skill agentically: spawn the Claude CLI with full tool access so it can
@@ -524,11 +532,14 @@ pub fn generate_skill_agentic(
         crate::models::NodeScope::Global => None,
     };
 
-    // Step 6: Execute agentic call
+    // Step 6: Snapshot existing skills before the agentic call
+    let before = snapshot_existing_skills(&target_dir);
+
+    // Step 7: Execute agentic call
     let response = backend.execute_agentic(&prompt, cwd)?;
 
-    // Step 7: Check if a skill file was created
-    let found = find_created_skill(&target_dir);
+    // Step 8: Check if a NEW skill file was created (not pre-existing)
+    let found = find_created_skill(&target_dir, &before);
     let created = found.is_some();
     let skill_path = found.unwrap_or_else(|| target_dir.join("unknown").join("SKILL.md"));
 
@@ -823,28 +834,47 @@ mod tests {
     }
 
     #[test]
-    fn test_find_created_skill_finds_most_recent() {
+    fn test_find_created_skill_finds_new_file() {
         let dir = tempfile::TempDir::new().unwrap();
-        // Create two skill subdirectories
+        // Pre-existing skill
         let skill1_dir = dir.path().join("skill-one");
-        let skill2_dir = dir.path().join("skill-two");
         std::fs::create_dir_all(&skill1_dir).unwrap();
-        std::fs::create_dir_all(&skill2_dir).unwrap();
         std::fs::write(skill1_dir.join("SKILL.md"), "skill one content").unwrap();
-        // Small sleep to ensure different mtime
-        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Take snapshot
+        let before = snapshot_existing_skills(dir.path());
+        assert_eq!(before.len(), 1);
+
+        // Create a new skill after snapshot
+        let skill2_dir = dir.path().join("skill-two");
+        std::fs::create_dir_all(&skill2_dir).unwrap();
         std::fs::write(skill2_dir.join("SKILL.md"), "skill two content").unwrap();
 
-        let result = find_created_skill(dir.path());
+        let result = find_created_skill(dir.path(), &before);
         assert!(result.is_some());
         let found = result.unwrap();
         assert!(found.to_string_lossy().contains("skill-two"));
     }
 
     #[test]
+    fn test_find_created_skill_ignores_preexisting() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // Pre-existing skill
+        let skill1_dir = dir.path().join("skill-one");
+        std::fs::create_dir_all(&skill1_dir).unwrap();
+        std::fs::write(skill1_dir.join("SKILL.md"), "skill one content").unwrap();
+
+        // Take snapshot, then no new skills created
+        let before = snapshot_existing_skills(dir.path());
+        let result = find_created_skill(dir.path(), &before);
+        assert!(result.is_none());
+    }
+
+    #[test]
     fn test_find_created_skill_returns_none_when_empty() {
         let dir = tempfile::TempDir::new().unwrap();
-        let result = find_created_skill(dir.path());
+        let before = snapshot_existing_skills(dir.path());
+        let result = find_created_skill(dir.path(), &before);
         assert!(result.is_none());
     }
 
