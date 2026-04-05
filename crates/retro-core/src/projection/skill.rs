@@ -373,6 +373,22 @@ pub fn generate_skill_slug(content: &str) -> String {
         .to_lowercase()
 }
 
+/// Determine the parent `skills/` directory for a skill node based on its scope.
+/// Global → `~/.claude/skills/`, Project → `{project_path}/.claude/skills/`.
+pub fn skill_target_dir(node: &KnowledgeNode, project_path: Option<&str>) -> std::path::PathBuf {
+    match node.scope {
+        crate::models::NodeScope::Global => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            std::path::PathBuf::from(home).join(".claude").join("skills")
+        }
+        crate::models::NodeScope::Project => {
+            std::path::PathBuf::from(project_path.unwrap_or("."))
+                .join(".claude")
+                .join("skills")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,5 +600,45 @@ mod tests {
             generate_skill_slug("pre-commit-hook"),
             "pre-commit-hook"
         );
+    }
+
+    #[test]
+    fn test_skill_target_dir_global() {
+        use crate::models::*;
+        let node = KnowledgeNode {
+            id: "n1".to_string(),
+            node_type: NodeType::Skill,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "test".to_string(),
+            confidence: 0.8,
+            status: NodeStatus::Active,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        let dir = skill_target_dir(&node, None);
+        assert!(dir.to_string_lossy().ends_with(".claude/skills"));
+    }
+
+    #[test]
+    fn test_skill_target_dir_project() {
+        use crate::models::*;
+        let node = KnowledgeNode {
+            id: "n2".to_string(),
+            node_type: NodeType::Skill,
+            scope: NodeScope::Project,
+            project_id: Some("my-project".to_string()),
+            content: "test".to_string(),
+            confidence: 0.8,
+            status: NodeStatus::Active,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+        let dir = skill_target_dir(&node, Some("/home/user/my-project"));
+        assert_eq!(dir, std::path::PathBuf::from("/home/user/my-project/.claude/skills"));
     }
 }
