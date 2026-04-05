@@ -270,6 +270,74 @@ pub fn skill_path(project_root: &str, name: &str) -> String {
     format!("{project_root}/.claude/skills/{name}/SKILL.md")
 }
 
+/// Find the writing-skills SKILL.md content from the plugins cache directory.
+/// Testable helper — takes the plugins directory as a parameter.
+///
+/// Glob pattern: `{plugins_dir}/cache/*/superpowers/*/skills/writing-skills/SKILL.md`
+/// Picks the last match (highest version when sorted ascending by path).
+/// Concatenates SKILL.md with companion .md files (everything except SKILL.md).
+fn find_writing_skills_in_plugins_dir(plugins_dir: &std::path::Path) -> Option<String> {
+    let pattern = plugins_dir
+        .join("cache")
+        .join("*")
+        .join("superpowers")
+        .join("*")
+        .join("skills")
+        .join("writing-skills")
+        .join("SKILL.md");
+
+    let pattern_str = pattern.to_string_lossy();
+    let mut matches: Vec<std::path::PathBuf> = glob::glob(&pattern_str)
+        .ok()?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if matches.is_empty() {
+        return None;
+    }
+
+    matches.sort();
+    let skill_path = matches.last()?;
+    let skill_dir = skill_path.parent()?;
+
+    let skill_content = std::fs::read_to_string(skill_path).ok()?;
+
+    // Read companion .md files from the same directory (everything except SKILL.md)
+    let mut companions: Vec<std::path::PathBuf> = std::fs::read_dir(skill_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|p| {
+            p.extension().map(|ext| ext == "md").unwrap_or(false)
+                && p.file_name().map(|n| n != "SKILL.md").unwrap_or(false)
+        })
+        .collect();
+    companions.sort();
+
+    let mut result = skill_content;
+    for companion in &companions {
+        if let Ok(companion_content) = std::fs::read_to_string(companion) {
+            let filename = companion
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            result.push_str(&format!(
+                "\n\n---\n## Companion: {filename}\n\n{companion_content}"
+            ));
+        }
+    }
+
+    Some(result)
+}
+
+/// Find writing-skills content from the global Claude plugins cache.
+/// Reads `~/.claude/plugins` and delegates to `find_writing_skills_in_plugins_dir`.
+pub fn find_writing_skills_content() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let plugins_dir = std::path::PathBuf::from(home).join(".claude").join("plugins");
+    find_writing_skills_in_plugins_dir(&plugins_dir)
+}
+
 /// Check if superpowers plugin is installed by examining a specific plugins file.
 /// Testable helper — takes the file path as a parameter.
 fn check_superpowers_in_file(path: &std::path::Path) -> bool {
@@ -295,6 +363,54 @@ pub fn is_superpowers_installed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_find_writing_skills_in_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let skill_dir = dir.path()
+            .join("cache")
+            .join("marketplace")
+            .join("superpowers")
+            .join("1.0.0")
+            .join("skills")
+            .join("writing-skills");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Writing Skills\nMain content here.").unwrap();
+        std::fs::write(skill_dir.join("best-practices.md"), "# Best Practices\nCompanion content.").unwrap();
+
+        let result = find_writing_skills_in_plugins_dir(dir.path());
+        assert!(result.is_some());
+        let content = result.unwrap();
+        assert!(content.contains("Main content here."));
+        assert!(content.contains("Companion content."));
+    }
+
+    #[test]
+    fn test_find_writing_skills_in_dir_missing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = find_writing_skills_in_plugins_dir(dir.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_writing_skills_picks_latest_version() {
+        let dir = tempfile::TempDir::new().unwrap();
+        for version in &["1.0.0", "2.0.0"] {
+            let skill_dir = dir.path()
+                .join("cache")
+                .join("mkt")
+                .join("superpowers")
+                .join(version)
+                .join("skills")
+                .join("writing-skills");
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            std::fs::write(skill_dir.join("SKILL.md"), format!("version {version}")).unwrap();
+        }
+        let result = find_writing_skills_in_plugins_dir(dir.path());
+        assert!(result.is_some());
+        let content = result.unwrap();
+        assert!(content.contains("version"));
+    }
 
     #[test]
     fn test_parse_skill_name_valid() {
