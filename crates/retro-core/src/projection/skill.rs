@@ -374,6 +374,13 @@ pub fn generate_skill_slug(content: &str) -> String {
         .to_lowercase()
 }
 
+/// Check if a skill file already exists at the expected target path.
+/// Uses the slug generated from node content to check `{skills_dir}/{slug}/SKILL.md`.
+pub fn skill_exists_at_target(skills_dir: &std::path::Path, node_content: &str) -> bool {
+    let slug = generate_skill_slug(node_content);
+    skills_dir.join(&slug).join("SKILL.md").exists()
+}
+
 /// Determine the parent `skills/` directory for a skill node based on its scope.
 /// Global → `~/.claude/skills/`, Project → `{project_path}/.claude/skills/`.
 pub fn skill_target_dir(node: &KnowledgeNode, project_path: Option<&str>) -> std::path::PathBuf {
@@ -489,6 +496,18 @@ pub fn generate_skill_agentic(
             target_dir.display()
         ))
     })?;
+
+    // Check if skill already exists at the expected path
+    if skill_exists_at_target(&target_dir, &node.content) {
+        let slug = generate_skill_slug(&node.content);
+        let existing_path = target_dir.join(&slug).join("SKILL.md");
+        return Ok(SkillGenerationResult {
+            created: true, // Already exists counts as "created"
+            skill_path: existing_path,
+            input_tokens: 0,
+            output_tokens: 0,
+        });
+    }
 
     // Step 4: Build the prompt
     let target_dir_str = target_dir.to_string_lossy();
@@ -827,5 +846,26 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let result = find_created_skill(dir.path());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_skill_already_exists_at_target() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let skills_dir = dir.path().join(".claude").join("skills");
+        // generate_skill_slug("Pre-PR checklist: run tests") == "pre-pr-checklist-run"
+        let slug_dir = skills_dir.join("pre-pr-checklist-run");
+        std::fs::create_dir_all(&slug_dir).unwrap();
+        std::fs::write(slug_dir.join("SKILL.md"), "---\nname: pre-pr-checklist-run\n---\nExisting skill.").unwrap();
+
+        assert!(skill_exists_at_target(&skills_dir, "Pre-PR checklist: run tests"));
+    }
+
+    #[test]
+    fn test_skill_does_not_exist_at_target() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let skills_dir = dir.path().join(".claude").join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+
+        assert!(!skill_exists_at_target(&skills_dir, "Pre-PR checklist: run tests"));
     }
 }
