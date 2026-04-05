@@ -167,6 +167,7 @@ Note: `--auto` flag is deprecated in v2. Use `retro start` for automatic backgro
 - **PR creation flow** — detect default branch via `gh repo view` → `git fetch origin <default>` → `git checkout -b retro/... origin/<default>` → write/commit → `git push -u origin HEAD` → `gh pr create --base <default>`. Always push before `gh pr create` (remote branch must exist).
 - **Stash wrapper** — `stash_push()`/`stash_pop()` around branch switches (`git checkout -b` fails if tracked files differ when working tree is dirty).
 - **Backup** — files backed up to `~/.retro/backups/` before modification.
+- **Skill projection** — unprojected `NodeType::Skill` nodes trigger agentic `claude -p` call with superpowers writing-skills instructions inlined. 1 skill per `retro run` (cost control). Requires superpowers plugin installed. Global skills write to `~/.claude/skills/`, project skills via PR.
 
 ### Full CLAUDE.md Management
 
@@ -231,6 +232,7 @@ Note: `--auto` flag is deprecated in v2. Use `retro start` for automatic backgro
   - `truncate_str()` lives in `retro-core/src/util.rs` — safe UTF-8 truncation
   - `build_curate_prompt()` lives in `analysis/prompts.rs`
   - `run_claude_child()` shared helper in `analysis/claude_cli.rs`
+  - `is_superpowers_installed()` lives in `retro-core/src/projection/skill.rs` — checks `~/.claude/plugins/installed_plugins.json`
 - CLI commands that share logic should expose a shared entry point (e.g., `run_apply()` with `DisplayMode` enum) rather than duplicating code
 
 ### Error Handling

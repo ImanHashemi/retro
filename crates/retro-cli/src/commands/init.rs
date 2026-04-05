@@ -120,6 +120,14 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
         println!("  {} project: {} ({})", "Registered".green(), project_id, repo_root);
 
         install_briefing_hook(&repo_root)?;
+
+        // Hint about superpowers plugin for skill generation
+        if !retro_core::projection::skill::is_superpowers_installed() {
+            println!(
+                "  {} install the superpowers plugin for automatic skill generation",
+                "Note:".dimmed()
+            );
+        }
     }
 
     println!();
