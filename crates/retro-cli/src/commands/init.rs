@@ -121,6 +121,39 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
 
         install_briefing_hook(&repo_root)?;
 
+        // Reconcile existing CLAUDE.md rules into the DB
+        let project_claude_md = format!("{}/CLAUDE.md", repo_root);
+        let home = std::env::var("HOME").unwrap_or_default();
+        let global_claude_md = format!("{}/.claude/CLAUDE.md", home);
+
+        let mut total_imported = 0usize;
+
+        // Project-scoped rules
+        if let Ok(result) = retro_core::reconcile::reconcile_claude_md(
+            &conn,
+            Some(&project_claude_md),
+            None,
+            &retro_core::models::NodeScope::Project,
+            Some(&project_id),
+        ) {
+            total_imported += result.imported;
+        }
+
+        // Global rules
+        if let Ok(result) = retro_core::reconcile::reconcile_claude_md(
+            &conn,
+            None,
+            Some(&global_claude_md),
+            &retro_core::models::NodeScope::Global,
+            None,
+        ) {
+            total_imported += result.imported;
+        }
+
+        if total_imported > 0 {
+            println!("  {} {} rules from CLAUDE.md", "Reconciled".green(), total_imported);
+        }
+
         // Hint about superpowers plugin for skill generation
         if !retro_core::projection::skill::is_superpowers_installed() {
             println!(
