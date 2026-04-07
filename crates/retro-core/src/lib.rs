@@ -11,6 +11,7 @@ pub mod lock;
 pub mod models;
 pub mod observer;
 pub mod projection;
+pub mod reconcile;
 pub mod runner;
 pub mod scrub;
 pub mod trust;
