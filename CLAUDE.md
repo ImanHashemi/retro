@@ -168,6 +168,7 @@ Note: `--auto` flag is deprecated in v2. Use `retro start` for automatic backgro
 - **Stash wrapper** — `stash_push()`/`stash_pop()` around branch switches (`git checkout -b` fails if tracked files differ when working tree is dirty).
 - **Backup** — files backed up to `~/.retro/backups/` before modification.
 - **Skill projection** — unprojected `NodeType::Skill` nodes trigger agentic `claude -p` call with superpowers writing-skills instructions inlined. 1 skill per `retro run` (cost control). Requires superpowers plugin installed. Global skills write to `~/.claude/skills/`, project skills via PR.
+- **CLAUDE.md reconciliation** — `retro run` Step 1 syncs the managed section with the DB bidirectionally. Rules in the file but not the DB get imported as `NodeType::Rule` (confidence 0.8, pre-projected). Nodes projected but no longer in the file get archived. Handles team collaboration (merged PRs from others) and DB recovery. Also runs during `retro init` to seed the DB.
 
 ### Full CLAUDE.md Management
 
@@ -183,6 +184,8 @@ Note: `--auto` flag is deprecated in v2. Use `retro start` for automatic backgro
 **v2 Scheduled Runner (primary):** `retro start` installs a launchd periodic job. `retro run` executes the full pipeline each invocation. No long-running daemon — launchd handles scheduling, lifecycle. Lockfile prevents concurrent runs.
 
 **v1 Git Hooks (deprecated):** Post-commit hook runs `retro ingest --auto` which chains analyze + apply. Per-stage cooldowns (`ingest_cooldown_minutes`, `analyze_cooldown_minutes`, `apply_cooldown_minutes`). Session cap (`auto_analyze_max_sessions`). `--auto` flag prints deprecation warning in v2 directing users to `retro start`.
+
+- **`RETRO_HOME` env var** — overrides the default `~/.retro/` data directory. Used for test isolation to prevent scenario tests from touching production data.
 
 ### Observability
 
