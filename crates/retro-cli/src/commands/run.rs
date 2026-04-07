@@ -74,8 +74,64 @@ fn run_for_project(
     verbose: bool,
     dry_run: bool,
 ) -> Result<()> {
-    // Step 1: Observe — find modified sessions
-    println!("{}", "Step 1/6: Observing session changes...".cyan());
+    // Step 1: Reconcile CLAUDE.md with DB
+    println!("{}", "Step 1/7: Reconciling CLAUDE.md...".cyan());
+
+    let project_claude_md = format!("{}/CLAUDE.md", project_path);
+    let home = std::env::var("HOME").unwrap_or_default();
+    let global_claude_md = format!("{}/.claude/CLAUDE.md", home);
+
+    if dry_run {
+        let project_rules = std::fs::read_to_string(&project_claude_md)
+            .ok()
+            .and_then(|c| retro_core::projection::claude_md::read_managed_section(&c));
+        let global_rules = std::fs::read_to_string(&global_claude_md)
+            .ok()
+            .and_then(|c| retro_core::projection::claude_md::read_managed_section(&c));
+        let project_rule_count = project_rules.as_ref().map(|r| r.len()).unwrap_or(0);
+        let global_rule_count = global_rules.as_ref().map(|r| r.len()).unwrap_or(0);
+        println!(
+            "  {} {} project rules, {} global rules in CLAUDE.md",
+            "[dry-run]".yellow(),
+            project_rule_count,
+            global_rule_count,
+        );
+    } else {
+        let current_project_slug = db::generate_project_slug(project_path);
+
+        let project_result = retro_core::reconcile::reconcile_claude_md(
+            conn,
+            Some(&project_claude_md),
+            None,
+            &retro_core::models::NodeScope::Project,
+            Some(&current_project_slug),
+        )?;
+
+        let global_result = retro_core::reconcile::reconcile_claude_md(
+            conn,
+            None,
+            Some(&global_claude_md),
+            &retro_core::models::NodeScope::Global,
+            None,
+        )?;
+
+        let total_imported = project_result.imported + global_result.imported;
+        let total_archived = project_result.archived + global_result.archived;
+
+        if total_imported > 0 || total_archived > 0 {
+            println!(
+                "  {} {} imported, {} archived",
+                "Reconciled:".green(),
+                total_imported,
+                total_archived,
+            );
+        } else {
+            println!("  {} CLAUDE.md in sync", "OK:".dimmed());
+        }
+    }
+
+    // Step 2: Observe — find modified sessions
+    println!("{}", "Step 2/7: Observing session changes...".cyan());
     let claude_dir = config.claude_dir();
     let last_run = db::get_metadata(conn, "last_run_at")?;
     let since = last_run.as_ref().and_then(|ts| {
@@ -106,8 +162,8 @@ fn run_for_project(
         }
     }
 
-    // Step 2: Ingest
-    println!("{}", "Step 2/6: Ingesting sessions...".cyan());
+    // Step 3: Ingest
+    println!("{}", "Step 3/7: Ingesting sessions...".cyan());
     if dry_run {
         println!(
             "  {} {} modified session files to ingest",
@@ -128,8 +184,8 @@ fn run_for_project(
         }
     }
 
-    // Step 3: Check analysis trigger
-    println!("{}", "Step 3/6: Checking analysis trigger...".cyan());
+    // Step 4: Check analysis trigger
+    println!("{}", "Step 4/7: Checking analysis trigger...".cyan());
 
     // Check AI call budget
     let today = Utc::now().format("%Y-%m-%d").to_string();
@@ -253,8 +309,8 @@ fn run_for_project(
         }
     }
 
-    // Step 4/6: Project approved changes
-    println!("{}", "Step 4/6: Projecting approved changes...".cyan());
+    // Step 5/7: Project approved changes
+    println!("{}", "Step 5/7: Projecting approved changes...".cyan());
 
     let unprojected = db::get_unprojected_nodes(conn)?;
     if unprojected.is_empty() {
@@ -524,8 +580,8 @@ fn run_for_project(
         }
     }
 
-    // Step 5/6: Syncing PR state
-    println!("{}", "Step 5/6: Syncing PR state...".cyan());
+    // Step 6/7: Syncing PR state
+    println!("{}", "Step 6/7: Syncing PR state...".cyan());
 
     let nodes_with_pr = db::get_nodes_with_pr(conn)?;
     if nodes_with_pr.is_empty() {
@@ -572,8 +628,8 @@ fn run_for_project(
         }
     }
 
-    // Step 6: Summary
-    println!("{}", "Step 6/6: Pipeline complete.".cyan());
+    // Step 7: Summary
+    println!("{}", "Step 7/7: Pipeline complete.".cyan());
 
     if dry_run {
         println!();
