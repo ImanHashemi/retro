@@ -353,8 +353,12 @@ impl Config {
     }
 }
 
-/// Get the retro data directory (~/.retro/).
+/// Get the retro data directory.
+/// Uses `RETRO_HOME` env var if set, otherwise defaults to `~/.retro/`.
 pub fn retro_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("RETRO_HOME") {
+        return PathBuf::from(dir);
+    }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home).join(".retro")
 }
@@ -533,5 +537,29 @@ auto_apply = false
         assert_eq!(config.runner.interval_seconds, 300);
         assert_eq!(config.trust.mode, "review");
         assert_eq!(config.knowledge.confidence_threshold, 0.7);
+    }
+
+    #[test]
+    fn test_retro_dir_default() {
+        // SAFETY: single-threaded test, no concurrent env access
+        unsafe { std::env::remove_var("RETRO_HOME") };
+        let dir = retro_dir();
+        assert!(dir.to_string_lossy().ends_with(".retro"));
+    }
+
+    #[test]
+    fn test_retro_dir_override() {
+        let original = std::env::var("RETRO_HOME").ok();
+        // SAFETY: single-threaded test, no concurrent env access
+        unsafe { std::env::set_var("RETRO_HOME", "/tmp/test-retro") };
+        let dir = retro_dir();
+        assert_eq!(dir, PathBuf::from("/tmp/test-retro"));
+        // SAFETY: restoring env to original state
+        unsafe {
+            match original {
+                Some(val) => std::env::set_var("RETRO_HOME", val),
+                None => std::env::remove_var("RETRO_HOME"),
+            }
+        }
     }
 }
