@@ -82,35 +82,51 @@ fn run_for_project(
     let global_claude_md = format!("{}/.claude/CLAUDE.md", home);
 
     if dry_run {
-        let project_rules = std::fs::read_to_string(&project_claude_md)
-            .ok()
-            .and_then(|c| retro_core::projection::claude_md::read_managed_section(&c));
-        let global_rules = std::fs::read_to_string(&global_claude_md)
-            .ok()
-            .and_then(|c| retro_core::projection::claude_md::read_managed_section(&c));
-        let project_rule_count = project_rules.as_ref().map(|r| r.len()).unwrap_or(0);
-        let global_rule_count = global_rules.as_ref().map(|r| r.len()).unwrap_or(0);
-        println!(
-            "  {} {} project rules, {} global rules in CLAUDE.md",
-            "[dry-run]".yellow(),
-            project_rule_count,
-            global_rule_count,
-        );
+        // Read-only comparison: show what WOULD be imported/archived
+        let current_project_slug = db::generate_project_slug(project_path);
+        let project_file_rules = retro_core::reconcile::read_rules_from_file(&project_claude_md);
+        let global_file_rules = retro_core::reconcile::read_rules_from_file(&global_claude_md);
+
+        let project_db = db::get_projected_nodes_for_scope(
+            conn, &retro_core::models::NodeScope::Project, Some(&current_project_slug),
+        ).unwrap_or_default();
+        let global_db = db::get_projected_nodes_for_scope(
+            conn, &retro_core::models::NodeScope::Global, None,
+        ).unwrap_or_default();
+
+        let project_db_set: std::collections::HashSet<&str> = project_db.iter().map(|n| n.content.as_str()).collect();
+        let global_db_set: std::collections::HashSet<&str> = global_db.iter().map(|n| n.content.as_str()).collect();
+        let project_file_set: std::collections::HashSet<&str> = project_file_rules.iter().map(|r| r.as_str()).collect();
+        let global_file_set: std::collections::HashSet<&str> = global_file_rules.iter().map(|r| r.as_str()).collect();
+
+        let would_import = project_file_rules.iter().filter(|r| !project_db_set.contains(r.as_str())).count()
+            + global_file_rules.iter().filter(|r| !global_db_set.contains(r.as_str())).count();
+        let would_archive = project_db.iter().filter(|n| !project_file_set.contains(n.content.as_str())).count()
+            + global_db.iter().filter(|n| !global_file_set.contains(n.content.as_str())).count();
+
+        if would_import > 0 || would_archive > 0 {
+            println!(
+                "  {} would import {}, would archive {}",
+                "[dry-run]".yellow(),
+                would_import,
+                would_archive,
+            );
+        } else {
+            println!("  {} CLAUDE.md in sync", "[dry-run]".yellow());
+        }
     } else {
         let current_project_slug = db::generate_project_slug(project_path);
 
         let project_result = retro_core::reconcile::reconcile_claude_md(
             conn,
-            Some(&project_claude_md),
-            None,
+            &project_claude_md,
             &retro_core::models::NodeScope::Project,
             Some(&current_project_slug),
         )?;
 
         let global_result = retro_core::reconcile::reconcile_claude_md(
             conn,
-            None,
-            Some(&global_claude_md),
+            &global_claude_md,
             &retro_core::models::NodeScope::Global,
             None,
         )?;
@@ -430,7 +446,7 @@ fn run_for_project(
         }
     }
 
-    // Skill node projection (within Step 4)
+    // Skill node projection (within Step 5)
     {
         let skill_nodes: Vec<&retro_core::models::KnowledgeNode> = unprojected
             .iter()

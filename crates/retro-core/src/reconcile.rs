@@ -61,7 +61,9 @@ pub fn reconcile_for_scope(
     Ok(result)
 }
 
-fn read_rules_from_file(path: &str) -> Vec<String> {
+/// Read rules from a CLAUDE.md file's managed section.
+/// Returns empty vec if file doesn't exist or has no managed section.
+pub fn read_rules_from_file(path: &str) -> Vec<String> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return vec![],
@@ -69,24 +71,17 @@ fn read_rules_from_file(path: &str) -> Vec<String> {
     read_managed_section(&content).unwrap_or_default()
 }
 
+/// Reconcile a single CLAUDE.md file with the DB for a given scope.
+/// Reads the managed section from the file and calls `reconcile_for_scope()`.
+/// Returns default (0/0) if the file doesn't exist or has no managed section.
 pub fn reconcile_claude_md(
     conn: &Connection,
-    project_claude_md_path: Option<&str>,
-    global_claude_md_path: Option<&str>,
+    claude_md_path: &str,
     scope: &NodeScope,
     project_id: Option<&str>,
 ) -> Result<ReconcileResult, CoreError> {
-    let path = match scope {
-        NodeScope::Project => project_claude_md_path,
-        NodeScope::Global => global_claude_md_path,
-    };
-
-    if let Some(p) = path {
-        let file_rules = read_rules_from_file(p);
-        reconcile_for_scope(conn, scope, project_id, &file_rules)
-    } else {
-        Ok(ReconcileResult::default())
-    }
+    let file_rules = read_rules_from_file(claude_md_path);
+    reconcile_for_scope(conn, scope, project_id, &file_rules)
 }
 
 #[cfg(test)]
@@ -248,8 +243,7 @@ mod tests {
         let path_str = path.to_str().unwrap();
         let result = reconcile_claude_md(
             &conn,
-            Some(path_str),
-            None,
+            path_str,
             &NodeScope::Project,
             Some("test-project"),
         )
@@ -271,8 +265,7 @@ mod tests {
 
         let result = reconcile_claude_md(
             &conn,
-            Some("/nonexistent/CLAUDE.md"),
-            None,
+            "/nonexistent/CLAUDE.md",
             &NodeScope::Project,
             Some("test-project"),
         )
@@ -297,8 +290,7 @@ mod tests {
         let path_str = path.to_str().unwrap();
         let result = reconcile_claude_md(
             &conn,
-            Some(path_str),
-            None,
+            path_str,
             &NodeScope::Project,
             Some("test-project"),
         )

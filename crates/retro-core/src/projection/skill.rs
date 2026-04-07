@@ -600,7 +600,8 @@ mod tests {
         let result = find_writing_skills_in_plugins_dir(dir.path());
         assert!(result.is_some());
         let content = result.unwrap();
-        assert!(content.contains("version"));
+        // Should pick 2.0.0 (last when sorted ascending by path)
+        assert!(content.contains("version 2.0.0"));
     }
 
     #[test]

@@ -131,8 +131,7 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
         // Project-scoped rules
         if let Ok(result) = retro_core::reconcile::reconcile_claude_md(
             &conn,
-            Some(&project_claude_md),
-            None,
+            &project_claude_md,
             &retro_core::models::NodeScope::Project,
             Some(&project_id),
         ) {
@@ -142,8 +141,7 @@ pub fn run(uninstall: bool, purge: bool, verbose: bool) -> Result<()> {
         // Global rules
         if let Ok(result) = retro_core::reconcile::reconcile_claude_md(
             &conn,
-            None,
-            Some(&global_claude_md),
+            &global_claude_md,
             &retro_core::models::NodeScope::Global,
             None,
         ) {
