@@ -1,6 +1,7 @@
 use crate::db;
 use crate::errors::CoreError;
 use crate::models::{KnowledgeNode, NodeScope, NodeStatus, NodeType};
+use crate::projection::claude_md::read_managed_section;
 use chrono::Utc;
 use rusqlite::Connection;
 use std::collections::HashSet;
@@ -58,6 +59,34 @@ pub fn reconcile_for_scope(
     }
 
     Ok(result)
+}
+
+fn read_rules_from_file(path: &str) -> Vec<String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    read_managed_section(&content).unwrap_or_default()
+}
+
+pub fn reconcile_claude_md(
+    conn: &Connection,
+    project_claude_md_path: Option<&str>,
+    global_claude_md_path: Option<&str>,
+    scope: &NodeScope,
+    project_id: Option<&str>,
+) -> Result<ReconcileResult, CoreError> {
+    let path = match scope {
+        NodeScope::Project => project_claude_md_path,
+        NodeScope::Global => global_claude_md_path,
+    };
+
+    if let Some(p) = path {
+        let file_rules = read_rules_from_file(p);
+        reconcile_for_scope(conn, scope, project_id, &file_rules)
+    } else {
+        Ok(ReconcileResult::default())
+    }
 }
 
 #[cfg(test)]
@@ -199,5 +228,83 @@ mod tests {
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].scope, NodeScope::Project);
         assert_eq!(nodes[0].project_id, Some("my-project".to_string()));
+    }
+
+    #[test]
+    fn test_reconcile_claude_md_reads_file() {
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let conn = test_db();
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("CLAUDE.md");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(
+            b"# Project\n\n<!-- retro:managed:start -->\n## Retro-Discovered Patterns\n\n- Rule from file\n<!-- retro:managed:end -->\n",
+        )
+        .unwrap();
+        drop(f);
+
+        let path_str = path.to_str().unwrap();
+        let result = reconcile_claude_md(
+            &conn,
+            Some(path_str),
+            None,
+            &NodeScope::Project,
+            Some("test-project"),
+        )
+        .unwrap();
+
+        assert_eq!(result.imported, 1);
+        assert_eq!(result.archived, 0);
+
+        let nodes =
+            db::get_projected_nodes_for_scope(&conn, &NodeScope::Project, Some("test-project"))
+                .unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].content, "Rule from file");
+    }
+
+    #[test]
+    fn test_reconcile_claude_md_missing_file() {
+        let conn = test_db();
+
+        let result = reconcile_claude_md(
+            &conn,
+            Some("/nonexistent/CLAUDE.md"),
+            None,
+            &NodeScope::Project,
+            Some("test-project"),
+        )
+        .unwrap();
+
+        assert_eq!(result.imported, 0);
+        assert_eq!(result.archived, 0);
+    }
+
+    #[test]
+    fn test_reconcile_claude_md_no_managed_section() {
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let conn = test_db();
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("CLAUDE.md");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"# Project\n\nNo managed section here.\n").unwrap();
+        drop(f);
+
+        let path_str = path.to_str().unwrap();
+        let result = reconcile_claude_md(
+            &conn,
+            Some(path_str),
+            None,
+            &NodeScope::Project,
+            Some("test-project"),
+        )
+        .unwrap();
+
+        assert_eq!(result.imported, 0);
+        assert_eq!(result.archived, 0);
     }
 }
