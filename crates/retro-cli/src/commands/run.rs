@@ -74,8 +74,80 @@ fn run_for_project(
     verbose: bool,
     dry_run: bool,
 ) -> Result<()> {
-    // Step 1: Observe — find modified sessions
-    println!("{}", "Step 1/6: Observing session changes...".cyan());
+    // Step 1: Reconcile CLAUDE.md with DB
+    println!("{}", "Step 1/7: Reconciling CLAUDE.md...".cyan());
+
+    let project_claude_md = format!("{}/CLAUDE.md", project_path);
+    let home = std::env::var("HOME").unwrap_or_default();
+    let global_claude_md = format!("{}/.claude/CLAUDE.md", home);
+
+    if dry_run {
+        // Read-only comparison: show what WOULD be imported/archived
+        let current_project_slug = db::generate_project_slug(project_path);
+        let project_file_rules = retro_core::reconcile::read_rules_from_file(&project_claude_md);
+        let global_file_rules = retro_core::reconcile::read_rules_from_file(&global_claude_md);
+
+        let project_db = db::get_projected_nodes_for_scope(
+            conn, &retro_core::models::NodeScope::Project, Some(&current_project_slug),
+        ).unwrap_or_default();
+        let global_db = db::get_projected_nodes_for_scope(
+            conn, &retro_core::models::NodeScope::Global, None,
+        ).unwrap_or_default();
+
+        let project_db_set: std::collections::HashSet<&str> = project_db.iter().map(|n| n.content.as_str()).collect();
+        let global_db_set: std::collections::HashSet<&str> = global_db.iter().map(|n| n.content.as_str()).collect();
+        let project_file_set: std::collections::HashSet<&str> = project_file_rules.iter().map(|r| r.as_str()).collect();
+        let global_file_set: std::collections::HashSet<&str> = global_file_rules.iter().map(|r| r.as_str()).collect();
+
+        let would_import = project_file_rules.iter().filter(|r| !project_db_set.contains(r.as_str())).count()
+            + global_file_rules.iter().filter(|r| !global_db_set.contains(r.as_str())).count();
+        let would_archive = project_db.iter().filter(|n| !project_file_set.contains(n.content.as_str())).count()
+            + global_db.iter().filter(|n| !global_file_set.contains(n.content.as_str())).count();
+
+        if would_import > 0 || would_archive > 0 {
+            println!(
+                "  {} would import {}, would archive {}",
+                "[dry-run]".yellow(),
+                would_import,
+                would_archive,
+            );
+        } else {
+            println!("  {} CLAUDE.md in sync", "[dry-run]".yellow());
+        }
+    } else {
+        let current_project_slug = db::generate_project_slug(project_path);
+
+        let project_result = retro_core::reconcile::reconcile_claude_md(
+            conn,
+            &project_claude_md,
+            &retro_core::models::NodeScope::Project,
+            Some(&current_project_slug),
+        )?;
+
+        let global_result = retro_core::reconcile::reconcile_claude_md(
+            conn,
+            &global_claude_md,
+            &retro_core::models::NodeScope::Global,
+            None,
+        )?;
+
+        let total_imported = project_result.imported + global_result.imported;
+        let total_archived = project_result.archived + global_result.archived;
+
+        if total_imported > 0 || total_archived > 0 {
+            println!(
+                "  {} {} imported, {} archived",
+                "Reconciled:".green(),
+                total_imported,
+                total_archived,
+            );
+        } else {
+            println!("  {} CLAUDE.md in sync", "OK:".dimmed());
+        }
+    }
+
+    // Step 2: Observe — find modified sessions
+    println!("{}", "Step 2/7: Observing session changes...".cyan());
     let claude_dir = config.claude_dir();
     let last_run = db::get_metadata(conn, "last_run_at")?;
     let since = last_run.as_ref().and_then(|ts| {
@@ -106,8 +178,8 @@ fn run_for_project(
         }
     }
 
-    // Step 2: Ingest
-    println!("{}", "Step 2/6: Ingesting sessions...".cyan());
+    // Step 3: Ingest
+    println!("{}", "Step 3/7: Ingesting sessions...".cyan());
     if dry_run {
         println!(
             "  {} {} modified session files to ingest",
@@ -128,8 +200,8 @@ fn run_for_project(
         }
     }
 
-    // Step 3: Check analysis trigger
-    println!("{}", "Step 3/6: Checking analysis trigger...".cyan());
+    // Step 4: Check analysis trigger
+    println!("{}", "Step 4/7: Checking analysis trigger...".cyan());
 
     // Check AI call budget
     let today = Utc::now().format("%Y-%m-%d").to_string();
@@ -253,8 +325,8 @@ fn run_for_project(
         }
     }
 
-    // Step 4/6: Project approved changes
-    println!("{}", "Step 4/6: Projecting approved changes...".cyan());
+    // Step 5/7: Project approved changes
+    println!("{}", "Step 5/7: Projecting approved changes...".cyan());
 
     let unprojected = db::get_unprojected_nodes(conn)?;
     if unprojected.is_empty() {
@@ -374,8 +446,158 @@ fn run_for_project(
         }
     }
 
-    // Step 5/6: Syncing PR state
-    println!("{}", "Step 5/6: Syncing PR state...".cyan());
+    // Skill node projection (within Step 5)
+    {
+        let skill_nodes: Vec<&retro_core::models::KnowledgeNode> = unprojected
+            .iter()
+            .filter(|n| matches!(n.node_type, retro_core::models::NodeType::Skill))
+            .collect();
+
+        if !skill_nodes.is_empty() {
+            if dry_run {
+                println!(
+                    "  {} {} skill node(s) to project",
+                    "[dry-run]".yellow(),
+                    skill_nodes.len()
+                );
+            } else if !retro_core::projection::skill::is_superpowers_installed() {
+                println!(
+                    "  {} superpowers plugin not installed — skipping skill projection",
+                    "Skipping:".yellow()
+                );
+            } else {
+                // Re-read budget from DB since analysis may have consumed calls
+                let (ai_calls_now, ai_calls_date_now) = get_ai_call_count(conn)?;
+                let skill_budget = if ai_calls_date_now == today {
+                    config.runner.max_ai_calls_per_day.saturating_sub(ai_calls_now)
+                } else {
+                    config.runner.max_ai_calls_per_day
+                };
+                if skill_budget == 0 {
+                    if verbose {
+                        println!(
+                            "  {} AI budget exhausted — skipping skill projection",
+                            "Skipping:".yellow()
+                        );
+                    }
+                } else {
+                    // Pick the first skill node (highest confidence, already sorted by DB query)
+                    let node = skill_nodes[0];
+                    println!(
+                        "  {} generating skill for: {}",
+                        "Skill:".cyan(),
+                        retro_core::util::truncate_str(&node.content, 60)
+                    );
+
+                    let backend =
+                        retro_core::analysis::claude_cli::ClaudeCliBackend::new(&config.ai);
+                    match retro_core::projection::skill::generate_skill_agentic(
+                        &backend,
+                        node,
+                        Some(project_path),
+                    ) {
+                        Ok(result) if result.created => {
+                            match node.scope {
+                                retro_core::models::NodeScope::Global => {
+                                    db::mark_node_projected(conn, &node.id)?;
+                                    println!(
+                                        "  {} skill created at {}",
+                                        "Created".green(),
+                                        result.skill_path.display()
+                                    );
+                                }
+                                retro_core::models::NodeScope::Project => {
+                                    // Read the created skill file for PR
+                                    let skill_content =
+                                        std::fs::read_to_string(&result.skill_path)
+                                            .unwrap_or_default();
+                                    let relative_path = result
+                                        .skill_path
+                                        .strip_prefix(project_path)
+                                        .map(|p| p.to_string_lossy().into_owned())
+                                        .unwrap_or_else(|_| {
+                                            result.skill_path.to_string_lossy().into_owned()
+                                        });
+
+                                    // Remove the file created by agentic call (PR will recreate it)
+                                    let _ = std::fs::remove_file(&result.skill_path);
+
+                                    match retro_core::git::create_retro_pr(
+                                        project_path,
+                                        &[(&relative_path, &skill_content)],
+                                        "retro: add skill from discovered pattern",
+                                        "retro: add discovered skill",
+                                        &format!(
+                                            "Retro generated a skill from an observed pattern.\n\n**Skill:** `{}`\n\nApproved via `retro dash`.",
+                                            result.skill_path.display()
+                                        ),
+                                    ) {
+                                        Ok(Some(url)) => {
+                                            if let Err(e) = db::mark_node_projected_with_pr(
+                                                conn, &node.id, &url,
+                                            ) {
+                                                eprintln!(
+                                                    "  {} marking skill node projected: {e}",
+                                                    "Warning".yellow()
+                                                );
+                                            }
+                                            println!(
+                                                "  {} skill PR: {}",
+                                                "Created".green(),
+                                                url.cyan()
+                                            );
+                                        }
+                                        Ok(None) => {
+                                            if let Err(e) =
+                                                db::mark_node_projected(conn, &node.id)
+                                            {
+                                                eprintln!(
+                                                    "  {} marking skill node projected: {e}",
+                                                    "Warning".yellow()
+                                                );
+                                            }
+                                            println!(
+                                                "  {} skill committed to branch (no gh for PR)",
+                                                "Projected".yellow()
+                                            );
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "  {} skill PR creation: {e}",
+                                                "Error".red()
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            increment_ai_calls(conn, 1)?;
+                            if verbose {
+                                eprintln!(
+                                    "[verbose] skill tokens: {} in / {} out",
+                                    result.input_tokens, result.output_tokens
+                                );
+                            }
+                        }
+                        Ok(_) => {
+                            println!(
+                                "  {} skill generation did not create file — will retry next run",
+                                "Warning:".yellow()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "  {} skill generation: {e}",
+                                "Error".red()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 6/7: Syncing PR state
+    println!("{}", "Step 6/7: Syncing PR state...".cyan());
 
     let nodes_with_pr = db::get_nodes_with_pr(conn)?;
     if nodes_with_pr.is_empty() {
@@ -422,8 +644,8 @@ fn run_for_project(
         }
     }
 
-    // Step 6: Summary
-    println!("{}", "Step 6/6: Pipeline complete.".cyan());
+    // Step 7: Summary
+    println!("{}", "Step 7/7: Pipeline complete.".cyan());
 
     if dry_run {
         println!();

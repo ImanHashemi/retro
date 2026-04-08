@@ -1496,6 +1496,49 @@ pub fn get_unprojected_nodes(conn: &Connection) -> Result<Vec<KnowledgeNode>, Co
     Ok(nodes)
 }
 
+/// Get active nodes that have been projected for a given scope, filtering to Rule/Directive/Preference types.
+pub fn get_projected_nodes_for_scope(
+    conn: &Connection,
+    scope: &NodeScope,
+    project_id: Option<&str>,
+) -> Result<Vec<KnowledgeNode>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, scope, project_id, content, confidence, status, created_at, updated_at, projected_at, pr_url
+         FROM nodes
+         WHERE status = 'active'
+           AND projected_at IS NOT NULL
+           AND scope = ?1
+           AND type IN ('rule', 'directive', 'preference')
+           AND (?2 IS NULL OR project_id = ?2)
+         ORDER BY confidence DESC",
+    )?;
+    let scope_str = scope.to_string();
+    let rows = stmt.query_map(params![scope_str, project_id], |row| {
+        Ok(KnowledgeNode {
+            id: row.get(0)?,
+            node_type: NodeType::from_str(&row.get::<_, String>(1)?),
+            scope: NodeScope::from_str(&row.get::<_, String>(2)?),
+            project_id: row.get(3)?,
+            content: row.get(4)?,
+            confidence: row.get(5)?,
+            status: NodeStatus::from_str(&row.get::<_, String>(6)?),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                .unwrap_or_default()
+                .with_timezone(&Utc),
+            projected_at: row.get(9)?,
+            pr_url: row.get(10)?,
+        })
+    })?;
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row?);
+    }
+    Ok(nodes)
+}
+
 /// Mark a node as projected (direct write, no PR).
 pub fn mark_node_projected(conn: &Connection, id: &str) -> Result<(), CoreError> {
     conn.execute(
@@ -2951,5 +2994,105 @@ mod tests {
         let retrieved = get_node(&conn, "n1").unwrap().unwrap();
         assert!(retrieved.pr_url.is_none());
         assert_eq!(retrieved.status, NodeStatus::Active);
+    }
+
+    #[test]
+    fn test_get_projected_nodes_for_scope_global() {
+        let conn = test_db();
+
+        // Active projected Rule (global) — should be returned
+        let projected_rule = KnowledgeNode {
+            id: "n1".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "Always write tests first".to_string(),
+            confidence: 0.9,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: Some(Utc::now().to_rfc3339()),
+            pr_url: None,
+        };
+
+        // Active unprojected Rule (global) — should NOT be returned
+        let unprojected_rule = KnowledgeNode {
+            id: "n2".to_string(),
+            node_type: NodeType::Rule,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "Use cargo fmt before committing".to_string(),
+            confidence: 0.8,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: None,
+            pr_url: None,
+        };
+
+        // Active projected Skill (global) — should NOT be returned (wrong type)
+        let projected_skill = KnowledgeNode {
+            id: "n3".to_string(),
+            node_type: NodeType::Skill,
+            scope: NodeScope::Global,
+            project_id: None,
+            content: "Some skill content".to_string(),
+            confidence: 0.85,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: Some(Utc::now().to_rfc3339()),
+            pr_url: None,
+        };
+
+        insert_node(&conn, &projected_rule).unwrap();
+        insert_node(&conn, &unprojected_rule).unwrap();
+        insert_node(&conn, &projected_skill).unwrap();
+
+        let nodes = get_projected_nodes_for_scope(&conn, &NodeScope::Global, None).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, "n1");
+    }
+
+    #[test]
+    fn test_get_projected_nodes_for_scope_project() {
+        let conn = test_db();
+
+        // Active projected Directive for "my-project" — should be returned
+        let my_project_node = KnowledgeNode {
+            id: "n1".to_string(),
+            node_type: NodeType::Directive,
+            scope: NodeScope::Project,
+            project_id: Some("my-project".to_string()),
+            content: "Always use the project linter config".to_string(),
+            confidence: 0.75,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: Some(Utc::now().to_rfc3339()),
+            pr_url: None,
+        };
+
+        // Active projected Preference for "other-project" — should NOT be returned
+        let other_project_node = KnowledgeNode {
+            id: "n2".to_string(),
+            node_type: NodeType::Preference,
+            scope: NodeScope::Project,
+            project_id: Some("other-project".to_string()),
+            content: "Prefer tabs over spaces".to_string(),
+            confidence: 0.7,
+            status: NodeStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            projected_at: Some(Utc::now().to_rfc3339()),
+            pr_url: None,
+        };
+
+        insert_node(&conn, &my_project_node).unwrap();
+        insert_node(&conn, &other_project_node).unwrap();
+
+        let nodes = get_projected_nodes_for_scope(&conn, &NodeScope::Project, Some("my-project")).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, "n1");
     }
 }

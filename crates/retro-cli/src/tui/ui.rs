@@ -54,6 +54,11 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(" · Last run: "),
         Span::raw(last_run),
         Span::raw(format!(" · AI calls today: {}/{}", app.runner_status.ai_calls_today, app.runner_status.ai_calls_max)),
+        if !app.runner_status.superpowers_installed {
+            Span::styled(" · Skills: superpowers not installed", Style::default().fg(Color::DarkGray))
+        } else {
+            Span::raw("")
+        },
         Span::styled(message_text, Style::default().fg(Color::Yellow)),
     ]);
 

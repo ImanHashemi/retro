@@ -40,6 +40,8 @@ pub struct RunnerStatus {
     pub ai_calls_today: u32,
     /// Configured maximum AI calls per day.
     pub ai_calls_max: u32,
+    /// Whether the superpowers plugin is installed (needed for skill generation).
+    pub superpowers_installed: bool,
 }
 
 /// Detail view state: the node being viewed and its scroll offset.
@@ -103,6 +105,7 @@ impl App {
                 last_run,
                 ai_calls_today: ai_used,
                 ai_calls_max: ai_max,
+                superpowers_installed: retro_core::projection::skill::is_superpowers_installed(),
             },
             should_quit: false,
             message: None,
@@ -293,6 +296,7 @@ mod tests {
                 last_run: None,
                 ai_calls_today: 0,
                 ai_calls_max: 10,
+                superpowers_installed: true,
             },
             should_quit: false,
             message: None,
