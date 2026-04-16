@@ -323,3 +323,13 @@ cargo test
 - When AI operations return unexpected or counterintuitive results (e.g., 0 patterns found, empty responses), include a `reasoning` field in the response schema and display it to the user.
 - For major changes, provide commands for clean install testing: `retro init --uninstall --purge && cargo build --release && ./target/release/retro init`
 - To release: bump version numbers in both Cargo.toml files, merge PR, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The `.github/workflows/publish.yml` workflow handles testing, crates.io publishing, and GitHub release creation automatically.
+
+<!-- retro:managed:start -->
+## Retro-Discovered Patterns
+
+- When retro projects knowledge into CLAUDE.md files, it must only project knowledge relevant to that specific repository. User caught retro injecting retro-specific rules into the ditto-ai-core project's CLAUDE.md and said: 'This is a PR for the AI core repository. It doesn't have anything to do with retro so why are there retro-specific things in this PR?' (session 2b626ce8). Knowledge nodes must be scoped to the project they were observed in — no cross-project knowledge leakage in projected PRs.
+
+**Why:** Pollutes other projects with irrelevant rules and creates confusing PRs.
+**How to apply:** When reviewing retro-generated PRs, verify that all knowledge items in the PR are actually relevant to that repository, not observations from other projects.
+
+<!-- retro:managed:end -->
