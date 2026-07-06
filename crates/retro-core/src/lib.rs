@@ -15,6 +15,7 @@ pub mod observer;
 pub mod projection;
 pub mod reconcile;
 pub mod runner;
+pub mod runner_v3;
 pub mod scrub;
 pub mod store;
 pub mod trust;

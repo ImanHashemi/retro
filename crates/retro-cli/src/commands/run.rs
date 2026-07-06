@@ -9,7 +9,42 @@ use retro_core::observer;
 
 /// Run the full v2 pipeline: observe -> ingest -> analyze -> project -> apply.
 pub fn run(verbose: bool, dry_run: bool, background: bool) -> Result<()> {
-    let _ = background; // consumed by the v3 dispatch in T10
+    // v3 dispatch: when [v3].enabled, the file-based pipeline replaces the
+    // legacy v2 body below entirely (early return). v3 off falls through
+    // unchanged to the v2 pipeline.
+    let dir = retro_dir();
+    let config = Config::load(&dir.join("config.toml"))?;
+    if config.v3.enabled {
+        let backend = retro_core::analysis::claude_cli::ClaudeCliBackend::new(&config.ai);
+        let summary = retro_core::runner_v3::run_v3(&dir, &config, &backend, dry_run)?;
+        match summary {
+            None => {
+                if !background {
+                    println!("Another retro run is in progress — skipped.");
+                }
+            }
+            Some(s) => {
+                if !background {
+                    if dry_run {
+                        println!(
+                            "v3 dry run: {} session(s) pending, {} skipped — no AI calls, no writes",
+                            s.sessions_pending, s.sessions_skipped
+                        );
+                    } else {
+                        println!(
+                            "v3 run: {} session(s) analyzed ({} AI call(s)) — +{} nodes, {} updated, {} merged, {} invalidated; {} global rule(s) projected{}{}",
+                            s.sessions_processed, s.ai_calls, s.nodes_created, s.nodes_updated,
+                            s.nodes_merged, s.nodes_invalidated, s.rules_projected_global,
+                            if s.sessions_pending > 0 { format!("; {} pending (budget)", s.sessions_pending) } else { String::new() },
+                            if s.ops_skipped > 0 { format!("; {} op(s) skipped", s.ops_skipped) } else { String::new() },
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");

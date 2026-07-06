@@ -27,6 +27,7 @@ index.db-shm
 health.json
 queue/
 state/
+run.lock
 ";
 
 /// Result of loading the store from disk: parsed nodes with their paths,
