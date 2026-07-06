@@ -16,7 +16,7 @@
 - **The store root** is `retro_dir()` from `crates/retro-core/src/config.rs:358` — respects `RETRO_HOME` env var (test isolation). Store code takes an explicit root path; only the CLI resolves `retro_dir()`.
 - **Frontmatter is a strict, fixed schema** parsed by hand (no YAML crate — avoids an unmaintained-dep supply-chain flag and keeps parsing exact). Unknown keys are a hard parse error (catches human typos); unparseable files are skipped with a warning at load time (matches the codebase's JSONL-skipping convention), never a crash.
 - **The index is disposable by contract:** `build()` deletes and recreates `index.db`. No state may live only in the index. Files always win.
-- Run `cargo test -p retro-core` frequently; full `cargo test` before each commit. Current baseline: 228 tests passing.
+- Run `cargo test -p retro-core` frequently; full `cargo test` before each commit. Current baseline: 278 tests passing (three workspace crates: retro-core, retro-cli, retro-projectors).
 
 ## File Structure
 
@@ -1598,7 +1598,7 @@ Expected: `Indexed 1 node(s) ...`, and `$RETRO_TEST_HOME/index.db` exists.
 - [ ] **Step 4: Run the full test suite**
 
 Run: `cargo test`
-Expected: all tests pass (baseline 228 + ~32 new).
+Expected: all tests pass (baseline 278 + ~32 new).
 
 - [ ] **Step 5: Commit**
 
