@@ -38,13 +38,15 @@ impl RunnerState {
         }
     }
 
+    /// Load-modify-save; callers relying on atomicity must hold the run lockfile.
     pub fn save(&self, store_root: &Path) -> Result<(), CoreError> {
         let io = |e: std::io::Error| CoreError::Io(e.to_string());
         let path = state_path(store_root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(io)?;
         }
-        let json = serde_json::to_string_pretty(self).map_err(|e| CoreError::Io(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| CoreError::Parse(e.to_string()))?;
         std::fs::write(&path, json).map_err(io)
     }
 

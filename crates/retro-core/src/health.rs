@@ -34,12 +34,14 @@ impl Health {
     }
 
     pub fn save(&self, store_root: &Path) -> Result<(), CoreError> {
-        let json = serde_json::to_string_pretty(self).map_err(|e| CoreError::Io(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| CoreError::Parse(e.to_string()))?;
         std::fs::write(store_root.join("health.json"), json)
             .map_err(|e| CoreError::Io(e.to_string()))
     }
 
     /// Human-readable warnings for every stage whose last run failed.
+    /// Returned in stage-name order (BTreeMap iteration).
     pub fn warnings(&self) -> Vec<String> {
         self.stages
             .iter()
