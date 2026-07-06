@@ -1,5 +1,5 @@
 use anyhow::Result;
-use retro_core::config::{Config, retro_dir};
+use retro_core::config::{retro_dir, Config};
 use retro_core::store::{queue, state::RunnerState};
 use retro_core::{briefing, health, observer};
 
@@ -18,7 +18,8 @@ pub fn run() -> Result<()> {
     // pipeline recovers it from the transcript's metadata.
     // Watermark safety margin: subtract 60 seconds so a crashed parallel
     // session whose last write predates the watermark isn't lost forever.
-    // Queue enqueue is idempotent by session id, so overlap is harmless.
+    // Sessions inside the margin that were already processed at this mtime
+    // are deduplicated via `state.processed` below, not re-enqueued.
     const WATERMARK_SAFETY_SECS: u64 = 60;
     let since = if state.last_observed_unix > WATERMARK_SAFETY_SECS {
         Some(
@@ -35,6 +36,14 @@ pub fn run() -> Result<()> {
         let Some(stem) = m.path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
+        let mtime_unix = m
+            .mtime
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if state.processed.get(stem).is_some_and(|&p| mtime_unix <= p) {
+            continue; // already processed at this mtime; margin overlap only
+        }
         let entry = queue::QueueEntry {
             session_id: stem.to_string(),
             transcript_path: m.path.display().to_string(),
@@ -45,9 +54,7 @@ pub fn run() -> Result<()> {
         if queue::enqueue(&dir, &entry).is_ok() {
             enqueued += 1;
         }
-        if let Ok(secs) = m.mtime.duration_since(std::time::UNIX_EPOCH) {
-            max_seen = max_seen.max(secs.as_secs());
-        }
+        max_seen = max_seen.max(mtime_unix);
     }
     state.last_observed_unix = max_seen;
 

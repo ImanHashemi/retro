@@ -21,6 +21,13 @@ pub struct RunnerState {
     /// Messages for the next session briefing (new registrations, learned nodes).
     #[serde(default)]
     pub notifications: Vec<String>,
+    /// session_id -> transcript mtime (unix secs) at the time it was last
+    /// processed by the pipeline. Used to skip re-enqueueing unchanged
+    /// sessions that fall inside the catch-up safety margin.
+    /// Not yet written by the pipeline itself (wired in runner_v3, a later task) —
+    /// only `record_processed()` exists so far.
+    #[serde(default)]
+    pub processed: std::collections::BTreeMap<String, u64>,
 }
 
 fn state_path(store_root: &Path) -> PathBuf {
@@ -73,6 +80,21 @@ impl RunnerState {
 
     pub fn drain_notifications(&mut self) -> Vec<String> {
         std::mem::take(&mut self.notifications)
+    }
+
+    /// Record a session as processed at the given transcript mtime, pruning
+    /// the map to the newest 1000 entries to bound growth.
+    pub fn record_processed(&mut self, session_id: &str, mtime_unix: u64) {
+        self.processed.insert(session_id.to_string(), mtime_unix);
+        if self.processed.len() > 1000 {
+            let mut by_mtime: Vec<(String, u64)> = self
+                .processed
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect();
+            by_mtime.sort_by_key(|(_, m)| std::cmp::Reverse(*m));
+            self.processed = by_mtime.into_iter().take(1000).collect();
+        }
     }
 }
 
@@ -132,5 +154,19 @@ mod tests {
         std::fs::write(tmp.path().join("state/state.json"), "{corrupt").unwrap();
         let s = RunnerState::load(tmp.path()).unwrap();
         assert_eq!(s.last_observed_unix, 0);
+    }
+
+    #[test]
+    fn record_processed_tracks_and_prunes() {
+        let tmp = TempDir::new().unwrap();
+        let mut s = RunnerState::load(tmp.path()).unwrap();
+        s.record_processed("a", 100);
+        assert_eq!(s.processed["a"], 100);
+        for i in 0..1100 {
+            s.record_processed(&format!("s{i}"), 1000 + i as u64);
+        }
+        assert!(s.processed.len() <= 1000);
+        assert!(s.processed.contains_key("s1099"), "newest kept");
+        assert!(!s.processed.contains_key("a"), "oldest pruned");
     }
 }

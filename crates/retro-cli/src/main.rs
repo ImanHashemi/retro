@@ -155,12 +155,18 @@ fn main() {
     let cli = Cli::parse();
     let verbose = cli.verbose;
 
-    // Show nudge for interactive commands (not auto mode)
+    // Show nudge for interactive commands (not auto mode, not hook entries)
     let is_auto = matches!(
         &cli.command,
         Commands::Ingest { auto: true, .. }
             | Commands::Analyze { auto: true, .. }
             | Commands::Apply { auto: true, .. }
+            | Commands::Observe
+            | Commands::Brief
+            | Commands::Run {
+                background: true,
+                ..
+            }
     );
     if !is_auto {
         commands::check_and_display_nudge();

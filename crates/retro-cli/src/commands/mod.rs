@@ -1,7 +1,7 @@
 pub mod analyze;
 pub mod apply;
-pub mod brief;
 pub mod audit;
+pub mod brief;
 pub mod clean;
 pub mod curate;
 pub mod dash;
@@ -280,7 +280,7 @@ pub fn check_and_display_nudge() {
             if let Ok(health) = retro_core::health::Health::load(&dir) {
                 use colored::Colorize;
                 for w in health.warnings() {
-                    println!("  {} {}", "retro:".yellow(), w);
+                    eprintln!("  {} {}", "retro:".yellow(), w);
                 }
             }
         }
