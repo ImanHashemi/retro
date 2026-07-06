@@ -12,6 +12,7 @@ mod node;
 mod slug;
 
 pub use node::{Node, NodeType, Scope};
+pub(crate) use node::is_valid_slug;
 pub use slug::slugify;
 
 use std::path::{Path, PathBuf};
