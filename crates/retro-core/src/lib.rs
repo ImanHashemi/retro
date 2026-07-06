@@ -6,6 +6,7 @@ pub mod curator;
 pub mod db;
 pub mod errors;
 pub mod git;
+pub mod health;
 pub mod ingest;
 pub mod lock;
 pub mod models;

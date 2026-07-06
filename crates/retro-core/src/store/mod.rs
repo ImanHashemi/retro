@@ -5,6 +5,7 @@
 
 pub mod git;
 pub mod index;
+pub mod state;
 mod node;
 mod slug;
 
