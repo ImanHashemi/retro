@@ -44,14 +44,16 @@ pub enum Scope {
     Project(String),
 }
 
-impl Scope {
-    pub fn as_str(&self) -> String {
+impl std::fmt::Display for Scope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Scope::Global => "global".to_string(),
-            Scope::Project(slug) => format!("project/{slug}"),
+            Scope::Global => write!(f, "global"),
+            Scope::Project(slug) => write!(f, "project/{slug}"),
         }
     }
+}
 
+impl Scope {
     pub fn parse(s: &str) -> Result<Self, CoreError> {
         if s == "global" {
             return Ok(Scope::Global);
@@ -88,12 +90,13 @@ impl Node {
     }
 
     pub fn to_markdown(&self) -> String {
+        // NOTE: source IDs must not contain commas (comma-joined list format).
         let sources = self.sources.join(", ");
         let invalidated = self.invalidated_by.as_deref().unwrap_or("null");
         format!(
-            "---\nid: {}\nscope: {}\ntype: {}\nconfidence: {}\nsources: [{}]\ncreated: {}\nupdated: {}\ninvalidated_by: {}\n---\n{}\n",
+            "---\nid: {}\nscope: {}\ntype: {}\nconfidence: {:.2}\nsources: [{}]\ncreated: {}\nupdated: {}\ninvalidated_by: {}\n---\n{}\n",
             self.id,
-            self.scope.as_str(),
+            self.scope,
             self.node_type.as_str(),
             self.confidence,
             sources,
@@ -128,9 +131,9 @@ mod tests {
 
     #[test]
     fn scope_roundtrip() {
-        assert_eq!(Scope::Global.as_str(), "global");
+        assert_eq!(Scope::Global.to_string(), "global");
         assert_eq!(
-            Scope::Project("my-api".to_string()).as_str(),
+            Scope::Project("my-api".to_string()).to_string(),
             "project/my-api"
         );
         assert_eq!(Scope::parse("global").unwrap(), Scope::Global);
@@ -174,7 +177,7 @@ mod tests {
 id: ab-paired-observations
 scope: project/my-api-service
 type: rule
-confidence: 0.9
+confidence: 0.90
 sources: [session:1a2b3c4d, session:5e6f7a8b]
 created: 2026-05-19
 updated: 2026-06-02
@@ -195,5 +198,12 @@ A/B comparisons must always use paired observations.
         let md = n.to_markdown();
         assert!(md.contains("sources: []\n"));
         assert!(md.contains("invalidated_by: other-node\n"));
+    }
+
+    #[test]
+    fn to_markdown_empty_body_single_trailing_newline() {
+        let mut n = sample_node();
+        n.body = String::new();
+        assert!(n.to_markdown().ends_with("---\n\n"));
     }
 }
