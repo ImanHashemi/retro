@@ -91,6 +91,8 @@ enum Commands {
     },
     /// Show retro status: session counts, last analysis, patterns
     Status,
+    /// Rebuild the v3 store index from knowledge files (safe anytime)
+    Reindex,
     /// Show audit log entries
     Log {
         /// Show entries from the last N days/hours (e.g., "7d", "24h")
@@ -172,6 +174,7 @@ fn main() {
         Commands::Clean { dry_run } => commands::clean::run(dry_run, verbose),
         Commands::Audit { dry_run } => commands::audit::run(dry_run, verbose),
         Commands::Status => commands::status::run(),
+        Commands::Reindex => commands::reindex::run(),
         Commands::Log { since } => commands::log::run(since),
         Commands::Review { global, dry_run } => commands::review::run(global, dry_run, verbose),
         Commands::Curate { dry_run } => commands::curate::run(dry_run, verbose),
