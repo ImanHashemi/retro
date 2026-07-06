@@ -4,5 +4,7 @@
 //! SQLite (`index.db`) is a disposable, rebuildable index — files always win.
 
 mod node;
+mod slug;
 
 pub use node::{Node, NodeType, Scope};
+pub use slug::slugify;
