@@ -110,7 +110,9 @@ impl Node {
     /// Parse a node from markdown with strict frontmatter.
     /// Unknown keys are an error (catches human typos); the fixed
     /// schema is owned by this binary — migration controls format changes.
+    /// Parsing normalizes on rewrite: CRLF becomes LF, confidence is written back with two decimals.
     pub fn from_markdown(content: &str) -> Result<Node, CoreError> {
+        let content = content.replace("\r\n", "\n");
         let rest = content
             .strip_prefix("---\n")
             .ok_or_else(|| CoreError::Parse("missing frontmatter open delimiter".to_string()))?;
@@ -126,6 +128,7 @@ impl Node {
         let mut created: Option<NaiveDate> = None;
         let mut updated: Option<NaiveDate> = None;
         let mut invalidated_by: Option<String> = None;
+        let mut seen_keys: Vec<String> = Vec::new();
 
         for line in front.lines() {
             if line.trim().is_empty() {
@@ -136,15 +139,26 @@ impl Node {
                 .ok_or_else(|| CoreError::Parse(format!("invalid frontmatter line: {line:?}")))?;
             let key = key.trim();
             let value = value.trim();
+            if seen_keys.iter().any(|k| k == key) {
+                return Err(CoreError::Parse(format!(
+                    "duplicate frontmatter key: {key:?}"
+                )));
+            }
+            seen_keys.push(key.to_string());
             match key {
                 "id" => id = Some(value.to_string()),
                 "scope" => scope = Some(Scope::parse(value)?),
                 "type" => node_type = Some(NodeType::parse(value)?),
                 "confidence" => {
-                    confidence =
-                        Some(value.parse::<f64>().map_err(|_| {
-                            CoreError::Parse(format!("invalid confidence: {value:?}"))
-                        })?)
+                    let c: f64 = value
+                        .parse()
+                        .map_err(|_| CoreError::Parse(format!("invalid confidence: {value:?}")))?;
+                    if !c.is_finite() || !(0.0..=1.0).contains(&c) {
+                        return Err(CoreError::Parse(format!(
+                            "confidence out of range [0.0, 1.0]: {value:?}"
+                        )));
+                    }
+                    confidence = Some(c);
                 }
                 "sources" => {
                     let inner = value
@@ -354,5 +368,31 @@ A/B comparisons must always use paired observations.
     fn from_markdown_requires_frontmatter_delimiters() {
         assert!(Node::from_markdown("no frontmatter here").is_err());
         assert!(Node::from_markdown("---\nid: x\nno closing delimiter").is_err());
+    }
+
+    #[test]
+    fn from_markdown_accepts_crlf_line_endings() {
+        let crlf = sample_node().to_markdown().replace('\n', "\r\n");
+        let parsed = Node::from_markdown(&crlf).unwrap();
+        assert_eq!(parsed.id, "ab-paired-observations");
+    }
+
+    #[test]
+    fn from_markdown_duplicate_key_errors() {
+        let md = sample_node()
+            .to_markdown()
+            .replace("type: rule\n", "type: rule\ntype: pattern\n");
+        let err = Node::from_markdown(&md).unwrap_err();
+        assert!(err.to_string().contains("duplicate"), "got: {err}");
+    }
+
+    #[test]
+    fn from_markdown_confidence_out_of_range_errors() {
+        for bad in ["1.5", "-0.1", "NaN", "inf"] {
+            let md = sample_node()
+                .to_markdown()
+                .replace("confidence: 0.90", &format!("confidence: {bad}"));
+            assert!(Node::from_markdown(&md).is_err(), "should fail: {bad}");
+        }
     }
 }
