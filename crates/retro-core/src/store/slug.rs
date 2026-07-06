@@ -2,6 +2,7 @@
 
 /// Lowercase ASCII-alphanumeric kebab-case, dashes collapsed, max 60 chars.
 /// Falls back to "node" for inputs with no usable characters.
+/// Non-ASCII input is expected to degrade (dropped); all-non-ASCII input intentionally falls back to "node" (collisions are resolved by unique_slug).
 pub fn slugify(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut prev_dash = true; // suppress leading dash
@@ -51,6 +52,12 @@ mod tests {
     fn slugify_caps_length_at_60() {
         let long = "x".repeat(100);
         assert_eq!(slugify(&long).len(), 60);
+
+        // cap lands on a separator -> trailing dash trimmed -> stays under cap
+        let cap_with_sep = "x".repeat(59) + "!!!yyy";
+        let s = slugify(&cap_with_sep);
+        assert!(s.len() <= 60);
+        assert!(!s.ends_with('-'));
     }
 
     #[test]
