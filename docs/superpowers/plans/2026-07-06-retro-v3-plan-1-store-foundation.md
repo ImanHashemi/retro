@@ -145,7 +145,7 @@ mod tests {
 id: ab-paired-observations
 scope: project/my-api-service
 type: rule
-confidence: 0.9
+confidence: 0.90
 sources: [session:1a2b3c4d, session:5e6f7a8b]
 created: 2026-05-19
 updated: 2026-06-02
@@ -1366,7 +1366,7 @@ pub fn build(store: &Store) -> Result<IndexStats, CoreError> {
 
     let loaded = store.load_all()?;
     for (path, node) in &loaded.nodes {
-        let scope = node.scope.as_str();
+        let scope = node.scope.to_string();
         conn.execute(
             "INSERT INTO nodes (id, scope, type, confidence, active, created, updated, invalidated_by, body, path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
