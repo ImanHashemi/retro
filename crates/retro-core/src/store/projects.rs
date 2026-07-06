@@ -43,7 +43,9 @@ impl PathMap {
         std::fs::create_dir_all(&dir).map_err(io)?;
         let json =
             serde_json::to_string_pretty(self).map_err(|e| CoreError::Parse(e.to_string()))?;
-        std::fs::write(dir.join("projects.json"), json).map_err(io)
+        let tmp = dir.join("projects.json.tmp");
+        std::fs::write(&tmp, json).map_err(io)?;
+        std::fs::rename(&tmp, dir.join("projects.json")).map_err(io)
     }
 }
 
@@ -106,7 +108,12 @@ fn all_metas(store: &Store) -> Vec<ProjectMeta> {
 /// registrations by remote_url, then by recorded path, else create new.
 /// Never call this for excluded paths — check `is_excluded` first.
 pub fn register(store: &Store, cwd: &str) -> Result<Registration, CoreError> {
-    let root = git_in(cwd, &["rev-parse", "--show-toplevel"]).unwrap_or_else(|| cwd.to_string());
+    let root = git_in(cwd, &["rev-parse", "--show-toplevel"]).unwrap_or_else(|| {
+        std::fs::canonicalize(cwd)
+            .ok()
+            .and_then(|p| p.to_str().map(str::to_string))
+            .unwrap_or_else(|| cwd.to_string())
+    });
     let remote = git_in(&root, &["remote", "get-url", "origin"]);
 
     let mut map = PathMap::load(store.root())?;
@@ -164,9 +171,19 @@ pub fn register(store: &Store, cwd: &str) -> Result<Registration, CoreError> {
 
 /// Path-prefix exclusion against `config.privacy.exclude_projects`.
 /// A prefix matches the directory itself or anything under it.
+/// Both sides are canonicalized when possible so symlink spellings
+/// (e.g. /tmp vs /private/tmp on macOS) cannot bypass an exclusion.
 pub fn is_excluded(path: &str, exclude_projects: &[String]) -> bool {
+    let canon = |s: &str| -> String {
+        std::fs::canonicalize(s)
+            .ok()
+            .and_then(|p| p.to_str().map(str::to_string))
+            .unwrap_or_else(|| s.to_string())
+    };
+    let path = canon(path);
     exclude_projects.iter().any(|prefix| {
-        path == prefix.as_str() || path.starts_with(&format!("{}/", prefix.trim_end_matches('/')))
+        let prefix = canon(prefix);
+        path == prefix || path.starts_with(&format!("{}/", prefix.trim_end_matches('/')))
     })
 }
 
@@ -272,6 +289,36 @@ mod tests {
         assert!(reg.newly_registered);
         let again = register(&store, proj.path().to_str().unwrap()).unwrap();
         assert!(!again.newly_registered);
+    }
+
+    #[test]
+    fn non_git_dir_two_spellings_register_once() {
+        let store_tmp = TempDir::new().unwrap();
+        let store = Store::open(store_tmp.path());
+        store.ensure_layout().unwrap();
+        let proj = TempDir::new().unwrap();
+        let raw = proj.path().to_str().unwrap().to_string();
+        let canonical = std::fs::canonicalize(proj.path())
+            .unwrap()
+            .display()
+            .to_string();
+        let first = register(&store, &raw).unwrap();
+        let second = register(&store, &canonical).unwrap();
+        assert!(!second.newly_registered, "same dir, different spelling");
+        assert_eq!(first.slug, second.slug);
+    }
+
+    #[test]
+    fn is_excluded_survives_symlink_spelling() {
+        let real = TempDir::new().unwrap();
+        let raw = real.path().to_str().unwrap().to_string();
+        let canonical = std::fs::canonicalize(real.path())
+            .unwrap()
+            .display()
+            .to_string();
+        // exclude written in one spelling, path arrives in the other
+        assert!(is_excluded(&canonical, &[raw.clone()]));
+        assert!(is_excluded(&raw, &[canonical]));
     }
 
     #[test]
