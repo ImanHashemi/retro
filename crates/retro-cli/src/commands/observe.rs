@@ -7,6 +7,12 @@ use retro_core::hook_event::HookEvent;
 use retro_core::store::state::RunnerState;
 use retro_core::store::{Store, projects, queue};
 
+/// What observe_event did with the session (drives the health record).
+enum ObserveOutcome {
+    Enqueued,
+    Excluded,
+}
+
 /// SessionEnd hook entry. Contract: NEVER fail the hook — errors are recorded
 /// in health and swallowed; stdout stays clean; exit code is always 0.
 pub fn run() -> Result<()> {
@@ -21,17 +27,28 @@ pub fn run() -> Result<()> {
         let _ = health::record(&dir, "observe", false, "unparseable hook event");
         return Ok(());
     };
-    if let Err(e) = observe_event(&dir, &config, &event) {
-        let _ = health::record(&dir, "observe", false, &e.to_string());
-        return Ok(());
+    match observe_event(&dir, &config, &event) {
+        Err(e) => {
+            let _ = health::record(&dir, "observe", false, &e.to_string());
+        }
+        Ok(ObserveOutcome::Excluded) => {
+            let _ = health::record(
+                &dir,
+                "observe",
+                true,
+                &format!("excluded {}", event.session_id),
+            );
+        }
+        Ok(ObserveOutcome::Enqueued) => {
+            let _ = health::record(
+                &dir,
+                "observe",
+                true,
+                &format!("enqueued {}", event.session_id),
+            );
+            spawn_worker();
+        }
     }
-    let _ = health::record(
-        &dir,
-        "observe",
-        true,
-        &format!("enqueued {}", event.session_id),
-    );
-    spawn_worker();
     Ok(())
 }
 
@@ -39,9 +56,9 @@ fn observe_event(
     dir: &std::path::Path,
     config: &Config,
     event: &HookEvent,
-) -> Result<(), retro_core::errors::CoreError> {
+) -> Result<ObserveOutcome, retro_core::errors::CoreError> {
     if projects::is_excluded(&event.cwd, &config.privacy.exclude_projects) {
-        return Ok(());
+        return Ok(ObserveOutcome::Excluded);
     }
     let store = Store::open(dir);
     store.ensure_layout()?;
@@ -75,7 +92,8 @@ fn observe_event(
             }
         }
     }
-    state.save(dir)
+    state.save(dir)?;
+    Ok(ObserveOutcome::Enqueued)
 }
 
 /// Detached background worker; inherits this process's environment (auth works

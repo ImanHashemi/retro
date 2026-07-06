@@ -8,7 +8,8 @@ use retro_core::ingest;
 use retro_core::observer;
 
 /// Run the full v2 pipeline: observe -> ingest -> analyze -> project -> apply.
-pub fn run(verbose: bool, dry_run: bool) -> Result<()> {
+pub fn run(verbose: bool, dry_run: bool, background: bool) -> Result<()> {
+    let _ = background; // consumed by the v3 dispatch in T10
     let dir = retro_dir();
     let config_path = dir.join("config.toml");
     let db_path = dir.join("retro.db");

@@ -47,7 +47,9 @@ impl RunnerState {
         }
         let json =
             serde_json::to_string_pretty(self).map_err(|e| CoreError::Parse(e.to_string()))?;
-        std::fs::write(&path, json).map_err(io)
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json).map_err(io)?;
+        std::fs::rename(&tmp, &path).map_err(io)
     }
 
     /// Remaining AI calls for `today` (YYYY-MM-DD) under `max_per_day`.

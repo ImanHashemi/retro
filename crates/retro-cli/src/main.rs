@@ -124,6 +124,9 @@ enum Commands {
         /// Preview only, don't make changes
         #[arg(long)]
         dry_run: bool,
+        /// (v3) Quiet background mode: exit silently if another run holds the lock
+        #[arg(long)]
+        background: bool,
     },
     /// Start the scheduled runner (launchd on macOS)
     Start,
@@ -181,7 +184,7 @@ fn main() {
         Commands::Log { since } => commands::log::run(since),
         Commands::Review { global, dry_run } => commands::review::run(global, dry_run, verbose),
         Commands::Curate { dry_run } => commands::curate::run(dry_run, verbose),
-        Commands::Run { verbose: run_verbose, dry_run } => commands::run::run(verbose || run_verbose, dry_run),
+        Commands::Run { verbose: run_verbose, dry_run, background } => commands::run::run(verbose || run_verbose, dry_run, background),
         Commands::Start => commands::start::run(verbose),
         Commands::Stop => commands::stop::run(verbose),
         Commands::Sync => commands::sync::run(verbose),
