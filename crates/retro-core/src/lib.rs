@@ -14,5 +14,6 @@ pub mod projection;
 pub mod reconcile;
 pub mod runner;
 pub mod scrub;
+pub mod store;
 pub mod trust;
 pub mod util;

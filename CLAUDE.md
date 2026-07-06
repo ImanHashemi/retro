@@ -86,6 +86,7 @@ retro init --uninstall --purge && cargo build --release && ./target/release/retr
 | `retro log [--since <days>]` | View audit log entries |
 | `retro hooks remove` | Remove git hooks |
 | `retro init --uninstall [--purge]` | Uninstall retro (removes launchd plist, hooks, optionally data) |
+| `retro reindex` | (v3) Rebuild the store index from knowledge files |
 
 Note: `--auto` flag is deprecated in v2. Use `retro start` for automatic background operation.
 
@@ -308,7 +309,16 @@ All core features complete and tested.
 - **Plan 2: DONE** — Pipeline. Session observer, graph analysis (prompt builder + response parser), Claude Code projector (rules → CLAUDE.md), briefing file generation, trust-based auto-approve, `retro run` command.
 - **Plan 3: DONE** — Surfaces. TUI dashboard (`retro dash`), launchd scheduled runner (`retro start`/`retro stop`), `retro init` evolution (launchd + briefing skill), `--auto` deprecation, runner log rotation, default interval 300s, `retro run` global mode.
 
-Test coverage: 228 unit tests.
+Test coverage: 320+ tests across the workspace.
+
+### v3 "Personal" (in progress)
+
+Spec: `docs/superpowers/specs/2026-07-06-retro-v3-personal-redesign-design.md`.
+
+- **Plan 1: DONE** — Store foundation. File-based knowledge store (`retro-core/src/store/`):
+  markdown nodes with strict frontmatter as source of truth under `~/.retro/knowledge/`,
+  git layer for store commits (`store::git`, wired to mutations in Plan 2), disposable SQLite index with FTS5 (`store::index`),
+  `retro reindex` command. v2 continues to work unchanged alongside.
 
 ## Testing
 
