@@ -43,7 +43,7 @@ pub fn ensure_repo(root: &Path) -> Result<bool, CoreError> {
         return Ok(false);
     }
     run_checked(root, &["init"])?;
-    // Local identity fallback: only set if unset globally.
+    // Local identity fallback: only set if unset in any config scope.
     let email_set = git(root, &["config", "user.email"])
         .map(|o| o.status.success())
         .unwrap_or(false);
@@ -52,6 +52,7 @@ pub fn ensure_repo(root: &Path) -> Result<bool, CoreError> {
         run_checked(root, &["config", "user.name", "retro"])?;
     }
     run_checked(root, &["config", "commit.gpgsign", "false"])?;
+    run_checked(root, &["config", "core.hooksPath", "/dev/null"])?;
     run_checked(root, &["add", "-A"])?;
     run_checked(
         root,
@@ -92,7 +93,7 @@ pub fn push_best_effort(root: &Path) -> PushOutcome {
     if remotes.is_empty() {
         return PushOutcome::NoRemote;
     }
-    match git(root, &["push", "origin", "HEAD"]) {
+    match git(root, &["push", "-u", "origin", "HEAD"]) {
         Ok(o) if o.status.success() => PushOutcome::Pushed,
         Ok(o) => PushOutcome::Failed(String::from_utf8_lossy(&o.stderr).to_string()),
         Err(e) => PushOutcome::Failed(e.to_string()),
