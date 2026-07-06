@@ -156,8 +156,8 @@ pub struct KnowledgeConfig {
 }
 
 /// v3 "Personal" pipeline gate. When disabled (default), retro behaves as v2.
-/// Enabled by `retro init --v3`; Plan 3's `retro migrate` will flip this for
-/// existing users and remove the v2 paths.
+/// Set to `true` to enable v3 paths. `retro init --v3` (Plan 2) will write this;
+/// `retro migrate` (Plan 3) will flip it for existing v2 users.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct V3Config {
     #[serde(default)]
