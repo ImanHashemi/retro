@@ -1,5 +1,6 @@
 pub mod claude_md;
 pub mod global_agent;
+pub mod local_md;
 pub mod skill;
 
 use crate::analysis::backend::AnalysisBackend;
