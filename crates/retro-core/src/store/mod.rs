@@ -90,6 +90,7 @@ impl Store {
             return Ok(None);
         }
         let content = std::fs::read_to_string(&path).map_err(|e| CoreError::Io(e.to_string()))?;
+        // TODO: include the file path in parse errors (load_all adds it; get() callers currently don't).
         Ok(Some(Node::from_markdown(&content)?))
     }
 
@@ -158,6 +159,7 @@ impl Store {
 
     /// Invalidate a node (set `invalidated_by`, touch `updated`).
     /// Returns false if the node does not exist. Never deletes.
+    /// NOTE: rewriting normalizes formatting (CRLF → LF, confidence to two decimals).
     pub fn invalidate(&self, scope: &Scope, id: &str, by: &str) -> Result<bool, CoreError> {
         let Some(mut node) = self.get(scope, id)? else {
             return Ok(false);
@@ -286,6 +288,11 @@ mod tests {
         assert_eq!(store.unique_slug("My Rule", &Scope::Global), "my-rule-2");
         store.write_node(&node("my-rule-2", Scope::Global)).unwrap();
         assert_eq!(store.unique_slug("My Rule", &Scope::Global), "my-rule-3");
+        // project scope resolves collisions independently
+        assert_eq!(
+            store.unique_slug("My Rule", &Scope::Project("p".to_string())),
+            "my-rule"
+        );
     }
 
     #[test]
