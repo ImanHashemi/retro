@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn apply_local_config_is_idempotent_and_standalone() {
         let tmp = TempDir::new().unwrap();
-        // simulate the clone path: repo exists but local config was never applied
+        // idempotency: repeated application after ensure_repo is safe
         assert!(ensure_repo(tmp.path()).unwrap());
         apply_local_config(tmp.path()).unwrap();
         apply_local_config(tmp.path()).unwrap(); // idempotent
@@ -184,6 +184,28 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "false");
+        let out = std::process::Command::new("git")
+            .args([
+                "-C",
+                tmp.path().to_str().unwrap(),
+                "config",
+                "--local",
+                "core.hooksPath",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "/dev/null");
+    }
+
+    #[test]
+    fn apply_local_config_works_on_raw_git_init_repo() {
+        let tmp = TempDir::new().unwrap();
+        // clone-path simulation: repo created WITHOUT ensure_repo
+        std::process::Command::new("git")
+            .args(["-C", tmp.path().to_str().unwrap(), "init"])
+            .output()
+            .unwrap();
+        apply_local_config(tmp.path()).unwrap();
         let out = std::process::Command::new("git")
             .args([
                 "-C",

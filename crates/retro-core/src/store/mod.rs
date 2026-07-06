@@ -92,8 +92,10 @@ impl Store {
             return Ok(None);
         }
         let content = std::fs::read_to_string(&path).map_err(|e| CoreError::Io(e.to_string()))?;
-        let node = Node::from_markdown(&content)
-            .map_err(|e| CoreError::Parse(format!("{}: {}", path.display(), e)))?;
+        let node = Node::from_markdown(&content).map_err(|e| match e {
+            CoreError::Parse(msg) => CoreError::Parse(format!("{}: {}", path.display(), msg)),
+            other => other,
+        })?;
         Ok(Some(node))
     }
 
