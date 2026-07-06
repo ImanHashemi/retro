@@ -151,6 +151,77 @@ mod tests {
         assert!(content.contains("user text"));
         assert!(content.contains("- global rule"));
     }
+
+    #[test]
+    fn multiline_body_flattens_to_single_line_bullet() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        store
+            .write_node(&node(
+                "multi",
+                Scope::Global,
+                NodeType::Rule,
+                0.9,
+                "Always do X.\n\n**Why:** because Y.\n**How to apply:** do Z.",
+            ))
+            .unwrap();
+        let rules = projectable_rules(&store, &Scope::Global, 0.7).unwrap();
+        assert_eq!(
+            rules,
+            vec!["Always do X. **Why:** because Y. **How to apply:** do Z.".to_string()]
+        );
+        // and the projected file has it as ONE bullet line
+        let claude_tmp = TempDir::new().unwrap();
+        let md = claude_tmp.path().join("CLAUDE.md");
+        project_global_md(&store, &md, 0.7, None).unwrap();
+        let content = std::fs::read_to_string(&md).unwrap();
+        assert!(content.contains("- Always do X. **Why:** because Y. **How to apply:** do Z."));
+    }
+
+    #[test]
+    fn git_exclude_works_in_worktrees() {
+        let store_tmp = TempDir::new().unwrap();
+        let store = Store::open(store_tmp.path());
+        store.ensure_layout().unwrap();
+        store
+            .write_node(&node(
+                "r",
+                Scope::Project("p".to_string()),
+                NodeType::Rule,
+                0.9,
+                "rule",
+            ))
+            .unwrap();
+
+        // real repo with a commit, then a linked worktree
+        let main = TempDir::new().unwrap();
+        let run = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(main.path(), &["init"]);
+        run(main.path(), &["config", "user.email", "t@t"]);
+        run(main.path(), &["config", "user.name", "t"]);
+        run(main.path(), &["config", "commit.gpgsign", "false"]);
+        run(main.path(), &["commit", "--allow-empty", "-m", "init"]);
+        let wt = main.path().join("wt");
+        run(main.path(), &["worktree", "add", wt.to_str().unwrap()]);
+
+        project_local_md(&store, "p", &wt, 0.7).unwrap();
+        // exclude lands in the COMMON dir's info/exclude
+        let exclude = std::fs::read_to_string(main.path().join(".git/info/exclude")).unwrap();
+        assert!(exclude.contains("CLAUDE.local.md"), "got: {exclude}");
+    }
 }
 
 /// Bodies of projectable nodes for a scope: active, non-memory, confidence >= threshold.
@@ -171,7 +242,18 @@ pub fn projectable_rules(
         .filter(|n| &n.scope == scope)
         .collect();
     nodes.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(nodes.into_iter().map(|n| n.body).collect())
+    Ok(nodes.into_iter().map(|n| flatten_body(&n.body)).collect())
+}
+
+/// Managed-block bullets are single-line (the v2-compatible, renderer-safe
+/// format). Multi-line store bodies are flattened: blank lines dropped,
+/// newlines become single spaces. The store file keeps the readable layout.
+fn flatten_body(body: &str) -> String {
+    body.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Regenerate the managed block in an arbitrary CLAUDE.md-style file.
@@ -183,6 +265,11 @@ pub fn project_global_md(
     backup_dir: Option<&Path>,
 ) -> Result<usize, CoreError> {
     let rules = projectable_rules(store, &Scope::Global, threshold)?;
+    // Parity with project_local_md: never create an empty shell on a machine
+    // that has no CLAUDE.md and no rules yet.
+    if rules.is_empty() && !claude_md_path.exists() {
+        return Ok(0);
+    }
     write_managed(claude_md_path, &rules, backup_dir)?;
     Ok(rules.len())
 }
@@ -222,15 +309,26 @@ fn write_managed(
     std::fs::write(path, updated).map_err(io)
 }
 
-/// Append CLAUDE.local.md to .git/info/exclude if the project is a git repo
-/// and the line isn't already present. Non-git directories are a no-op.
+/// Append CLAUDE.local.md to the repo's personal ignore file
+/// (<common-git-dir>/info/exclude). Handles regular repos AND worktrees
+/// (where .git is a file); git reads info/exclude from the COMMON dir.
+/// Non-git directories are a no-op.
 fn ensure_git_exclude(project_root: &Path) -> Result<(), CoreError> {
     let io = |e: std::io::Error| CoreError::Io(e.to_string());
-    let git_dir = project_root.join(".git");
-    if !git_dir.is_dir() {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .map_err(io)?;
+    if !out.status.success() {
+        return Ok(()); // not a git repo
+    }
+    let common = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if common.is_empty() {
         return Ok(());
     }
-    let info_dir = git_dir.join("info");
+    let info_dir = std::path::Path::new(&common).join("info");
     std::fs::create_dir_all(&info_dir).map_err(io)?;
     let exclude = info_dir.join("exclude");
     let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
