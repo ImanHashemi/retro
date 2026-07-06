@@ -43,8 +43,17 @@ pub fn index_path(store_root: &Path) -> PathBuf {
     store_root.join("index.db")
 }
 
+/// Open the index for querying. Errors with NotInitialized if the index
+/// has never been built — callers should run `build()` (or `retro reindex`).
 pub fn open(store_root: &Path) -> Result<Connection, CoreError> {
-    Ok(Connection::open(index_path(store_root))?)
+    let conn = Connection::open(index_path(store_root))?;
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 0 {
+        return Err(CoreError::NotInitialized(
+            "index not built — run `retro reindex`".to_string(),
+        ));
+    }
+    Ok(conn)
 }
 
 /// Full rebuild: delete index.db, recreate schema, insert every node.
@@ -114,7 +123,7 @@ pub fn build(store: &Store) -> Result<IndexStats, CoreError> {
     }
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('fingerprint', ?1)",
-        rusqlite::params![fingerprint(store)?],
+        rusqlite::params![fingerprint_of(&loaded.nodes)?],
     )?;
     Ok(IndexStats {
         nodes: loaded.nodes.len(),
@@ -140,10 +149,12 @@ pub fn query(conn: &Connection, filter: &NodeFilter) -> Result<Vec<NodeRow>, Cor
         sql.push_str(" AND active = 1");
     }
     if let Some(text) = &filter.text {
-        sql.push_str(
-            " AND (scope || '/' || id) IN (SELECT scope || '/' || id FROM nodes_fts WHERE nodes_fts MATCH ?)",
-        );
-        params.push(Box::new(fts_escape(text)));
+        if !text.trim().is_empty() {
+            sql.push_str(
+                " AND (scope || '/' || id) IN (SELECT scope || '/' || id FROM nodes_fts WHERE nodes_fts MATCH ?)",
+            );
+            params.push(Box::new(fts_escape(text)));
+        }
     }
     sql.push_str(" ORDER BY scope, id");
 
@@ -191,15 +202,18 @@ fn fts_escape(input: &str) -> String {
 /// Cheap store fingerprint: sorted `path|mtime|len` lines.
 /// String comparison — no hashing dependency needed.
 pub fn fingerprint(store: &Store) -> Result<String, CoreError> {
-    let loaded = store.load_all()?;
-    let mut lines: Vec<String> = Vec::with_capacity(loaded.nodes.len());
-    for (path, _) in &loaded.nodes {
+    fingerprint_of(&store.load_all()?.nodes)
+}
+
+fn fingerprint_of(nodes: &[(PathBuf, super::Node)]) -> Result<String, CoreError> {
+    let mut lines: Vec<String> = Vec::with_capacity(nodes.len());
+    for (path, _) in nodes {
         let meta = std::fs::metadata(path).map_err(|e| CoreError::Io(e.to_string()))?;
         let mtime = meta
             .modified()
             .map_err(|e| CoreError::Io(e.to_string()))?
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_nanos())
             .unwrap_or(0);
         lines.push(format!("{}|{}|{}", path.display(), mtime, meta.len()));
     }
@@ -355,6 +369,44 @@ mod tests {
         )
         .unwrap();
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn query_combined_filters_and_blank_text() {
+        let (_tmp, store) = seeded_store();
+        build(&store).unwrap();
+        let conn = open(store.root()).unwrap();
+        // scope + text combined (dashboard's primary pattern)
+        let hits = query(
+            &conn,
+            &NodeFilter {
+                scope: Some("global".to_string()),
+                text: Some("smoke tests".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "g-rule");
+        // blank text is ignored, not an FTS error
+        let hits = query(
+            &conn,
+            &NodeFilter {
+                text: Some("   ".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 3);
+    }
+
+    #[test]
+    fn open_before_build_errors_not_initialized() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        let err = open(store.root()).unwrap_err();
+        assert!(err.to_string().contains("not built"), "got: {err}");
     }
 
     #[test]
