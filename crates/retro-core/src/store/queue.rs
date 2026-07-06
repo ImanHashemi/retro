@@ -17,7 +17,8 @@ pub struct QueueEntry {
     /// (SessionEnd hook provides it; catch-up scan recovers it later from the transcript).
     #[serde(default)]
     pub cwd: Option<String>,
-    /// RFC3339. Drain order.
+    /// RFC3339 in UTC (use `chrono::Utc::now().to_rfc3339()`); drain order is
+    /// lexicographic, which is only correct for a consistent UTC writer.
     pub enqueued_at: String,
 }
 
@@ -44,7 +45,9 @@ pub fn enqueue(store_root: &Path, entry: &QueueEntry) -> Result<(), CoreError> {
     let path = entry_path(store_root, &entry.session_id)?;
     std::fs::create_dir_all(queue_dir(store_root)).map_err(io)?;
     let json = serde_json::to_string_pretty(entry).map_err(|e| CoreError::Parse(e.to_string()))?;
-    std::fs::write(&path, json).map_err(io)
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json).map_err(io)?;
+    std::fs::rename(&tmp, &path).map_err(io)
 }
 
 /// All entries, oldest first. Unparseable files are skipped (prune_stale removes them).
@@ -81,6 +84,9 @@ pub fn remove(store_root: &Path, session_id: &str) -> Result<(), CoreError> {
 /// Remove entries whose transcript no longer exists, plus unparseable entry
 /// files. Returns the removed session ids (callers record them in health —
 /// visible, never silently retried forever).
+///
+/// Callers MUST record the returned ids (health/log) — a pruned entry means a
+/// session that will never be analyzed; silent discard hides data loss.
 pub fn prune_stale(store_root: &Path) -> Result<Vec<String>, CoreError> {
     let dir = queue_dir(store_root);
     let mut pruned = Vec::new();
@@ -186,6 +192,26 @@ mod tests {
         let pruned = prune_stale(tmp.path()).unwrap();
         assert_eq!(pruned, vec!["junk".to_string()]);
         assert!(list(tmp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_missing_entry_is_a_noop() {
+        let tmp = TempDir::new().unwrap();
+        remove(tmp.path(), "never-enqueued").unwrap();
+    }
+
+    #[test]
+    fn re_enqueue_with_different_content_last_wins() {
+        let tmp = TempDir::new().unwrap();
+        let t = tmp.path().join("t.jsonl");
+        std::fs::write(&t, "{}").unwrap();
+        let mut e = entry("same-id", &t);
+        enqueue(tmp.path(), &e).unwrap();
+        e.cwd = Some("/different/path".to_string());
+        enqueue(tmp.path(), &e).unwrap();
+        let entries = list(tmp.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].cwd.as_deref(), Some("/different/path"));
     }
 
     #[test]
