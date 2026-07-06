@@ -93,6 +93,8 @@ enum Commands {
     Status,
     /// Rebuild the v3 store index from knowledge files (safe anytime)
     Reindex,
+    /// (v3 hook entry) Enqueue a finished session for analysis — called by the SessionEnd hook
+    Observe,
     /// Show audit log entries
     Log {
         /// Show entries from the last N days/hours (e.g., "7d", "24h")
@@ -175,6 +177,7 @@ fn main() {
         Commands::Audit { dry_run } => commands::audit::run(dry_run, verbose),
         Commands::Status => commands::status::run(),
         Commands::Reindex => commands::reindex::run(),
+        Commands::Observe => commands::observe::run(),
         Commands::Log { since } => commands::log::run(since),
         Commands::Review { global, dry_run } => commands::review::run(global, dry_run, verbose),
         Commands::Curate { dry_run } => commands::curate::run(dry_run, verbose),

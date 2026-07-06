@@ -9,6 +9,7 @@ pub mod hooks;
 pub mod ingest;
 pub mod init;
 pub mod log;
+pub mod observe;
 pub mod patterns;
 pub mod reindex;
 pub mod review;
