@@ -92,8 +92,9 @@ impl Store {
             return Ok(None);
         }
         let content = std::fs::read_to_string(&path).map_err(|e| CoreError::Io(e.to_string()))?;
-        // TODO: include the file path in parse errors (load_all adds it; get() callers currently don't).
-        Ok(Some(Node::from_markdown(&content)?))
+        let node = Node::from_markdown(&content)
+            .map_err(|e| CoreError::Parse(format!("{}: {}", path.display(), e)))?;
+        Ok(Some(node))
     }
 
     /// Load every node in the store. Unparseable .md files are skipped
@@ -371,5 +372,15 @@ mod tests {
         assert_eq!(n.updated, chrono::Utc::now().date_naive());
 
         assert!(!store.invalidate(&Scope::Global, "missing", "x").unwrap());
+    }
+
+    #[test]
+    fn get_parse_error_includes_file_path() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        std::fs::write(tmp.path().join("knowledge/global/bad.md"), "not a node").unwrap();
+        let err = store.get(&Scope::Global, "bad").unwrap_err();
+        assert!(err.to_string().contains("bad.md"), "got: {err}");
     }
 }

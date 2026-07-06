@@ -9,6 +9,7 @@ use crate::errors::CoreError;
 
 /// Outcome of a best-effort push. Failures are data, not errors —
 /// callers record them in health, they never abort a pipeline.
+#[must_use]
 #[derive(Debug)]
 pub enum PushOutcome {
     Pushed,
@@ -35,14 +36,10 @@ pub fn head_exists(root: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Initialize the store repo if needed. Returns true if newly created.
-/// Sets a local identity fallback and disables gpg signing locally so
-/// automated commits never depend on the user's global git setup.
-pub fn ensure_repo(root: &Path) -> Result<bool, CoreError> {
-    if is_repo(root) {
-        return Ok(false);
-    }
-    run_checked(root, &["init"])?;
+/// Apply the store repo's local git config. Safe to call repeatedly.
+/// Must also be applied on the clone path (`retro init --from`), which
+/// bypasses `ensure_repo`'s create branch.
+pub fn apply_local_config(root: &Path) -> Result<(), CoreError> {
     // Local identity fallback: only set if unset in any config scope.
     let email_set = git(root, &["config", "user.email"])
         .map(|o| o.status.success())
@@ -53,6 +50,18 @@ pub fn ensure_repo(root: &Path) -> Result<bool, CoreError> {
     }
     run_checked(root, &["config", "commit.gpgsign", "false"])?;
     run_checked(root, &["config", "core.hooksPath", "/dev/null"])?;
+    Ok(())
+}
+
+/// Initialize the store repo if needed. Returns true if newly created.
+/// Sets a local identity fallback and disables gpg signing locally so
+/// automated commits never depend on the user's global git setup.
+pub fn ensure_repo(root: &Path) -> Result<bool, CoreError> {
+    if is_repo(root) {
+        return Ok(false);
+    }
+    run_checked(root, &["init"])?;
+    apply_local_config(root)?;
     run_checked(root, &["add", "-A"])?;
     run_checked(
         root,
@@ -155,5 +164,36 @@ mod tests {
             push_best_effort(tmp.path()),
             PushOutcome::NoRemote
         ));
+    }
+
+    #[test]
+    fn apply_local_config_is_idempotent_and_standalone() {
+        let tmp = TempDir::new().unwrap();
+        // simulate the clone path: repo exists but local config was never applied
+        assert!(ensure_repo(tmp.path()).unwrap());
+        apply_local_config(tmp.path()).unwrap();
+        apply_local_config(tmp.path()).unwrap(); // idempotent
+        let out = std::process::Command::new("git")
+            .args([
+                "-C",
+                tmp.path().to_str().unwrap(),
+                "config",
+                "--local",
+                "commit.gpgsign",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "false");
+        let out = std::process::Command::new("git")
+            .args([
+                "-C",
+                tmp.path().to_str().unwrap(),
+                "config",
+                "--local",
+                "core.hooksPath",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "/dev/null");
     }
 }
