@@ -99,6 +99,7 @@ impl Store {
     /// Load every node in the store. Unparseable .md files are skipped
     /// with a warning (matches the JSONL-skipping convention elsewhere).
     /// Layout is fixed depth: knowledge/global/*.md and knowledge/projects/*/*.md.
+    /// Files whose location/name don't match their declared scope/id are skipped with a warning (prevents duplicate ids and get()-invisible nodes).
     pub fn load_all(&self) -> Result<LoadResult, CoreError> {
         let mut result = LoadResult {
             nodes: Vec::new(),
@@ -133,7 +134,20 @@ impl Store {
                     }
                 };
                 match Node::from_markdown(&content) {
-                    Ok(node) => result.nodes.push((path, node)),
+                    Ok(node) => {
+                        let canonical = self.node_path(&node.scope, &node.id);
+                        if path != canonical {
+                            result.warnings.push(format!(
+                                "{}: declares {}/{} which belongs at {} — skipped",
+                                path.display(),
+                                node.scope,
+                                node.id,
+                                canonical.display()
+                            ));
+                            continue;
+                        }
+                        result.nodes.push((path, node));
+                    }
                     Err(e) => {
                         result.warnings.push(format!("{}: {}", path.display(), e));
                     }
@@ -294,6 +308,50 @@ mod tests {
         assert_eq!(
             store.unique_slug("My Rule", &Scope::Project("p".to_string())),
             "my-rule"
+        );
+    }
+
+    #[test]
+    fn load_all_skips_copied_duplicate_with_warning() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        store.write_node(&node("original", Scope::Global)).unwrap();
+        // simulate a user copy-pasting a node file: same frontmatter id, different filename
+        std::fs::copy(
+            tmp.path().join("knowledge/global/original.md"),
+            tmp.path().join("knowledge/global/original-copy.md"),
+        )
+        .unwrap();
+        let result = store.load_all().unwrap();
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(
+            result.warnings[0].contains("original-copy.md"),
+            "got: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn load_all_skips_misplaced_scope_with_warning() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        // file physically in global/ but declaring a project scope
+        let n = node("misplaced", Scope::Project("other-proj".to_string()));
+        std::fs::write(
+            tmp.path().join("knowledge/global/misplaced.md"),
+            n.to_markdown(),
+        )
+        .unwrap();
+        let result = store.load_all().unwrap();
+        assert!(result.nodes.is_empty());
+        assert_eq!(result.warnings.len(), 1);
+        assert!(
+            result.warnings[0].contains("belongs at"),
+            "got: {:?}",
+            result.warnings
         );
     }
 

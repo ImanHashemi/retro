@@ -5,6 +5,18 @@ use chrono::NaiveDate;
 
 use crate::errors::CoreError;
 
+/// Ids and project slugs must be safe path segments: lowercase ASCII
+/// alphanumerics and dashes, starting alphanumeric (the slugify charset).
+fn is_valid_slug(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}
+        _ => return false,
+    }
+    s.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 /// Node type. v3 collapses v2's six types to four
 /// (`directive` → `rule`, `skill` → `pattern`, handled at migration).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +71,7 @@ impl Scope {
             return Ok(Scope::Global);
         }
         if let Some(slug) = s.strip_prefix("project/") {
-            if !slug.is_empty() {
+            if is_valid_slug(slug) {
                 return Ok(Scope::Project(slug.to_string()));
             }
         }
@@ -191,8 +203,14 @@ impl Node {
         }
 
         let missing = |k: &str| CoreError::Parse(format!("missing frontmatter key: {k}"));
+        let id = id.ok_or_else(|| missing("id"))?;
+        if !is_valid_slug(&id) {
+            return Err(CoreError::Parse(format!(
+                "invalid id (must be lowercase kebab-case): {id:?}"
+            )));
+        }
         Ok(Node {
-            id: id.ok_or_else(|| missing("id"))?,
+            id,
             scope: scope.ok_or_else(|| missing("scope"))?,
             node_type: node_type.ok_or_else(|| missing("type"))?,
             confidence: confidence.ok_or_else(|| missing("confidence"))?,
@@ -384,6 +402,23 @@ A/B comparisons must always use paired observations.
             .replace("type: rule\n", "type: rule\ntype: pattern\n");
         let err = Node::from_markdown(&md).unwrap_err();
         assert!(err.to_string().contains("duplicate"), "got: {err}");
+    }
+
+    #[test]
+    fn from_markdown_rejects_unsafe_id_and_scope() {
+        let base = sample_node().to_markdown();
+        for (needle, replacement) in [
+            ("id: ab-paired-observations", "id: ../escape"),
+            ("id: ab-paired-observations", "id: UPPER_case"),
+            ("scope: project/my-api-service", "scope: project/../escape"),
+            ("scope: project/my-api-service", "scope: project/has space"),
+        ] {
+            let md = base.replace(needle, replacement);
+            assert!(
+                Node::from_markdown(&md).is_err(),
+                "should fail: {replacement}"
+            );
+        }
     }
 
     #[test]

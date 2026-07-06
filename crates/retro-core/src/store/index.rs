@@ -46,7 +46,13 @@ pub fn index_path(store_root: &Path) -> PathBuf {
 /// Open the index for querying. Errors with NotInitialized if the index
 /// has never been built — callers should run `build()` (or `retro reindex`).
 pub fn open(store_root: &Path) -> Result<Connection, CoreError> {
-    let conn = Connection::open(index_path(store_root))?;
+    let path = index_path(store_root);
+    if !path.exists() {
+        return Err(CoreError::NotInitialized(
+            "index not built — run `retro reindex`".to_string(),
+        ));
+    }
+    let conn = Connection::open(&path)?;
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 0 {
         return Err(CoreError::NotInitialized(
@@ -57,6 +63,7 @@ pub fn open(store_root: &Path) -> Result<Connection, CoreError> {
 }
 
 /// Full rebuild: delete index.db, recreate schema, insert every node.
+/// Builds are atomic: user_version is set only after all rows are committed, so a failed build is indistinguishable from "not built".
 pub fn build(store: &Store) -> Result<IndexStats, CoreError> {
     let db = index_path(store.root());
     for suffix in ["", "-wal", "-shm"] {
@@ -65,7 +72,7 @@ pub fn build(store: &Store) -> Result<IndexStats, CoreError> {
             std::fs::remove_file(&p).map_err(|e| CoreError::Io(e.to_string()))?;
         }
     }
-    let conn = Connection::open(&db)?;
+    let mut conn = Connection::open(&db)?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -87,14 +94,14 @@ pub fn build(store: &Store) -> Result<IndexStats, CoreError> {
              node_id TEXT NOT NULL,
              source TEXT NOT NULL
          );
-         CREATE VIRTUAL TABLE nodes_fts USING fts5(id, scope, body);
-         PRAGMA user_version = 1;",
+         CREATE VIRTUAL TABLE nodes_fts USING fts5(id, scope, body);",
     )?;
 
     let loaded = store.load_all()?;
+    let tx = conn.transaction()?;
     for (path, node) in &loaded.nodes {
         let scope = node.scope.to_string();
-        conn.execute(
+        tx.execute(
             "INSERT INTO nodes (id, scope, type, confidence, active, created, updated, invalidated_by, body, path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
@@ -111,20 +118,22 @@ pub fn build(store: &Store) -> Result<IndexStats, CoreError> {
             ],
         )?;
         for source in &node.sources {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO node_sources (scope, node_id, source) VALUES (?1, ?2, ?3)",
                 rusqlite::params![scope, node.id, source],
             )?;
         }
-        conn.execute(
+        tx.execute(
             "INSERT INTO nodes_fts (id, scope, body) VALUES (?1, ?2, ?3)",
             rusqlite::params![node.id, scope, node.body],
         )?;
     }
-    conn.execute(
+    tx.execute(
         "INSERT INTO meta (key, value) VALUES ('fingerprint', ?1)",
         rusqlite::params![fingerprint_of(&loaded.nodes)?],
     )?;
+    tx.commit()?;
+    conn.pragma_update(None, "user_version", 1)?;
     Ok(IndexStats {
         nodes: loaded.nodes.len(),
         warnings: loaded.warnings,
@@ -177,11 +186,11 @@ pub fn query(conn: &Connection, filter: &NodeFilter) -> Result<Vec<NodeRow>, Cor
             sources: Vec::new(),
         });
     }
+    let mut sources_stmt = conn.prepare(
+        "SELECT source FROM node_sources WHERE scope = ?1 AND node_id = ?2 ORDER BY source",
+    )?;
     for r in &mut rows {
-        let mut stmt = conn.prepare(
-            "SELECT source FROM node_sources WHERE scope = ?1 AND node_id = ?2 ORDER BY source",
-        )?;
-        let sources = stmt
+        let sources = sources_stmt
             .query_map(rusqlite::params![r.scope, r.id], |row| row.get(0))?
             .collect::<Result<Vec<String>, _>>()?;
         r.sources = sources;
@@ -407,6 +416,21 @@ mod tests {
         store.ensure_layout().unwrap();
         let err = open(store.root()).unwrap_err();
         assert!(err.to_string().contains("not built"), "got: {err}");
+    }
+
+    #[test]
+    fn build_with_copied_duplicate_file_warns_and_succeeds() {
+        let (tmp, store) = seeded_store();
+        std::fs::copy(
+            tmp.path().join("knowledge/global/g-rule.md"),
+            tmp.path().join("knowledge/global/g-rule-copy.md"),
+        )
+        .unwrap();
+        let stats = build(&store).unwrap();
+        assert_eq!(stats.nodes, 3);
+        assert_eq!(stats.warnings.len(), 1);
+        let conn = open(store.root()).unwrap();
+        assert_eq!(query(&conn, &NodeFilter::default()).unwrap().len(), 3);
     }
 
     #[test]
