@@ -7,6 +7,7 @@ pub mod git;
 pub mod index;
 pub mod queue;
 pub mod state;
+pub mod projects;
 mod node;
 mod slug;
 
