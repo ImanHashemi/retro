@@ -2,6 +2,7 @@ pub mod backend;
 pub mod claude_cli;
 pub mod merge;
 pub mod prompts;
+pub mod v3;
 
 use crate::config::Config;
 use crate::db;
