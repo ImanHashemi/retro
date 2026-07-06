@@ -106,6 +106,94 @@ impl Node {
             self.body.trim_end_matches('\n'),
         )
     }
+
+    /// Parse a node from markdown with strict frontmatter.
+    /// Unknown keys are an error (catches human typos); the fixed
+    /// schema is owned by this binary — migration controls format changes.
+    pub fn from_markdown(content: &str) -> Result<Node, CoreError> {
+        let rest = content
+            .strip_prefix("---\n")
+            .ok_or_else(|| CoreError::Parse("missing frontmatter open delimiter".to_string()))?;
+        let (front, body) = rest
+            .split_once("\n---\n")
+            .ok_or_else(|| CoreError::Parse("missing frontmatter close delimiter".to_string()))?;
+
+        let mut id: Option<String> = None;
+        let mut scope: Option<Scope> = None;
+        let mut node_type: Option<NodeType> = None;
+        let mut confidence: Option<f64> = None;
+        let mut sources: Vec<String> = Vec::new();
+        let mut created: Option<NaiveDate> = None;
+        let mut updated: Option<NaiveDate> = None;
+        let mut invalidated_by: Option<String> = None;
+
+        for line in front.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let (key, value) = line
+                .split_once(':')
+                .ok_or_else(|| CoreError::Parse(format!("invalid frontmatter line: {line:?}")))?;
+            let key = key.trim();
+            let value = value.trim();
+            match key {
+                "id" => id = Some(value.to_string()),
+                "scope" => scope = Some(Scope::parse(value)?),
+                "type" => node_type = Some(NodeType::parse(value)?),
+                "confidence" => {
+                    confidence =
+                        Some(value.parse::<f64>().map_err(|_| {
+                            CoreError::Parse(format!("invalid confidence: {value:?}"))
+                        })?)
+                }
+                "sources" => {
+                    let inner = value
+                        .strip_prefix('[')
+                        .and_then(|v| v.strip_suffix(']'))
+                        .ok_or_else(|| {
+                            CoreError::Parse(format!("invalid sources list: {value:?}"))
+                        })?;
+                    sources = inner
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                        .collect();
+                }
+                "created" => created = Some(parse_date(value)?),
+                "updated" => updated = Some(parse_date(value)?),
+                "invalidated_by" => {
+                    invalidated_by = match value {
+                        "null" | "" => None,
+                        other => Some(other.to_string()),
+                    }
+                }
+                other => {
+                    return Err(CoreError::Parse(format!(
+                        "unknown frontmatter key: {other:?}"
+                    )));
+                }
+            }
+        }
+
+        let missing = |k: &str| CoreError::Parse(format!("missing frontmatter key: {k}"));
+        Ok(Node {
+            id: id.ok_or_else(|| missing("id"))?,
+            scope: scope.ok_or_else(|| missing("scope"))?,
+            node_type: node_type.ok_or_else(|| missing("type"))?,
+            confidence: confidence.ok_or_else(|| missing("confidence"))?,
+            sources,
+            created: created.ok_or_else(|| missing("created"))?,
+            updated: updated.ok_or_else(|| missing("updated"))?,
+            invalidated_by,
+            body: body.trim_end_matches('\n').to_string(),
+        })
+    }
+}
+
+fn parse_date(s: &str) -> Result<NaiveDate, CoreError> {
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map_err(|_| CoreError::Parse(format!("invalid date: {s:?}")))
 }
 
 #[cfg(test)]
@@ -205,5 +293,66 @@ A/B comparisons must always use paired observations.
         let mut n = sample_node();
         n.body = String::new();
         assert!(n.to_markdown().ends_with("---\n\n"));
+    }
+
+    #[test]
+    fn from_markdown_roundtrip() {
+        let n = sample_node();
+        let parsed = Node::from_markdown(&n.to_markdown()).unwrap();
+        assert_eq!(parsed, n);
+    }
+
+    #[test]
+    fn from_markdown_roundtrip_with_invalidated_and_empty_sources() {
+        let mut n = sample_node();
+        n.sources = vec![];
+        n.invalidated_by = Some("other".to_string());
+        let parsed = Node::from_markdown(&n.to_markdown()).unwrap();
+        assert_eq!(parsed, n);
+    }
+
+    #[test]
+    fn from_markdown_body_may_contain_dashes() {
+        let mut n = sample_node();
+        n.body = "line one\n---\nline after a dash rule".to_string();
+        let parsed = Node::from_markdown(&n.to_markdown()).unwrap();
+        assert_eq!(parsed.body, n.body);
+    }
+
+    #[test]
+    fn from_markdown_missing_required_key_errors() {
+        let md = "---\nid: x\nscope: global\ntype: rule\n---\nbody\n";
+        let err = Node::from_markdown(md).unwrap_err();
+        assert!(err.to_string().contains("confidence"), "got: {err}");
+    }
+
+    #[test]
+    fn from_markdown_unknown_key_errors() {
+        let md = sample_node().to_markdown().replace("updated:", "updatedd:");
+        let err = Node::from_markdown(&md).unwrap_err();
+        assert!(err.to_string().contains("updatedd"), "got: {err}");
+    }
+
+    #[test]
+    fn from_markdown_bad_values_error() {
+        let base = sample_node().to_markdown();
+        for (needle, replacement) in [
+            ("confidence: 0.90", "confidence: high"),
+            ("created: 2026-05-19", "created: yesterday"),
+            ("type: rule", "type: law"),
+            ("scope: project/my-api-service", "scope: team/x"),
+        ] {
+            let md = base.replace(needle, replacement);
+            assert!(
+                Node::from_markdown(&md).is_err(),
+                "should fail: {replacement}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_markdown_requires_frontmatter_delimiters() {
+        assert!(Node::from_markdown("no frontmatter here").is_err());
+        assert!(Node::from_markdown("---\nid: x\nno closing delimiter").is_err());
     }
 }
