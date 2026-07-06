@@ -4,6 +4,7 @@
 //! SQLite (`index.db`) is a disposable, rebuildable index — files always win.
 
 pub mod git;
+pub mod index;
 mod node;
 mod slug;
 
