@@ -3,6 +3,7 @@
 //! Markdown files under `<root>/knowledge/` are the source of truth.
 //! SQLite (`index.db`) is a disposable, rebuildable index — files always win.
 
+pub mod git;
 mod node;
 mod slug;
 
