@@ -113,7 +113,9 @@ pub fn run_v3(
             Ok(s) => s,
             Err(_) => {
                 // unparseable transcript: drop from queue, note in health
-                queue::remove(store_root, &entry.session_id)?;
+                if !dry_run {
+                    queue::remove(store_root, &entry.session_id)?;
+                }
                 summary.sessions_skipped += 1;
                 continue;
             }
@@ -125,12 +127,16 @@ pub fn run_v3(
             .filter(|c| !c.is_empty())
             .unwrap_or(cwd_hint);
         if cwd.is_empty() {
-            queue::remove(store_root, &entry.session_id)?;
+            if !dry_run {
+                queue::remove(store_root, &entry.session_id)?;
+            }
             summary.sessions_skipped += 1;
             continue;
         }
         if projects::is_excluded(&cwd, &config.privacy.exclude_projects) {
-            queue::remove(store_root, &entry.session_id)?;
+            if !dry_run {
+                queue::remove(store_root, &entry.session_id)?;
+            }
             summary.sessions_skipped += 1;
             continue;
         }
@@ -183,11 +189,14 @@ pub fn run_v3(
     }
 
     // Stage: budget-gated analysis, one AI call per project group.
+    // State is re-loaded fresh around each mutation — never held across an AI
+    // call, so concurrent hook writes (observe/brief) aren't clobbered by a
+    // stale save.
     let today = chrono::Utc::now().date_naive().to_string();
-    let mut state = RunnerState::load(store_root)?;
     let mut touched: Vec<(String, String)> = Vec::new(); // (slug, path) that got/changed nodes
     let mut learned: Vec<String> = Vec::new();
     for (slug, project_path, group) in &groups {
+        let state = RunnerState::load(store_root)?;
         if state.budget_remaining(&today, config.runner.max_ai_calls_per_day) == 0 {
             let waiting: usize =
                 groups.iter().map(|(_, _, s)| s.len()).sum::<usize>() - summary.sessions_processed;
@@ -209,7 +218,6 @@ pub fn run_v3(
                 continue;
             }
         };
-        state.record_ai_calls(&today, 1);
         summary.ai_calls += 1;
         summary.sessions_processed += result.sessions_analyzed;
         summary.nodes_created += result.nodes_created;
@@ -221,6 +229,8 @@ pub fn run_v3(
             let first_line = b.lines().next().unwrap_or(b);
             format!("Learned: {}", crate::util::truncate_str(first_line, 100))
         }));
+        let mut state = RunnerState::load(store_root)?;
+        state.record_ai_calls(&today, 1);
         for (session_id, mtime_unix, _) in group {
             queue::remove(store_root, session_id)?;
             state.record_processed(session_id, *mtime_unix);
@@ -245,6 +255,10 @@ pub fn run_v3(
             )?;
         }
     }
+
+    // Anything still queued (budget exhaustion OR failed groups) is pending —
+    // authoritative recount so the summary can't understate it.
+    summary.sessions_pending = queue::list(store_root)?.len();
 
     // Stage: surface store parse warnings (skipped/misplaced files) — visible,
     // never silent (matches the JSONL-skipping convention elsewhere).
@@ -429,6 +443,63 @@ mod tests {
             "got: {:?}",
             final_state.processed
         );
+    }
+
+    #[test]
+    fn dry_run_leaves_unparseable_entries_queued() {
+        let (tmp, _claude, config) = setup();
+        let bad = tmp.path().join("bad.jsonl");
+        std::fs::write(&bad, "not valid jsonl").unwrap();
+        queue::enqueue(
+            tmp.path(),
+            &queue::QueueEntry {
+                session_id: "bad-sess".to_string(),
+                transcript_path: bad.display().to_string(),
+                cwd: Some("/tmp/x".to_string()),
+                enqueued_at: "2026-07-06T10:00:00Z".to_string(),
+            },
+        )
+        .unwrap();
+        let backend = MockBackend::with_responses(vec![]);
+        let summary = run_v3(tmp.path(), &config, &backend, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(summary.sessions_skipped, 1);
+        assert_eq!(
+            queue::list(tmp.path()).unwrap().len(),
+            1,
+            "dry-run must not remove"
+        );
+    }
+
+    #[test]
+    fn failed_analysis_leaves_sessions_queued_and_pending() {
+        let (tmp, _claude, config) = setup();
+        let proj = TempDir::new().unwrap();
+        let transcript =
+            write_fixture_session(tmp.path(), "fail-sess", proj.path().to_str().unwrap());
+        queue::enqueue(
+            tmp.path(),
+            &queue::QueueEntry {
+                session_id: "fail-sess".to_string(),
+                transcript_path: transcript.display().to_string(),
+                cwd: Some(proj.path().display().to_string()),
+                enqueued_at: "2026-07-06T10:00:00Z".to_string(),
+            },
+        )
+        .unwrap();
+        let backend = MockBackend::with_responses(vec![]); // exhausted mock -> analyze_sessions errors
+        let summary = run_v3(tmp.path(), &config, &backend, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(summary.ai_calls, 0);
+        assert_eq!(
+            summary.sessions_pending, 1,
+            "failed group counts as pending"
+        );
+        assert_eq!(queue::list(tmp.path()).unwrap().len(), 1, "stays queued");
+        let h = health::Health::load(tmp.path()).unwrap();
+        assert!(!h.stages["analyze"].ok, "failure recorded");
     }
 
     #[test]
