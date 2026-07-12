@@ -24,8 +24,8 @@ pub struct RunnerState {
     /// session_id -> transcript mtime (unix secs) at the time it was last
     /// processed by the pipeline. Used to skip re-enqueueing unchanged
     /// sessions that fall inside the catch-up safety margin.
-    /// Not yet written by the pipeline itself (wired in runner_v3, a later task) —
-    /// only `record_processed()` exists so far.
+    /// Written by the pipeline (`runner_v3`) via `record_processed()` after
+    /// each drained session; read by `retro brief`'s catch-up dedup.
     #[serde(default)]
     pub processed: std::collections::BTreeMap<String, u64>,
 }
