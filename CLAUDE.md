@@ -87,6 +87,10 @@ retro init --uninstall --purge && cargo build --release && ./target/release/retr
 | `retro hooks remove` | Remove git hooks |
 | `retro init --uninstall [--purge]` | Uninstall retro (removes launchd plist, hooks, optionally data) |
 | `retro reindex` | (v3) Rebuild the store index from knowledge files |
+| `retro observe` | (v3) SessionEnd hook entry: enqueue session, spawn worker |
+| `retro brief` | (v3) SessionStart hook entry: catch-up scan + session briefing |
+| `retro init --v3 [--from <remote>]` | (v3) Initialize personal store, install global hooks |
+| `retro run [--background]` | (v3, when `[v3] enabled`) Drain queue: analyze → project → commit → push |
 
 Note: `--auto` flag is deprecated in v2. Use `retro start` for automatic background operation.
 
@@ -319,6 +323,17 @@ Spec: `docs/superpowers/specs/2026-07-06-retro-v3-personal-redesign-design.md`.
   markdown nodes with strict frontmatter as source of truth under `~/.retro/knowledge/`,
   git layer for store commits (`store::git`, wired to mutations in Plan 2), disposable SQLite index with FTS5 (`store::index`),
   `retro reindex` command. v2 continues to work unchanged alongside.
+- **Plan 2: DONE** — Pipeline. Hook-based capture (`retro observe` on SessionEnd,
+  `retro brief` on SessionStart with 60s-margin catch-up and processed-session dedup),
+  automatic project registration (remote-url identity, canonical paths, notify-on-register,
+  exclusion with cleanup), analysis via the v2 engine with a hardened markdown-store sink
+  (`analysis/v3.rs` — slug validation on all LLM-supplied ids, visible skip accounting),
+  one-way projection to `~/.claude/CLAUDE.md` + per-project `CLAUDE.local.md` (single-line
+  bullets; ignored via the common git dir's `info/exclude`), budget-gated `runner_v3`
+  pipeline behind `[v3] enabled` (failed AI calls consume budget; machine-local ignores
+  migrate via `.git/info/exclude`), `retro init --v3 [--from <remote>]` with non-destructive
+  global-hooks merge, settings backup, and optional private backup remote. All v3 state
+  (`queue/`, `state/`, `health.json`, `run.lock`) is machine-local and gitignored.
 
 ## Testing
 
