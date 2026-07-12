@@ -188,6 +188,16 @@ fn init_v3(from: Option<&str>) -> Result<()> {
                 dir.display()
             );
         }
+        // ...nor anything else (a live v2 install, say): git clone needs an empty target.
+        let is_non_empty = std::fs::read_dir(&dir)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false);
+        if is_non_empty {
+            anyhow::bail!(
+                "{} is not empty (an existing retro install?) — git clone needs an empty target. Move it aside or run plain `retro init --v3` to adopt it in place",
+                dir.display()
+            );
+        }
         std::fs::create_dir_all(dir.parent().unwrap_or(&dir))?;
         let status = std::process::Command::new("git")
             .args(["clone", remote, &dir.display().to_string()])
@@ -213,13 +223,18 @@ fn init_v3(from: Option<&str>) -> Result<()> {
     // Global hooks in ~/.claude/settings.json (absolute binary path — hooks
     // run outside any shell profile, PATH is not guaranteed).
     let config_path = dir.join("config.toml");
+    // Load-modify-save: Config captures all known sections; hand-added unknown keys/comments are dropped (acceptable — config is retro-owned).
     let mut config = Config::load(&config_path)?;
     let exe = std::env::current_exe()?.display().to_string();
     let settings_path = config.claude_dir().join("settings.json");
+    if settings_path.exists() {
+        retro_core::util::backup_file(&settings_path.display().to_string(), &dir.join("backups"))?;
+    }
     let existing: serde_json::Value = match std::fs::read_to_string(&settings_path) {
         Ok(content) => serde_json::from_str(&content)
             .map_err(|e| anyhow::anyhow!("cannot parse {}: {e}", settings_path.display()))?,
-        Err(_) => serde_json::json!({}),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(e) => anyhow::bail!("cannot read {}: {e}", settings_path.display()),
     };
     let with_end =
         retro_core::claude_settings::ensure_hook(existing, "SessionEnd", &format!("{exe} observe"))?;
@@ -244,31 +259,36 @@ fn init_v3(from: Option<&str>) -> Result<()> {
         let mut answer = String::new();
         std::io::stdin().read_line(&mut answer)?;
         if answer.trim().eq_ignore_ascii_case("y") {
-            let status = std::process::Command::new("gh")
+            match std::process::Command::new("gh")
                 .args(["repo", "create", "retro-knowledge", "--private"])
-                .status()?;
-            if status.success() {
-                let user_out = std::process::Command::new("gh")
-                    .args(["api", "user", "-q", ".login"])
-                    .output()?;
-                let user = String::from_utf8_lossy(&user_out.stdout).trim().to_string();
-                anyhow::ensure!(!user.is_empty(), "could not determine GitHub username");
-                let url = format!("git@github.com:{user}/retro-knowledge.git");
-                let st = std::process::Command::new("git")
-                    .args(["-C", &dir.display().to_string(), "remote", "add", "origin", &url])
-                    .status()?;
-                anyhow::ensure!(st.success(), "git remote add failed");
-                match store_git::push_best_effort(&dir) {
-                    store_git::PushOutcome::Pushed => {
-                        println!("Backed up to {url}")
+                .status()
+            {
+                Err(_) => println!(
+                    "gh CLI not found — skipping backup setup; add a remote later with: git -C {} remote add origin <url>",
+                    dir.display()
+                ),
+                Ok(status) if status.success() => {
+                    let user_out = std::process::Command::new("gh")
+                        .args(["api", "user", "-q", ".login"])
+                        .output()?;
+                    let user = String::from_utf8_lossy(&user_out.stdout).trim().to_string();
+                    anyhow::ensure!(!user.is_empty(), "could not determine GitHub username");
+                    let url = format!("git@github.com:{user}/retro-knowledge.git");
+                    let st = std::process::Command::new("git")
+                        .args(["-C", &dir.display().to_string(), "remote", "add", "origin", &url])
+                        .status()?;
+                    anyhow::ensure!(st.success(), "git remote add failed");
+                    match store_git::push_best_effort(&dir) {
+                        store_git::PushOutcome::Pushed => {
+                            println!("Backed up to {url}")
+                        }
+                        outcome => println!("Remote added ({url}); first push pending: {outcome:?}"),
                     }
-                    outcome => println!("Remote added ({url}); first push pending: {outcome:?}"),
                 }
-            } else {
-                println!(
+                Ok(_) => println!(
                     "gh repo create failed — you can add a remote later with git -C {} remote add origin <url>",
                     dir.display()
-                );
+                ),
             }
         }
     }

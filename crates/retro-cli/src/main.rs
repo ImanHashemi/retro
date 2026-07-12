@@ -26,10 +26,10 @@ enum Commands {
         #[arg(long, requires = "uninstall")]
         purge: bool,
         /// Initialize the v3 personal store (git-backed ~/.retro, global hooks)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "uninstall")]
         v3: bool,
         /// Clone an existing v3 knowledge repo instead of starting fresh (implies --v3)
-        #[arg(long, value_name = "REMOTE")]
+        #[arg(long, value_name = "REMOTE", conflicts_with = "uninstall")]
         from: Option<String>,
     },
     /// Ingest new sessions from Claude Code history (fast, no AI)

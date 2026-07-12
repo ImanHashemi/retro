@@ -51,7 +51,14 @@ pub fn ensure_hook(mut settings: Value, event: &str, command: &str) -> Result<Va
                 let is_retro = hook
                     .get("command")
                     .and_then(|c| c.as_str())
-                    .map(|c| c.ends_with(&retro_marker))
+                    .map(|c| {
+                        let mut parts = c.split_whitespace();
+                        let prog = parts.next().unwrap_or("");
+                        let sub = parts.next().unwrap_or("");
+                        let marker_sub =
+                            retro_marker.rsplit_once(' ').map(|(_, s)| s).unwrap_or("");
+                        (prog == "retro" || prog.ends_with("/retro")) && sub == marker_sub
+                    })
                     .unwrap_or(false);
                 if is_retro {
                     hook["command"] = json!(command);
@@ -116,5 +123,20 @@ mod tests {
         let arr = new["hooks"]["SessionEnd"].as_array().unwrap();
         assert_eq!(arr.len(), 1, "updated in place, not duplicated");
         assert_eq!(arr[0]["hooks"][0]["command"], "/new/path/retro observe");
+    }
+
+    #[test]
+    fn does_not_hijack_similarly_named_commands() {
+        let existing = ensure_hook(
+            json!({"hooks": {"SessionEnd": [
+                {"matcher": "", "hooks": [{"type": "command", "command": "my-retro observe"}]}
+            ]}}),
+            "SessionEnd",
+            "/bin/retro observe",
+        )
+        .unwrap();
+        let arr = existing["hooks"]["SessionEnd"].as_array().unwrap();
+        assert_eq!(arr.len(), 2, "foreign command preserved, retro appended");
+        assert_eq!(arr[0]["hooks"][0]["command"], "my-retro observe");
     }
 }
