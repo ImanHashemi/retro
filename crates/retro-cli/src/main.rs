@@ -25,6 +25,12 @@ enum Commands {
         /// When used with --uninstall, also delete ~/.retro/ entirely
         #[arg(long, requires = "uninstall")]
         purge: bool,
+        /// Initialize the v3 personal store (git-backed ~/.retro, global hooks)
+        #[arg(long)]
+        v3: bool,
+        /// Clone an existing v3 knowledge repo instead of starting fresh (implies --v3)
+        #[arg(long, value_name = "REMOTE")]
+        from: Option<String>,
     },
     /// Ingest new sessions from Claude Code history (fast, no AI)
     Ingest {
@@ -173,7 +179,12 @@ fn main() {
     }
 
     let result = match cli.command {
-        Commands::Init { uninstall, purge } => commands::init::run(uninstall, purge, verbose),
+        Commands::Init {
+            uninstall,
+            purge,
+            v3,
+            from,
+        } => commands::init::run(uninstall, purge, verbose, v3, from),
         Commands::Ingest { global, auto } => commands::ingest::run(global, auto, verbose),
         Commands::Analyze {
             global,

@@ -101,6 +101,12 @@ pub fn ensure_repo(root: &Path) -> Result<bool, CoreError> {
     Ok(true)
 }
 
+pub fn has_remote(root: &Path) -> bool {
+    git(root, &["remote"])
+        .map(|o| o.status.success() && !o.stdout.is_empty())
+        .unwrap_or(false)
+}
+
 pub fn has_changes(root: &Path) -> Result<bool, CoreError> {
     let out = git(root, &["status", "--porcelain"])?;
     if !out.status.success() {
@@ -185,6 +191,13 @@ mod tests {
         // modification → commit
         std::fs::write(tmp.path().join("note.md"), "hello again").unwrap();
         assert!(commit_all(tmp.path(), "user: edit note").unwrap());
+    }
+
+    #[test]
+    fn has_remote_false_on_fresh_repo() {
+        let tmp = TempDir::new().unwrap();
+        ensure_repo(tmp.path()).unwrap();
+        assert!(!has_remote(tmp.path()));
     }
 
     #[test]

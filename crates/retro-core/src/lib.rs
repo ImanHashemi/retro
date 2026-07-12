@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod audit_log;
 pub mod briefing;
+pub mod claude_settings;
 pub mod config;
 pub mod curator;
 pub mod db;
