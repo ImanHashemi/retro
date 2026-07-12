@@ -50,6 +50,37 @@ pub fn apply_local_config(root: &Path) -> Result<(), CoreError> {
     }
     run_checked(root, &["config", "commit.gpgsign", "false"])?;
     run_checked(root, &["config", "core.hooksPath", "/dev/null"])?;
+    ensure_machine_excludes(root)?;
+    Ok(())
+}
+
+/// Upsert the machine-local ignore set into `.git/info/exclude`. Unlike the
+/// store's `.gitignore` (written once, then user-owned), this file is never
+/// user-edited, so it safely carries new ignore entries to stores created by
+/// older binaries — without it, `commit_all`'s `git add -A` would sweep PID
+/// files, backups, and v2 artifacts into the knowledge repo.
+fn ensure_machine_excludes(root: &Path) -> Result<(), CoreError> {
+    let io = |e: std::io::Error| CoreError::Io(e.to_string());
+    let info_dir = root.join(".git").join("info");
+    if !root.join(".git").exists() {
+        return Ok(()); // not a repo yet; ensure_repo calls us again after init
+    }
+    std::fs::create_dir_all(&info_dir).map_err(io)?;
+    let exclude = info_dir.join("exclude");
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    let mut updated = existing.clone();
+    for entry in super::IGNORED_ENTRIES {
+        if !existing.lines().any(|l| l.trim() == *entry) {
+            if !updated.is_empty() && !updated.ends_with('\n') {
+                updated.push('\n');
+            }
+            updated.push_str(entry);
+            updated.push('\n');
+        }
+    }
+    if updated != existing {
+        std::fs::write(&exclude, updated).map_err(io)?;
+    }
     Ok(())
 }
 

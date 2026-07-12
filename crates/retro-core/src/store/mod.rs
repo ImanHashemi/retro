@@ -19,16 +19,43 @@ use std::path::{Path, PathBuf};
 
 use crate::errors::CoreError;
 
-/// Contents of the store's .gitignore: everything derived or machine-local.
-pub const GITIGNORE_CONTENT: &str = "\
-index.db
-index.db-wal
-index.db-shm
-health.json
-queue/
-state/
-run.lock
-";
+/// Everything derived or machine-local in the store root — the single source
+/// of truth for BOTH the store's .gitignore (written once by `ensure_layout`,
+/// never rewritten: it is user-owned after that) and the repo's
+/// `.git/info/exclude` (upserted by `store::git::apply_local_config` on every
+/// run, which is how EXISTING stores whose .gitignore predates an entry get
+/// it). The store root is the real `~/.retro`, so this must also cover the
+/// v2-era artifacts living alongside the knowledge files — without these,
+/// `commit_all`'s `add -A` sweeps private machine files into the knowledge
+/// repo and push ships them off-machine.
+pub(crate) const IGNORED_ENTRIES: &[&str] = &[
+    "index.db",
+    "index.db-wal",
+    "index.db-shm",
+    "health.json",
+    "queue/",
+    "state/",
+    "run.lock",
+    "backups/",
+    // v2 artifacts (SQLite DB, logs, audit trail) in the same ~/.retro root:
+    "retro.db",
+    "retro.db-wal",
+    "retro.db-shm",
+    "retro.db.backup",
+    "audit.jsonl",
+    "runner.log",
+    "runner.log.1",
+    "briefings/",
+    "hook-stderr.log",
+    "warnings.log",
+];
+
+/// Contents of the store's .gitignore, derived from [`IGNORED_ENTRIES`].
+pub fn gitignore_content() -> String {
+    let mut content = IGNORED_ENTRIES.join("\n");
+    content.push('\n');
+    content
+}
 
 /// Result of loading the store from disk: parsed nodes with their paths,
 /// plus warnings for files that were skipped (unparseable).
@@ -75,7 +102,7 @@ impl Store {
         std::fs::create_dir_all(self.knowledge_dir().join("projects")).map_err(io)?;
         let gitignore = self.root.join(".gitignore");
         if !gitignore.exists() {
-            std::fs::write(&gitignore, GITIGNORE_CONTENT).map_err(io)?;
+            std::fs::write(&gitignore, gitignore_content()).map_err(io)?;
         }
         Ok(())
     }

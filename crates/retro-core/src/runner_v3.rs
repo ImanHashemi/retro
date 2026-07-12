@@ -14,7 +14,7 @@ use crate::models::Session;
 use crate::projection::local_md;
 use crate::scrub;
 use crate::store::state::RunnerState;
-use crate::store::{git as store_git, index, projects, queue, Store};
+use crate::store::{Store, git as store_git, index, projects, queue};
 
 #[derive(Debug, Default)]
 pub struct RunV3Summary {
@@ -26,8 +26,14 @@ pub struct RunV3Summary {
     pub nodes_updated: usize,
     pub nodes_merged: usize,
     pub nodes_invalidated: usize,
-    /// Operations the analysis stage rejected as invalid/hostile (see health
-    /// stage "analyze-skips" for the reasons).
+    /// Queue entries whose transcript no longer exists. Real runs prune them
+    /// (this is the pruned count); dry-run only counts them (subset of
+    /// `sessions_skipped` — a missing transcript also fails to parse).
+    pub sessions_stale: usize,
+    /// Operations the analysis stage rejected as invalid/hostile (untrusted
+    /// LLM output — see `analysis::v3::V3AnalyzeResult::skip`). Up to 3
+    /// reasons per group are pushed to state notifications so the user sees
+    /// them in the next briefing.
     pub ops_skipped: usize,
     pub rules_projected_global: usize,
     pub pushed: bool,
@@ -58,6 +64,10 @@ pub fn run_v3(
     // Stage: commit manual edits (files-as-truth: user edits become history).
     if !dry_run {
         store_git::ensure_repo(store_root)?;
+        // Unconditionally (ensure_repo early-returns for existing repos):
+        // keeps local git config AND machine-local .git/info/exclude entries
+        // current on stores created by older binaries (ignore migration).
+        store_git::apply_local_config(store_root)?;
         if store_git::commit_all(store_root, "user: edit knowledge")? {
             health::record(store_root, "manual-edits", true, "committed user edits")?;
         }
@@ -81,17 +91,44 @@ pub fn run_v3(
         }
     }
 
-    // Stage: prune stale queue entries (deleted transcripts) — visible, not silent.
-    let pruned = queue::prune_stale(store_root)?;
-    if !pruned.is_empty() {
+    // Stage: prune stale queue entries (deleted transcripts) — visible, not
+    // silent. Dry-run must not delete queue files: it only counts them.
+    if dry_run {
+        summary.sessions_stale = queue::list(store_root)?
+            .iter()
+            .filter(|e| !Path::new(&e.transcript_path).exists())
+            .count();
+    } else {
+        let pruned = queue::prune_stale(store_root)?;
+        summary.sessions_stale = pruned.len();
+        if !pruned.is_empty() {
+            health::record(
+                store_root,
+                "queue",
+                true,
+                &format!(
+                    "pruned {} stale entr(ies): {}",
+                    pruned.len(),
+                    pruned.join(", ")
+                ),
+            )?;
+        }
+    }
+
+    // Stage: surface store parse warnings (skipped/misplaced knowledge files)
+    // BEFORE analysis — recorded ok=false so Health::warnings() carries them
+    // into the briefing and nudge (visible, never silent).
+    let loaded = store.load_all()?;
+    if !loaded.warnings.is_empty() {
+        let joined = loaded.warnings.join("; ");
         health::record(
             store_root,
-            "queue",
-            true,
+            "store",
+            false,
             &format!(
-                "pruned {} stale entr(ies): {}",
-                pruned.len(),
-                pruned.join(", ")
+                "{} unreadable/misplaced knowledge file(s): {}",
+                loaded.warnings.len(),
+                crate::util::truncate_str(&joined, 500)
             ),
         )?;
     }
@@ -210,7 +247,17 @@ pub fn run_v3(
             break;
         }
         let sessions: Vec<Session> = group.iter().map(|(_, _, s)| s.clone()).collect();
-        let result = match analysis_v3::analyze_sessions(&store, backend, &sessions, Some(slug)) {
+        let analyze_outcome = analysis_v3::analyze_sessions(&store, backend, &sessions, Some(slug));
+        // The backend call happened either way — count it against the daily
+        // budget on BOTH arms, or a persistently failing group becomes
+        // unbounded spend that max_ai_calls_per_day never sees.
+        {
+            let mut state = RunnerState::load(store_root)?;
+            state.record_ai_calls(&today, 1);
+            state.save(store_root)?;
+        }
+        summary.ai_calls += 1;
+        let result = match analyze_outcome {
             Ok(r) => r,
             Err(e) => {
                 health::record(store_root, "analyze", false, &e.to_string())?;
@@ -218,7 +265,6 @@ pub fn run_v3(
                 continue;
             }
         };
-        summary.ai_calls += 1;
         summary.sessions_processed += result.sessions_analyzed;
         summary.nodes_created += result.nodes_created;
         summary.nodes_updated += result.nodes_updated;
@@ -230,52 +276,35 @@ pub fn run_v3(
             format!("Learned: {}", crate::util::truncate_str(first_line, 100))
         }));
         let mut state = RunnerState::load(store_root)?;
-        state.record_ai_calls(&today, 1);
         for (session_id, mtime_unix, _) in group {
             queue::remove(store_root, session_id)?;
             state.record_processed(session_id, *mtime_unix);
         }
+        // Rejected/hostile ops surface as briefing notifications (≤3 per
+        // group) — health ok=true records are invisible to warnings().
+        for reason in result.skipped.iter().take(3) {
+            state
+                .notifications
+                .push(format!("Analysis skipped: {reason}"));
+        }
         state.save(store_root)?;
         touched.push((slug.clone(), project_path.clone()));
-        let detail = if result.ops_skipped > 0 {
-            format!(
-                "{}: +{} nodes, {} op(s) skipped",
-                slug, result.nodes_created, result.ops_skipped
-            )
-        } else {
-            format!("{}: +{} nodes", slug, result.nodes_created)
-        };
-        health::record(store_root, "analyze", true, &detail)?;
-        if !result.skipped.is_empty() {
-            health::record(
-                store_root,
-                "analyze-skips",
-                true,
-                &result.skipped.join("; "),
-            )?;
+        let mut detail = format!(
+            "{}: +{} nodes, {} updated ({} ops skipped)",
+            slug, result.nodes_created, result.nodes_updated, result.ops_skipped
+        );
+        if !result.reasoning.is_empty() {
+            detail.push_str(&format!(
+                " — {}",
+                crate::util::truncate_str(&result.reasoning, 120)
+            ));
         }
+        health::record(store_root, "analyze", true, &detail)?;
     }
 
     // Anything still queued (budget exhaustion OR failed groups) is pending —
     // authoritative recount so the summary can't understate it.
     summary.sessions_pending = queue::list(store_root)?.len();
-
-    // Stage: surface store parse warnings (skipped/misplaced files) — visible,
-    // never silent (matches the JSONL-skipping convention elsewhere).
-    let loaded = store.load_all()?;
-    if !loaded.warnings.is_empty() {
-        let joined = loaded.warnings.join("; ");
-        health::record(
-            store_root,
-            "store",
-            true,
-            &format!(
-                "{} file(s) skipped: {}",
-                loaded.warnings.len(),
-                crate::util::truncate_str(&joined, 500)
-            ),
-        )?;
-    }
 
     // Stage: projection (global always — cheap and idempotent; locals for touched projects).
     let threshold = config.knowledge.confidence_threshold;
@@ -492,7 +521,8 @@ mod tests {
         let summary = run_v3(tmp.path(), &config, &backend, false)
             .unwrap()
             .unwrap();
-        assert_eq!(summary.ai_calls, 0);
+        // The backend call happened (tokens spent) — it counts even on failure.
+        assert_eq!(summary.ai_calls, 1);
         assert_eq!(
             summary.sessions_pending, 1,
             "failed group counts as pending"
@@ -544,14 +574,175 @@ mod tests {
             },
         )
         .unwrap();
+        // a STALE entry (transcript deleted) must survive dry-run too:
+        // prune_stale deletes queue files, so it must never run in dry-run
+        queue::enqueue(
+            tmp.path(),
+            &queue::QueueEntry {
+                session_id: "stale-sess".to_string(),
+                transcript_path: tmp.path().join("deleted.jsonl").display().to_string(),
+                cwd: None,
+                enqueued_at: "2026-07-06T09:00:00Z".to_string(),
+            },
+        )
+        .unwrap();
         let backend = MockBackend::with_responses(vec![]);
         let summary = run_v3(tmp.path(), &config, &backend, true)
             .unwrap()
             .unwrap();
         assert_eq!(summary.ai_calls, 0);
         assert_eq!(summary.sessions_pending, 1);
-        assert_eq!(queue::list(tmp.path()).unwrap().len(), 1, "queue untouched");
+        assert_eq!(summary.sessions_stale, 1, "stale entry counted, not pruned");
+        assert_eq!(
+            queue::list(tmp.path()).unwrap().len(),
+            2,
+            "queue untouched — stale entry survives dry-run"
+        );
         assert!(Store::open(tmp.path()).load_all().unwrap().nodes.is_empty());
+    }
+
+    /// Fix 1 regression: `util::backup_file` used to fail when the backup dir
+    /// didn't exist ("No such file or directory"), which made project_global_md
+    /// error out on EVERY machine where ~/.claude/CLAUDE.md already existed —
+    /// the global managed block was never updated.
+    #[test]
+    fn projects_global_even_when_claude_md_exists() {
+        let (tmp, claude, config) = setup();
+        let md = claude.path().join("CLAUDE.md");
+        std::fs::write(&md, "# My instructions\n\nuser text\n").unwrap();
+
+        let proj = TempDir::new().unwrap();
+        let transcript = write_fixture_session(tmp.path(), "sess-g", proj.path().to_str().unwrap());
+        queue::enqueue(
+            tmp.path(),
+            &queue::QueueEntry {
+                session_id: "sess-g".to_string(),
+                transcript_path: transcript.display().to_string(),
+                cwd: Some(proj.path().display().to_string()),
+                enqueued_at: "2026-07-06T10:00:00Z".to_string(),
+            },
+        )
+        .unwrap();
+        let response = r#"{"reasoning":"global rule","operations":[
+            {"action":"create_node","node_type":"rule","scope":"global","content":"Global rule from analysis.","confidence":0.9}
+        ]}"#;
+        let backend = MockBackend::with_responses(vec![response.to_string()]);
+        let summary = run_v3(tmp.path(), &config, &backend, false)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(summary.rules_projected_global, 1);
+        let content = std::fs::read_to_string(&md).unwrap();
+        assert!(content.contains("user text"), "user content preserved");
+        assert!(
+            content.contains("Global rule from analysis."),
+            "got: {content}"
+        );
+        // pre-existing file was backed up under <store>/backups/
+        let backups: Vec<_> = std::fs::read_dir(tmp.path().join("backups"))
+            .expect("backups dir created")
+            .flatten()
+            .collect();
+        assert!(
+            backups
+                .iter()
+                .any(|e| e.file_name().to_string_lossy().ends_with(".bak")),
+            "got: {backups:?}"
+        );
+    }
+
+    /// Fix 2 regression: the store root IS the real ~/.retro, which on
+    /// existing installs contains v2 artifacts (SQLite DB, audit log, runner
+    /// log, backups) and a plan-1-era .gitignore that doesn't cover them.
+    /// ensure_layout never rewrites a user-owned .gitignore, so the ignores
+    /// must reach existing stores via .git/info/exclude — otherwise
+    /// commit_all's `add -A` sweeps private machine files into the knowledge
+    /// repo and push ships them off-machine.
+    #[test]
+    fn existing_store_with_v2_artifacts_never_commits_them() {
+        let tmp = TempDir::new().unwrap();
+        let claude = TempDir::new().unwrap();
+        // plan-1-era .gitignore (pre-dates run.lock/backups//v2-artifact entries)
+        std::fs::write(
+            tmp.path().join(".gitignore"),
+            "index.db\nindex.db-wal\nindex.db-shm\nhealth.json\nqueue/\nstate/\n",
+        )
+        .unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap(); // keeps the old .gitignore
+        // fake v2 artifacts living in the same root
+        std::fs::write(tmp.path().join("retro.db"), "sqlite").unwrap();
+        std::fs::write(tmp.path().join("audit.jsonl"), "{}").unwrap();
+        std::fs::write(tmp.path().join("runner.log"), "log").unwrap();
+        std::fs::create_dir_all(tmp.path().join("backups")).unwrap();
+        std::fs::write(tmp.path().join("backups/x.bak"), "backup").unwrap();
+
+        let mut config = Config::default();
+        config.v3.enabled = true;
+        config.paths.claude_dir = claude.path().display().to_string();
+        let backend = MockBackend::with_responses(vec![]);
+        run_v3(tmp.path(), &config, &backend, false)
+            .unwrap()
+            .unwrap();
+
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .arg("ls-files")
+            .output()
+            .unwrap();
+        let tracked = String::from_utf8_lossy(&out.stdout).to_string();
+        for bad in [
+            "run.lock",
+            "retro.db",
+            "audit.jsonl",
+            "runner.log",
+            "backups/",
+        ] {
+            assert!(
+                !tracked.contains(bad),
+                "{bad} must never be tracked; ls-files:\n{tracked}"
+            );
+        }
+    }
+
+    /// Fix 4 regression: a failed analysis (backend call made, response bad)
+    /// must still consume budget — the tokens were spent either way. Without
+    /// this, a persistently failing group retries on every run forever:
+    /// unbounded daily spend.
+    #[test]
+    fn failed_analysis_consumes_budget() {
+        let (tmp, _claude, mut config) = setup();
+        config.runner.max_ai_calls_per_day = 1;
+        let proj = TempDir::new().unwrap();
+        let transcript =
+            write_fixture_session(tmp.path(), "spend-sess", proj.path().to_str().unwrap());
+        queue::enqueue(
+            tmp.path(),
+            &queue::QueueEntry {
+                session_id: "spend-sess".to_string(),
+                transcript_path: transcript.display().to_string(),
+                cwd: Some(proj.path().display().to_string()),
+                enqueued_at: "2026-07-06T10:00:00Z".to_string(),
+            },
+        )
+        .unwrap();
+        let backend = MockBackend::with_responses(vec![]); // exhausted mock -> analyze errors
+        run_v3(tmp.path(), &config, &backend, false)
+            .unwrap()
+            .unwrap();
+
+        let state = RunnerState::load(tmp.path()).unwrap();
+        assert_eq!(state.ai_calls_today, 1, "failed call still consumed budget");
+        assert_eq!(
+            state.ai_calls_date,
+            chrono::Utc::now().date_naive().to_string()
+        );
+        assert_eq!(
+            queue::list(tmp.path()).unwrap().len(),
+            1,
+            "failed group stays queued"
+        );
     }
 
     /// Regression: on a store that has NEVER been initialized (no

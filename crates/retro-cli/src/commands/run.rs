@@ -26,8 +26,13 @@ pub fn run(verbose: bool, dry_run: bool, background: bool) -> Result<()> {
             Some(s) => {
                 if !background {
                     if dry_run {
+                        let stale = if s.sessions_stale > 0 {
+                            format!(", {} stale (would prune)", s.sessions_stale)
+                        } else {
+                            String::new()
+                        };
                         println!(
-                            "v3 dry run: {} session(s) pending, {} skipped — no AI calls, no writes",
+                            "v3 dry run: {} session(s) pending, {} skipped{stale} — no AI calls, no writes",
                             s.sessions_pending, s.sessions_skipped
                         );
                     } else {
