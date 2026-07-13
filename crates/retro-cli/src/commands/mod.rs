@@ -295,7 +295,7 @@ pub fn check_and_display_nudge() {
                     if stale {
                         use colored::Colorize;
                         eprintln!(
-                            "{} {} session(s) queued for over a day — run `retro run` or `retro doctor`",
+                            "  {} {} session(s) queued (oldest > 24h) — run `retro run` or `retro doctor`",
                             "retro:".yellow(),
                             entries.len()
                         );
