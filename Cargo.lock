@@ -743,6 +743,7 @@ dependencies = [
  "ratatui",
  "retro-core",
  "serde_json",
+ "tempfile",
  "tiny_http",
 ]
 
