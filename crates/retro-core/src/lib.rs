@@ -11,6 +11,7 @@ pub mod git;
 pub mod health;
 pub mod hook_event;
 pub mod ingest;
+pub mod lint;
 pub mod lock;
 pub mod models;
 pub mod observer;
