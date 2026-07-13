@@ -21,6 +21,7 @@ pub mod start;
 pub mod status;
 pub mod stop;
 pub mod sync;
+pub mod ui;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
