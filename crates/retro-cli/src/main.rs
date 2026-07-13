@@ -144,6 +144,8 @@ enum Commands {
     Sync,
     /// Open the TUI dashboard
     Dash,
+    /// (v3) End-to-end health verification (read-only)
+    Doctor,
     /// Manage git hooks
     Hooks {
         #[command(subcommand)]
@@ -209,6 +211,7 @@ fn main() {
         Commands::Stop => commands::stop::run(verbose),
         Commands::Sync => commands::sync::run(verbose),
         Commands::Dash => commands::dash::run(verbose),
+        Commands::Doctor => commands::doctor::run(),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),
         },

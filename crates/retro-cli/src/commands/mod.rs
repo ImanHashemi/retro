@@ -6,6 +6,7 @@ pub mod clean;
 pub mod curate;
 pub mod dash;
 pub mod diff;
+pub mod doctor;
 pub mod hooks;
 pub mod ingest;
 pub mod init;

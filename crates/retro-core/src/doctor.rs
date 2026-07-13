@@ -146,7 +146,15 @@ fn run_checks_inner(
             Ok(false) => (false, "stale — run `retro reindex`".to_string()),
             Err(e) => (false, format!("freshness check failed: {e}")),
         },
-        Err(e) => (false, format!("{e} — run `retro reindex`")),
+        Err(e) => {
+            let msg = e.to_string();
+            let detail = if msg.contains("retro reindex") {
+                msg
+            } else {
+                format!("{msg} — run `retro reindex`")
+            };
+            (false, detail)
+        }
     };
     checks.push(Check {
         name: "index".to_string(),
