@@ -22,6 +22,8 @@ pub struct Config {
     pub trust: TrustConfig,
     #[serde(default = "default_knowledge")]
     pub knowledge: KnowledgeConfig,
+    #[serde(default = "default_v3")]
+    pub v3: V3Config,
 }
 
 impl Default for Config {
@@ -36,6 +38,7 @@ impl Default for Config {
             runner: default_runner(),
             trust: default_trust(),
             knowledge: default_knowledge(),
+            v3: default_v3(),
         }
     }
 }
@@ -150,6 +153,15 @@ pub struct KnowledgeConfig {
     pub confidence_threshold: f64,
     #[serde(default = "default_global_promotion_threshold")]
     pub global_promotion_threshold: f64,
+}
+
+/// v3 "Personal" pipeline gate. When disabled (default), retro behaves as v2.
+/// Set to `true` to enable v3 paths. `retro init --v3` (Plan 2) will write this;
+/// `retro migrate` (Plan 3) will flip it for existing v2 users.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct V3Config {
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 fn default_analysis() -> AnalysisConfig {
@@ -316,6 +328,12 @@ fn default_knowledge() -> KnowledgeConfig {
     KnowledgeConfig {
         confidence_threshold: default_confidence_threshold(),
         global_promotion_threshold: default_global_promotion_threshold(),
+    }
+}
+
+fn default_v3() -> V3Config {
+    V3Config {
+        enabled: false,
     }
 }
 
@@ -561,5 +579,17 @@ auto_apply = false
                 None => std::env::remove_var("RETRO_HOME"),
             }
         }
+    }
+
+    #[test]
+    fn v3_section_defaults_off_and_roundtrips() {
+        let config = Config::default();
+        assert!(!config.v3.enabled);
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert!(!parsed.v3.enabled);
+        // absent section parses as default (forward/backward compat)
+        let parsed: Config = toml::from_str("").unwrap();
+        assert!(!parsed.v3.enabled);
     }
 }

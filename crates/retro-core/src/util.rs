@@ -20,6 +20,12 @@ pub fn backup_file(path: &str, backup_dir: &Path) -> Result<(), CoreError> {
     let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
     let backup_path = backup_dir.join(format!("{sanitized}.{timestamp}.bak"));
 
+    // Callers pass directories that may not exist yet (e.g. <store>/backups/
+    // on a fresh v3 store) — a bare copy would fail every backup, and with it
+    // the projection that requested the backup.
+    std::fs::create_dir_all(backup_dir)
+        .map_err(|e| CoreError::Io(format!("creating {}: {e}", backup_dir.display())))?;
+
     std::fs::copy(path, &backup_path).map_err(|e| {
         CoreError::Io(format!(
             "backing up {} to {}: {e}",

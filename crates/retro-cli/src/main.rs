@@ -25,6 +25,12 @@ enum Commands {
         /// When used with --uninstall, also delete ~/.retro/ entirely
         #[arg(long, requires = "uninstall")]
         purge: bool,
+        /// Initialize the v3 personal store (git-backed ~/.retro, global hooks)
+        #[arg(long, conflicts_with = "uninstall")]
+        v3: bool,
+        /// Clone an existing v3 knowledge repo instead of starting fresh (implies --v3)
+        #[arg(long, value_name = "REMOTE", conflicts_with = "uninstall")]
+        from: Option<String>,
     },
     /// Ingest new sessions from Claude Code history (fast, no AI)
     Ingest {
@@ -93,6 +99,10 @@ enum Commands {
     Status,
     /// Rebuild the v3 store index from knowledge files (safe anytime)
     Reindex,
+    /// (v3 hook entry) Enqueue a finished session for analysis — called by the SessionEnd hook
+    Observe,
+    /// (v3 hook entry) Catch-up scan + session briefing — called by the SessionStart hook
+    Brief,
     /// Show audit log entries
     Log {
         /// Show entries from the last N days/hours (e.g., "7d", "24h")
@@ -122,6 +132,9 @@ enum Commands {
         /// Preview only, don't make changes
         #[arg(long)]
         dry_run: bool,
+        /// (v3) Quiet background mode: exit silently if another run holds the lock
+        #[arg(long)]
+        background: bool,
     },
     /// Start the scheduled runner (launchd on macOS)
     Start,
@@ -148,19 +161,30 @@ fn main() {
     let cli = Cli::parse();
     let verbose = cli.verbose;
 
-    // Show nudge for interactive commands (not auto mode)
+    // Show nudge for interactive commands (not auto mode, not hook entries)
     let is_auto = matches!(
         &cli.command,
         Commands::Ingest { auto: true, .. }
             | Commands::Analyze { auto: true, .. }
             | Commands::Apply { auto: true, .. }
+            | Commands::Observe
+            | Commands::Brief
+            | Commands::Run {
+                background: true,
+                ..
+            }
     );
     if !is_auto {
         commands::check_and_display_nudge();
     }
 
     let result = match cli.command {
-        Commands::Init { uninstall, purge } => commands::init::run(uninstall, purge, verbose),
+        Commands::Init {
+            uninstall,
+            purge,
+            v3,
+            from,
+        } => commands::init::run(uninstall, purge, verbose, v3, from),
         Commands::Ingest { global, auto } => commands::ingest::run(global, auto, verbose),
         Commands::Analyze {
             global,
@@ -175,10 +199,12 @@ fn main() {
         Commands::Audit { dry_run } => commands::audit::run(dry_run, verbose),
         Commands::Status => commands::status::run(),
         Commands::Reindex => commands::reindex::run(),
+        Commands::Observe => commands::observe::run(),
+        Commands::Brief => commands::brief::run(),
         Commands::Log { since } => commands::log::run(since),
         Commands::Review { global, dry_run } => commands::review::run(global, dry_run, verbose),
         Commands::Curate { dry_run } => commands::curate::run(dry_run, verbose),
-        Commands::Run { verbose: run_verbose, dry_run } => commands::run::run(verbose || run_verbose, dry_run),
+        Commands::Run { verbose: run_verbose, dry_run, background } => commands::run::run(verbose || run_verbose, dry_run, background),
         Commands::Start => commands::start::run(verbose),
         Commands::Stop => commands::stop::run(verbose),
         Commands::Sync => commands::sync::run(verbose),

@@ -1,6 +1,7 @@
 pub mod analyze;
 pub mod apply;
 pub mod audit;
+pub mod brief;
 pub mod clean;
 pub mod curate;
 pub mod dash;
@@ -9,6 +10,7 @@ pub mod hooks;
 pub mod ingest;
 pub mod init;
 pub mod log;
+pub mod observe;
 pub mod patterns;
 pub mod reindex;
 pub mod review;
@@ -271,6 +273,19 @@ fn display_auto_run(run: &AutoRunSummary) {
 /// Silently does nothing if DB doesn't exist or any error occurs.
 pub fn check_and_display_nudge() {
     let dir = retro_core::config::retro_dir();
+
+    // v3: surface pipeline health warnings on any interactive command.
+    if let Ok(config) = retro_core::config::Config::load(&dir.join("config.toml")) {
+        if config.v3.enabled {
+            if let Ok(health) = retro_core::health::Health::load(&dir) {
+                use colored::Colorize;
+                for w in health.warnings() {
+                    eprintln!("  {} {}", "retro:".yellow(), w);
+                }
+            }
+        }
+    }
+
     let db_path = dir.join("retro.db");
     if !db_path.exists() {
         return;

@@ -2,6 +2,7 @@ pub mod backend;
 pub mod claude_cli;
 pub mod merge;
 pub mod prompts;
+pub mod v3;
 
 use crate::config::Config;
 use crate::db;
@@ -581,6 +582,14 @@ fn parse_analysis_response(text: &str) -> Result<AnalysisResponse, CoreError> {
 
 /// Parse an AI response into a GraphOperation batch.
 pub fn parse_graph_response(json: &str, default_project: Option<&str>) -> Result<Vec<GraphOperation>, CoreError> {
+    parse_graph_response_full(json, default_project).map(|(_, ops)| ops)
+}
+
+/// Like `parse_graph_response`, but also returns the model's reasoning summary.
+pub fn parse_graph_response_full(
+    json: &str,
+    default_project: Option<&str>,
+) -> Result<(String, Vec<GraphOperation>), CoreError> {
     let response: GraphAnalysisResponse = serde_json::from_str(json)
         .map_err(|e| CoreError::Parse(format!("failed to parse graph analysis response: {e}")))?;
 
@@ -639,7 +648,7 @@ pub fn parse_graph_response(json: &str, default_project: Option<&str>) -> Result
             _ => {} // Skip unknown actions
         }
     }
-    Ok(ops)
+    Ok((response.reasoning, ops))
 }
 
 fn truncate_for_error(s: &str, max: usize) -> &str {
