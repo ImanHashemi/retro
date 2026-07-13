@@ -1,6 +1,7 @@
 mod commands;
 mod launchd;
 mod tui;
+mod ui;
 
 use clap::{Parser, Subcommand};
 
