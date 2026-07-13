@@ -41,12 +41,24 @@ pub fn run_lint(store: &Store, config: &Config) -> Result<LintReport, CoreError>
             if a.scope != b.scope {
                 continue;
             }
+            // Length-ratio pre-filter: bodies differing by >20% in length
+            // can't reach 0.8 similarity — skip the O(len²) Levenshtein DP.
+            let (la, lb) = (a.body.chars().count(), b.body.chars().count());
+            let max_len = la.max(lb);
+            if max_len > 0 && (la.abs_diff(lb) as f64) / (max_len as f64) > 0.2 {
+                continue;
+            }
             if crate::analysis::merge::normalized_similarity(&a.body, &b.body) > 0.8 {
+                let cross_type = if a.node_type == b.node_type {
+                    "consider merging (invalidate one)"
+                } else {
+                    "similar content across node types — review whether both are needed"
+                };
                 report.findings.push(LintFinding {
                     kind: "near-duplicate".to_string(),
                     node_ids: vec![a.id.clone(), b.id.clone()],
                     detail: format!(
-                        "`{}` and `{}` look like the same rule — consider merging (invalidate one)",
+                        "`{}` and `{}` look like the same rule — {cross_type}",
                         a.id, b.id
                     ),
                 });
