@@ -57,7 +57,9 @@ fn observe_event(
     config: &Config,
     event: &HookEvent,
 ) -> Result<ObserveOutcome, retro_core::errors::CoreError> {
-    if projects::is_excluded(&event.cwd, &config.privacy.exclude_projects) {
+    if projects::is_excluded(&event.cwd, &config.privacy.exclude_projects)
+        || projects::is_store_dir(dir, &event.cwd)
+    {
         return Ok(ObserveOutcome::Excluded);
     }
     let store = Store::open(dir);

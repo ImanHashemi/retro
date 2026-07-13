@@ -1,5 +1,5 @@
 use anyhow::Result;
-use retro_core::config::{retro_dir, Config};
+use retro_core::config::{Config, retro_dir};
 use retro_core::store::{queue, state::RunnerState};
 use retro_core::{briefing, health, observer};
 
@@ -33,6 +33,11 @@ pub fn run() -> Result<()> {
     let mut enqueued = 0usize;
     let mut max_seen = state.last_observed_unix;
     for m in &modified {
+        // Subagent transcripts (<session>/subagents/agent-*.jsonl) are parts
+        // of their parent session, not sessions — never enqueue them.
+        if m.path.components().any(|c| c.as_os_str() == "subagents") {
+            continue;
+        }
         let Some(stem) = m.path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };

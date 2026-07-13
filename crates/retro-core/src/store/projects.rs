@@ -169,6 +169,20 @@ pub fn register(store: &Store, cwd: &str) -> Result<Registration, CoreError> {
     })
 }
 
+/// True when `path` is the store itself (or inside it) — retro never watches
+/// its own home, independent of user config (self-observation guard).
+pub fn is_store_dir(store_root: &Path, path: &str) -> bool {
+    let canon = |p: &Path| -> String {
+        std::fs::canonicalize(p)
+            .ok()
+            .and_then(|c| c.to_str().map(str::to_string))
+            .unwrap_or_else(|| p.display().to_string())
+    };
+    let root = canon(store_root);
+    let candidate = canon(Path::new(path));
+    candidate == root || candidate.starts_with(&format!("{}/", root.trim_end_matches('/')))
+}
+
 /// Path-prefix exclusion against `config.privacy.exclude_projects`.
 /// A prefix matches the directory itself or anything under it.
 /// Both sides are canonicalized when possible so symlink spellings
@@ -328,6 +342,19 @@ mod tests {
         assert!(is_excluded("/Users/me/private", &excludes));
         assert!(!is_excluded("/Users/me/privateer", &excludes));
         assert!(!is_excluded("/Users/me/work/app", &excludes));
+    }
+
+    #[test]
+    fn store_dir_and_children_are_self_excluded() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let root_str = root.to_str().unwrap();
+        assert!(is_store_dir(root, root_str));
+        let child = root.join("knowledge");
+        std::fs::create_dir_all(&child).unwrap();
+        assert!(is_store_dir(root, child.to_str().unwrap()));
+        let other = TempDir::new().unwrap();
+        assert!(!is_store_dir(root, other.path().to_str().unwrap()));
     }
 
     #[test]
