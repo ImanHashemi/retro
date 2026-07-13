@@ -10,6 +10,7 @@ pub mod doctor;
 pub mod hooks;
 pub mod ingest;
 pub mod init;
+pub mod lint;
 pub mod log;
 pub mod observe;
 pub mod patterns;

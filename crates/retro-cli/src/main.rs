@@ -146,6 +146,12 @@ enum Commands {
     Dash,
     /// (v3) End-to-end health verification (read-only)
     Doctor,
+    /// (v3) Store-wide lint: near-duplicates and stale candidates (no AI calls)
+    Lint {
+        /// Report only; don't queue findings as briefing notifications
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Manage git hooks
     Hooks {
         #[command(subcommand)]
@@ -212,6 +218,7 @@ fn main() {
         Commands::Sync => commands::sync::run(verbose),
         Commands::Dash => commands::dash::run(verbose),
         Commands::Doctor => commands::doctor::run(),
+        Commands::Lint { dry_run } => commands::lint::run(dry_run),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),
         },
