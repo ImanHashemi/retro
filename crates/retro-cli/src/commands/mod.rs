@@ -283,6 +283,25 @@ pub fn check_and_display_nudge() {
                     eprintln!("  {} {}", "retro:".yellow(), w);
                 }
             }
+            if let Ok(entries) = retro_core::store::queue::list(&dir) {
+                if !entries.is_empty() {
+                    // enqueued_at is RFC3339; oldest entry first (list is sorted)
+                    let oldest = &entries[0].enqueued_at;
+                    let stale = chrono::DateTime::parse_from_rfc3339(oldest)
+                        .map(|t| {
+                            chrono::Utc::now().signed_duration_since(t) > chrono::Duration::hours(24)
+                        })
+                        .unwrap_or(false);
+                    if stale {
+                        use colored::Colorize;
+                        eprintln!(
+                            "{} {} session(s) queued for over a day — run `retro run` or `retro doctor`",
+                            "retro:".yellow(),
+                            entries.len()
+                        );
+                    }
+                }
+            }
         }
     }
 

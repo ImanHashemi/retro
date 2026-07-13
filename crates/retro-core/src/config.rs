@@ -24,6 +24,8 @@ pub struct Config {
     pub knowledge: KnowledgeConfig,
     #[serde(default = "default_v3")]
     pub v3: V3Config,
+    #[serde(default = "default_ui")]
+    pub ui: UiConfig,
 }
 
 impl Default for Config {
@@ -39,6 +41,7 @@ impl Default for Config {
             trust: default_trust(),
             knowledge: default_knowledge(),
             v3: default_v3(),
+            ui: default_ui(),
         }
     }
 }
@@ -162,6 +165,17 @@ pub struct KnowledgeConfig {
 pub struct V3Config {
     #[serde(default)]
     pub enabled: bool,
+}
+
+/// v3 dashboard server settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiConfig {
+    #[serde(default = "default_ui_port")]
+    pub port: u16,
+}
+
+fn default_ui_port() -> u16 {
+    7777
 }
 
 fn default_analysis() -> AnalysisConfig {
@@ -334,6 +348,12 @@ fn default_knowledge() -> KnowledgeConfig {
 fn default_v3() -> V3Config {
     V3Config {
         enabled: false,
+    }
+}
+
+fn default_ui() -> UiConfig {
+    UiConfig {
+        port: default_ui_port(),
     }
 }
 
@@ -591,5 +611,15 @@ auto_apply = false
         // absent section parses as default (forward/backward compat)
         let parsed: Config = toml::from_str("").unwrap();
         assert!(!parsed.v3.enabled);
+    }
+
+    #[test]
+    fn ui_section_defaults_and_roundtrips() {
+        let config = Config::default();
+        assert_eq!(config.ui.port, 7777);
+        let parsed: Config = toml::from_str("").unwrap();
+        assert_eq!(parsed.ui.port, 7777);
+        let parsed: Config = toml::from_str("[ui]\nport = 9000\n").unwrap();
+        assert_eq!(parsed.ui.port, 9000);
     }
 }
