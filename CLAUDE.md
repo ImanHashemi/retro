@@ -91,6 +91,9 @@ retro init --uninstall --purge && cargo build --release && ./target/release/retr
 | `retro brief` | (v3) SessionStart hook entry: catch-up scan + session briefing |
 | `retro init --v3 [--from <remote>]` | (v3) Initialize personal store, install global hooks |
 | `retro run [--background]` | (v3, when `[v3] enabled`) Drain queue: analyze → project → commit → push |
+| `retro ui [--no-open]` | (v3) Open the local web dashboard (X-ray, knowledge, health, history) |
+| `retro doctor` | (v3) End-to-end health verification (read-only structural checks) |
+| `retro lint [--dry-run]` | (v3) Free near-duplicate + stale-candidate pass (no AI calls) |
 
 Note: `--auto` flag is deprecated in v2. Use `retro start` for automatic background operation.
 
@@ -334,6 +337,14 @@ Spec: `docs/superpowers/specs/2026-07-06-retro-v3-personal-redesign-design.md`.
   migrate via `.git/info/exclude`), `retro init --v3 [--from <remote>]` with non-destructive
   global-hooks merge, settings backup, and optional private backup remote. All v3 state
   (`queue/`, `state/`, `health.json`, `run.lock`) is machine-local and gitignored.
+- **Plan 3: DONE** — Surfaces. `retro ui` local dashboard (tiny_http, single embedded page:
+  context X-ray with retro-owned marking, knowledge browser with search/invalidate,
+  health + doctor view, store history; write actions commit → reindex → reproject,
+  guarded by `run.lock` and boundary slug validation), `retro doctor` (structural
+  checks + optional claude-CLI probe), v3-aware `retro status`, `retro lint` (free
+  near-duplicate + stale-candidate pass, Levenshtein 0.8 net), queue-age nudge,
+  store self-exclusion guard, subagent-transcript skip, runner push of unpushed
+  between-run commits. One new dependency: tiny_http (sync).
 
 ## Testing
 
