@@ -381,7 +381,10 @@ pub fn run_v3(
     };
     let committed = store_git::commit_all(store_root, &straggler_message)?;
     committed_any = committed_any || committed;
-    if committed_any {
+    // Also push when an earlier commit (dashboard write, manual edit between
+    // runs) is still sitting unpushed — this run made no commit of its own,
+    // but the backup remote should not lag indefinitely.
+    if committed_any || store_git::has_unpushed(store_root) {
         match store_git::push_best_effort(store_root) {
             store_git::PushOutcome::Pushed => {
                 summary.pushed = true;
