@@ -153,6 +153,42 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_projection_writes_nothing_and_makes_no_backup() {
+        let store_tmp = TempDir::new().unwrap();
+        let store = Store::open(store_tmp.path());
+        store.ensure_layout().unwrap();
+        store
+            .write_node(&node(
+                "g",
+                Scope::Global,
+                NodeType::Rule,
+                0.9,
+                "stable rule",
+            ))
+            .unwrap();
+
+        let claude_tmp = TempDir::new().unwrap();
+        let md = claude_tmp.path().join("CLAUDE.md");
+        std::fs::write(&md, "# Mine\n").unwrap();
+        let backups = store_tmp.path().join("backups");
+
+        project_global_md(&store, &md, 0.7, Some(&backups)).unwrap();
+        let first_backup_count = std::fs::read_dir(&backups).unwrap().count();
+        let mtime_after_first = std::fs::metadata(&md).unwrap().modified().unwrap();
+
+        // second run: identical content -> no new backup, no rewrite
+        project_global_md(&store, &md, 0.7, Some(&backups)).unwrap();
+        assert_eq!(
+            std::fs::read_dir(&backups).unwrap().count(),
+            first_backup_count
+        );
+        assert_eq!(
+            std::fs::metadata(&md).unwrap().modified().unwrap(),
+            mtime_after_first
+        );
+    }
+
+    #[test]
     fn multiline_body_flattens_to_single_line_bullet() {
         let tmp = TempDir::new().unwrap();
         let store = Store::open(tmp.path());
@@ -300,13 +336,21 @@ fn write_managed(
 ) -> Result<(), CoreError> {
     let io = |e: std::io::Error| CoreError::Io(e.to_string());
     let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let updated = update_claude_md_content(&existing, rules);
+    // Idempotent regeneration: unchanged content means no write, no backup —
+    // hook-triggered runs must not churn the user's files.
+    if updated == existing {
+        return Ok(());
+    }
     if let Some(dir) = backup_dir {
         if path.exists() {
             crate::util::backup_file(&path.display().to_string(), dir)?;
         }
     }
-    let updated = update_claude_md_content(&existing, rules);
-    std::fs::write(path, updated).map_err(io)
+    // Atomic swap: Claude Code may read this file mid-run.
+    let tmp = path.with_extension("md.retro-tmp");
+    std::fs::write(&tmp, updated).map_err(io)?;
+    std::fs::rename(&tmp, path).map_err(io)
 }
 
 /// Append CLAUDE.local.md to the repo's personal ignore file

@@ -61,6 +61,12 @@ pub fn run_v3(
         store.ensure_layout()?;
     }
 
+    // Tracks whether ANY stage committed store changes this run — the push
+    // gate at the end must fire on any of them, not just the final commit
+    // (a mid-run commit with no further changes leaves the final commit_all
+    // a no-op, but the history it created still needs to reach the remote).
+    let mut committed_any = false;
+
     // Stage: commit manual edits (files-as-truth: user edits become history).
     if !dry_run {
         store_git::ensure_repo(store_root)?;
@@ -69,6 +75,7 @@ pub fn run_v3(
         // current on stores created by older binaries (ignore migration).
         store_git::apply_local_config(store_root)?;
         if store_git::commit_all(store_root, "user: edit knowledge")? {
+            committed_any = true;
             health::record(store_root, "manual-edits", true, "committed user edits")?;
         }
     }
@@ -87,6 +94,11 @@ pub fn run_v3(
                 ));
                 st.save(store_root)?;
                 health::record(store_root, "exclude", true, &format!("cleaned up {slug}"))?;
+                // Dedicated commit so the removal lands in history immediately,
+                // independent of whatever the end-of-pipeline commit does.
+                if store_git::commit_all(store_root, &format!("retro: exclude {slug}"))? {
+                    committed_any = true;
+                }
             }
         }
     }
@@ -152,6 +164,15 @@ pub fn run_v3(
                 // unparseable transcript: drop from queue, note in health
                 if !dry_run {
                     queue::remove(store_root, &entry.session_id)?;
+                    health::record(
+                        store_root,
+                        "queue",
+                        false,
+                        &format!(
+                            "dropped {}: unparseable transcript (session will never be analyzed)",
+                            entry.session_id
+                        ),
+                    )?;
                 }
                 summary.sessions_skipped += 1;
                 continue;
@@ -341,7 +362,8 @@ pub fn run_v3(
             summary.nodes_updated + summary.nodes_merged
         ),
     )?;
-    if committed {
+    committed_any = committed_any || committed;
+    if committed_any {
         match store_git::push_best_effort(store_root) {
             store_git::PushOutcome::Pushed => {
                 summary.pushed = true;
