@@ -355,6 +355,9 @@ mod tests {
         assert!(is_store_dir(root, child.to_str().unwrap()));
         let other = TempDir::new().unwrap();
         assert!(!is_store_dir(root, other.path().to_str().unwrap()));
+        // sibling sharing a string prefix must NOT match (trailing-slash guard)
+        let sibling = format!("{root_str}-other");
+        assert!(!is_store_dir(root, &sibling));
     }
 
     #[test]
