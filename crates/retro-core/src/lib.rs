@@ -5,6 +5,7 @@ pub mod claude_settings;
 pub mod config;
 pub mod curator;
 pub mod db;
+pub mod doctor;
 pub mod errors;
 pub mod git;
 pub mod health;
