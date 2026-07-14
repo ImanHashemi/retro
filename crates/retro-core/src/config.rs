@@ -8,22 +8,14 @@ pub struct Config {
     pub analysis: AnalysisConfig,
     #[serde(default = "default_ai")]
     pub ai: AiConfig,
-    #[serde(default = "default_hooks")]
-    pub hooks: HooksConfig,
     #[serde(default = "default_paths")]
     pub paths: PathsConfig,
     #[serde(default = "default_privacy")]
     pub privacy: PrivacyConfig,
-    #[serde(default = "default_claude_md")]
-    pub claude_md: ClaudeMdConfig,
     #[serde(default = "default_runner")]
     pub runner: RunnerConfig,
-    #[serde(default = "default_trust")]
-    pub trust: TrustConfig,
     #[serde(default = "default_knowledge")]
     pub knowledge: KnowledgeConfig,
-    #[serde(default = "default_v3")]
-    pub v3: V3Config,
     #[serde(default = "default_ui")]
     pub ui: UiConfig,
 }
@@ -33,14 +25,10 @@ impl Default for Config {
         Self {
             analysis: default_analysis(),
             ai: default_ai(),
-            hooks: default_hooks(),
             paths: default_paths(),
             privacy: default_privacy(),
-            claude_md: default_claude_md(),
             runner: default_runner(),
-            trust: default_trust(),
             knowledge: default_knowledge(),
-            v3: default_v3(),
             ui: default_ui(),
         }
     }
@@ -54,8 +42,6 @@ pub struct AnalysisConfig {
     pub confidence_threshold: f64,
     #[serde(default = "default_staleness_days")]
     pub staleness_days: u32,
-    #[serde(default = "default_rolling_window")]
-    pub rolling_window: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,24 +50,6 @@ pub struct AiConfig {
     pub backend: String,
     #[serde(default = "default_model")]
     pub model: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HooksConfig {
-    #[serde(default = "default_ingest_cooldown")]
-    pub ingest_cooldown_minutes: u32,
-    #[serde(default = "default_analyze_cooldown")]
-    pub analyze_cooldown_minutes: u32,
-    #[serde(default = "default_apply_cooldown")]
-    pub apply_cooldown_minutes: u32,
-    #[serde(default = "default_auto_apply")]
-    pub auto_apply: bool,
-    #[serde(default = "default_post_commit")]
-    pub post_commit: String,
-    #[serde(default = "default_post_merge")]
-    pub post_merge: String,
-    #[serde(default = "default_auto_analyze_max_sessions")]
-    pub auto_analyze_max_sessions: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,55 +67,9 @@ pub struct PrivacyConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClaudeMdConfig {
-    #[serde(default = "default_full_management")]
-    pub full_management: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerConfig {
-    #[serde(default = "default_interval_seconds")]
-    pub interval_seconds: u32,
-    #[serde(default = "default_analysis_trigger")]
-    pub analysis_trigger: String,
-    #[serde(default = "default_analysis_threshold")]
-    pub analysis_threshold: u32,
-    #[serde(default)]
-    pub active_hours: Option<String>,
     #[serde(default = "default_max_ai_calls_per_day")]
     pub max_ai_calls_per_day: u32,
-    #[serde(default)]
-    pub min_analysis_interval_minutes: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrustConfig {
-    #[serde(default = "default_trust_mode")]
-    pub mode: String,
-    #[serde(default = "default_auto_approve_config")]
-    pub auto_approve: AutoApproveConfig,
-    #[serde(default = "default_trust_scope_config")]
-    pub scope: TrustScopeConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutoApproveConfig {
-    #[serde(default = "default_true")]
-    pub rules: bool,
-    #[serde(default)]
-    pub skills: bool,
-    #[serde(default = "default_true")]
-    pub preferences: bool,
-    #[serde(default = "default_true")]
-    pub directives: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrustScopeConfig {
-    #[serde(default = "default_scope_review")]
-    pub global_changes: String,
-    #[serde(default = "default_scope_auto")]
-    pub project_changes: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,15 +78,6 @@ pub struct KnowledgeConfig {
     pub confidence_threshold: f64,
     #[serde(default = "default_global_promotion_threshold")]
     pub global_promotion_threshold: f64,
-}
-
-/// v3 "Personal" pipeline gate. When disabled (default), retro behaves as v2.
-/// Set to `true` to enable v3 paths. `retro init --v3` (Plan 2) will write this;
-/// `retro migrate` (Plan 3) will flip it for existing v2 users.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct V3Config {
-    #[serde(default)]
-    pub enabled: bool,
 }
 
 /// v3 dashboard server settings.
@@ -183,7 +96,6 @@ fn default_analysis() -> AnalysisConfig {
         window_days: default_window_days(),
         confidence_threshold: default_confidence_threshold(),
         staleness_days: default_staleness_days(),
-        rolling_window: default_rolling_window(),
     }
 }
 
@@ -191,18 +103,6 @@ fn default_ai() -> AiConfig {
     AiConfig {
         backend: default_backend(),
         model: default_model(),
-    }
-}
-
-fn default_hooks() -> HooksConfig {
-    HooksConfig {
-        ingest_cooldown_minutes: default_ingest_cooldown(),
-        analyze_cooldown_minutes: default_analyze_cooldown(),
-        apply_cooldown_minutes: default_apply_cooldown(),
-        auto_apply: default_auto_apply(),
-        post_commit: default_post_commit(),
-        post_merge: default_post_merge(),
-        auto_analyze_max_sessions: default_auto_analyze_max_sessions(),
     }
 }
 
@@ -222,9 +122,6 @@ fn default_privacy() -> PrivacyConfig {
 fn default_window_days() -> u32 {
     14
 }
-fn default_rolling_window() -> bool {
-    true
-}
 fn default_confidence_threshold() -> f64 {
     0.7
 }
@@ -237,27 +134,6 @@ fn default_backend() -> String {
 fn default_model() -> String {
     "sonnet".to_string()
 }
-fn default_ingest_cooldown() -> u32 {
-    5
-}
-fn default_analyze_cooldown() -> u32 {
-    1440
-}
-fn default_apply_cooldown() -> u32 {
-    1440
-}
-fn default_auto_apply() -> bool {
-    true
-}
-fn default_post_commit() -> String {
-    "ingest".to_string()
-}
-fn default_post_merge() -> String {
-    "analyze".to_string()
-}
-fn default_auto_analyze_max_sessions() -> u32 {
-    15
-}
 fn default_claude_dir() -> String {
     "~/.claude".to_string()
 }
@@ -265,39 +141,8 @@ fn default_scrub_secrets() -> bool {
     true
 }
 
-fn default_claude_md() -> ClaudeMdConfig {
-    ClaudeMdConfig {
-        full_management: default_full_management(),
-    }
-}
-
-fn default_full_management() -> bool {
-    false
-}
-
-fn default_interval_seconds() -> u32 {
-    300
-}
-fn default_analysis_trigger() -> String {
-    "sessions".to_string()
-}
-fn default_analysis_threshold() -> u32 {
-    3
-}
 fn default_max_ai_calls_per_day() -> u32 {
     10
-}
-fn default_trust_mode() -> String {
-    "review".to_string()
-}
-fn default_true() -> bool {
-    true
-}
-fn default_scope_review() -> String {
-    "review".to_string()
-}
-fn default_scope_auto() -> String {
-    "auto".to_string()
 }
 fn default_global_promotion_threshold() -> f64 {
     0.85
@@ -305,36 +150,7 @@ fn default_global_promotion_threshold() -> f64 {
 
 fn default_runner() -> RunnerConfig {
     RunnerConfig {
-        interval_seconds: default_interval_seconds(),
-        analysis_trigger: default_analysis_trigger(),
-        analysis_threshold: default_analysis_threshold(),
-        active_hours: None,
         max_ai_calls_per_day: default_max_ai_calls_per_day(),
-        min_analysis_interval_minutes: 0,
-    }
-}
-
-fn default_trust() -> TrustConfig {
-    TrustConfig {
-        mode: default_trust_mode(),
-        auto_approve: default_auto_approve_config(),
-        scope: default_trust_scope_config(),
-    }
-}
-
-fn default_auto_approve_config() -> AutoApproveConfig {
-    AutoApproveConfig {
-        rules: true,
-        skills: false,
-        preferences: true,
-        directives: true,
-    }
-}
-
-fn default_trust_scope_config() -> TrustScopeConfig {
-    TrustScopeConfig {
-        global_changes: default_scope_review(),
-        project_changes: default_scope_auto(),
     }
 }
 
@@ -342,12 +158,6 @@ fn default_knowledge() -> KnowledgeConfig {
     KnowledgeConfig {
         confidence_threshold: default_confidence_threshold(),
         global_promotion_threshold: default_global_promotion_threshold(),
-    }
-}
-
-fn default_v3() -> V3Config {
-    V3Config {
-        enabled: false,
     }
 }
 
@@ -419,107 +229,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_hooks_config_defaults() {
-        let config = default_hooks();
-        assert_eq!(config.ingest_cooldown_minutes, 5);
-        assert_eq!(config.analyze_cooldown_minutes, 1440);
-        assert_eq!(config.apply_cooldown_minutes, 1440);
-        assert!(config.auto_apply);
-    }
-
-    #[test]
-    fn test_hooks_config_new_fields_deserialize() {
-        let toml_str = r#"
-[hooks]
-ingest_cooldown_minutes = 10
-analyze_cooldown_minutes = 720
-apply_cooldown_minutes = 2880
-auto_apply = false
-"#;
-        let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.hooks.ingest_cooldown_minutes, 10);
-        assert_eq!(config.hooks.analyze_cooldown_minutes, 720);
-        assert_eq!(config.hooks.apply_cooldown_minutes, 2880);
-        assert!(!config.hooks.auto_apply);
-    }
-
-    #[test]
-    fn test_hooks_config_partial_deserialize() {
-        // Config with only some fields should fill defaults for the rest
-        let toml_str = r#"
-[hooks]
-ingest_cooldown_minutes = 10
-auto_apply = false
-"#;
-        let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.hooks.ingest_cooldown_minutes, 10);
-        assert_eq!(config.hooks.analyze_cooldown_minutes, 1440); // default
-        assert_eq!(config.hooks.apply_cooldown_minutes, 1440); // default
-        assert!(!config.hooks.auto_apply);
-    }
-
-    #[test]
-    fn test_hooks_config_max_sessions_default() {
-        let config = Config::default();
-        assert_eq!(config.hooks.auto_analyze_max_sessions, 15);
-    }
-
-    #[test]
-    fn test_hooks_config_max_sessions_custom() {
-        let toml_str = r#"
-[hooks]
-auto_analyze_max_sessions = 5
-"#;
-        let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.hooks.auto_analyze_max_sessions, 5);
-    }
-
-    #[test]
-    fn test_claude_md_config_defaults() {
-        let config = Config::default();
-        assert!(!config.claude_md.full_management);
-    }
-
-    #[test]
-    fn test_claude_md_config_custom() {
-        let toml_str = r#"
-[claude_md]
-full_management = true
-"#;
-        let config: Config = toml::from_str(toml_str).unwrap();
-        assert!(config.claude_md.full_management);
-    }
-
-    #[test]
-    fn test_claude_md_config_absent() {
-        let toml_str = r#"
-[analysis]
-window_days = 7
-"#;
-        let config: Config = toml::from_str(toml_str).unwrap();
-        assert!(!config.claude_md.full_management);
-    }
-
-    #[test]
     fn test_runner_config_defaults() {
         let config = Config::default();
-        assert_eq!(config.runner.interval_seconds, 300);
-        assert_eq!(config.runner.analysis_trigger, "sessions");
-        assert_eq!(config.runner.analysis_threshold, 3);
-        assert!(config.runner.active_hours.is_none());
         assert_eq!(config.runner.max_ai_calls_per_day, 10);
-    }
-
-    #[test]
-    fn test_trust_config_defaults() {
-        let config = Config::default();
-        assert_eq!(config.trust.mode, "review");
-        assert!(config.trust.auto_approve.rules);
-        assert!(!config.trust.auto_approve.skills);
-        assert!(config.trust.auto_approve.preferences);
-        assert!(config.trust.auto_approve.directives);
-        assert_eq!(config.trust.scope.global_changes, "review");
-        assert_eq!(config.trust.scope.project_changes, "auto");
     }
 
     #[test]
@@ -530,36 +242,24 @@ window_days = 7
     }
 
     #[test]
-    fn test_v2_config_deserialize() {
+    fn test_runner_and_knowledge_config_deserialize() {
         let toml_str = r#"
 [runner]
-interval_seconds = 120
 max_ai_calls_per_day = 5
-
-[trust]
-mode = "auto"
-
-[trust.auto_approve]
-skills = true
-
-[trust.scope]
-global_changes = "auto"
 
 [knowledge]
 confidence_threshold = 0.8
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.runner.interval_seconds, 120);
         assert_eq!(config.runner.max_ai_calls_per_day, 5);
-        assert_eq!(config.trust.mode, "auto");
-        assert!(config.trust.auto_approve.skills);
-        assert_eq!(config.trust.scope.global_changes, "auto");
         assert_eq!(config.knowledge.confidence_threshold, 0.8);
     }
 
     #[test]
-    fn test_v1_config_still_loads() {
-        // A pure v1 config (no runner/trust/knowledge sections) should still parse
+    fn test_config_with_removed_sections_still_loads() {
+        // Old config.toml files may still have [hooks]/[trust]/[claude_md]/[v3]
+        // sections from earlier retro versions — serde ignores unknown keys,
+        // so these must not fail to parse.
         let toml_str = r#"
 [analysis]
 window_days = 7
@@ -567,13 +267,20 @@ window_days = 7
 [hooks]
 ingest_cooldown_minutes = 10
 auto_apply = false
+
+[trust]
+mode = "auto"
+
+[claude_md]
+full_management = true
+
+[v3]
+enabled = true
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.analysis.window_days, 7);
-        assert_eq!(config.hooks.ingest_cooldown_minutes, 10);
-        // v2 sections should have defaults
-        assert_eq!(config.runner.interval_seconds, 300);
-        assert_eq!(config.trust.mode, "review");
+        // current sections still get their defaults
+        assert_eq!(config.runner.max_ai_calls_per_day, 10);
         assert_eq!(config.knowledge.confidence_threshold, 0.7);
     }
 
@@ -599,18 +306,6 @@ auto_apply = false
                 None => std::env::remove_var("RETRO_HOME"),
             }
         }
-    }
-
-    #[test]
-    fn v3_section_defaults_off_and_roundtrips() {
-        let config = Config::default();
-        assert!(!config.v3.enabled);
-        let toml_str = toml::to_string_pretty(&config).unwrap();
-        let parsed: Config = toml::from_str(&toml_str).unwrap();
-        assert!(!parsed.v3.enabled);
-        // absent section parses as default (forward/backward compat)
-        let parsed: Config = toml::from_str("").unwrap();
-        assert!(!parsed.v3.enabled);
     }
 
     #[test]

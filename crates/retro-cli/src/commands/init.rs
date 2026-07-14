@@ -63,8 +63,7 @@ pub fn run(from: Option<String>) -> Result<()> {
     // Global hooks in ~/.claude/settings.json (absolute binary path — hooks
     // run outside any shell profile, PATH is not guaranteed).
     let config_path = dir.join("config.toml");
-    // Load-modify-save: Config captures all known sections; hand-added unknown keys/comments are dropped (acceptable — config is retro-owned).
-    let mut config = Config::load(&config_path)?;
+    let config = Config::load(&config_path)?;
 
     // Safety-import: rescue any managed-block rules from the user's global
     // CLAUDE.md that aren't in the store yet, before anything can project
@@ -100,12 +99,6 @@ pub fn run(from: Option<String>) -> Result<()> {
     }
     std::fs::write(&settings_path, serde_json::to_string_pretty(&with_both)?)?;
     println!("Installed v3 hooks in {}", settings_path.display());
-
-    // Enable the gate (retro-core's doctor check still reads this; the gate
-    // itself is removed in the deletion wave that drops the [v3] config
-    // section — see Task 8).
-    config.v3.enabled = true;
-    config.save(&config_path)?;
 
     // Backup remote (skip when cloning — a remote already exists).
     if from.is_none() && !store_git::has_remote(&dir) {

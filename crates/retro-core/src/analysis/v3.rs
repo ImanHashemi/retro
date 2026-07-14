@@ -8,7 +8,7 @@ use crate::analysis::backend::AnalysisBackend;
 use crate::analysis::{GRAPH_ANALYSIS_RESPONSE_SCHEMA, parse_graph_response_full, prompts};
 use crate::errors::CoreError;
 use crate::models::{
-    EdgeType, GraphOperation, KnowledgeNode, NodeScope, NodeStatus, NodeType as V2NodeType, Session,
+    EdgeType, GraphOperation, KnowledgeNode, NodeScope, NodeType as V2NodeType, Session,
 };
 use crate::store::{Node, NodeType, Scope, Store, is_valid_slug};
 use crate::util::truncate_str;
@@ -46,7 +46,7 @@ impl V3AnalyzeResult {
 
 /// Shim: present a v3 store node to the v2 prompt builder. Only id, content,
 /// confidence, type, and scope influence the prompt (content truncated to
-/// 200 chars there); the rest are placeholders.
+/// 200 chars there).
 fn shim(node: &Node) -> KnowledgeNode {
     KnowledgeNode {
         id: node.id.clone(),
@@ -60,17 +60,8 @@ fn shim(node: &Node) -> KnowledgeNode {
             Scope::Global => NodeScope::Global,
             Scope::Project(_) => NodeScope::Project,
         },
-        project_id: match &node.scope {
-            Scope::Global => None,
-            Scope::Project(slug) => Some(slug.clone()),
-        },
         content: node.body.clone(),
         confidence: node.confidence,
-        status: NodeStatus::Active,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        projected_at: None,
-        pr_url: None,
     }
 }
 

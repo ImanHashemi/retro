@@ -765,14 +765,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "retro-projectors"
-version = "0.4.0"
-dependencies = [
- "chrono",
- "retro-core",
-]
-
-[[package]]
 name = "rusqlite"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
