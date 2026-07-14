@@ -8,10 +8,10 @@ use retro_core::store::{Store, state::RunnerState};
 /// as briefing notifications (capped) so they surface in the next session.
 pub fn run(dry_run: bool) -> Result<()> {
     let dir = retro_dir();
-    let config = Config::load(&dir.join("config.toml"))?;
-    if !config.v3.enabled {
-        anyhow::bail!("v3 is disabled — run `retro init --v3` first");
+    if !dir.join("knowledge").exists() {
+        anyhow::bail!("retro is not initialized — run `retro init`");
     }
+    let config = Config::load(&dir.join("config.toml"))?;
     let store = Store::open(&dir);
     let report = lint::run_lint(&store, &config)?;
     println!(

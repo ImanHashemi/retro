@@ -7,6 +7,9 @@ use retro_core::doctor;
 /// a --version subprocess (no tokens).
 pub fn run() -> Result<()> {
     let dir = retro_dir();
+    if !dir.join("knowledge").exists() {
+        anyhow::bail!("retro is not initialized — run `retro init`");
+    }
     let config = Config::load(&dir.join("config.toml"))?;
     let report = doctor::run_checks(&dir, &config, true);
     for check in &report.checks {
