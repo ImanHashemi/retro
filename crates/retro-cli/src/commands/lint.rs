@@ -23,6 +23,13 @@ pub fn run(dry_run: bool) -> Result<()> {
         println!("  {} {}", format!("[{}]", f.kind).yellow(), f.detail);
     }
     if !dry_run && !report.findings.is_empty() {
+        // state.json writes require the run lock (same discipline as the
+        // dashboard write handlers) — a load-modify-save racing a runner
+        // pass could clobber budget/processed fields.
+        let Some(_lock) = retro_core::lock::LockFile::try_acquire(&dir.join("run.lock")) else {
+            println!("\n(a retro run is in progress — findings not queued; rerun `retro lint` shortly)");
+            return Ok(());
+        };
         let mut state = RunnerState::load(&dir)?;
         for f in report.findings.iter().take(3) {
             let msg = format!("Lint: {}", f.detail);

@@ -12,7 +12,7 @@
 
 ## Context for implementers (read first)
 
-- **Conventions:** `CoreError` in retro-core, `anyhow` + bare `?` in retro-cli. NEVER `cargo fmt` — per-file `rustfmt --edition 2024` on NEW files only; manual style in shared files. Mandatory preflight every dispatch: `cd /Users/imanhashemi/repositories/retro/.claude/worktrees/v3-surfaces && git branch --show-current` must print `v3-surfaces`.
+- **Conventions:** `CoreError` in retro-core, `anyhow` + bare `?` in retro-cli. NEVER `cargo fmt` — per-file `rustfmt --edition 2024` on NEW files only; manual style in shared files. Mandatory preflight every dispatch: `cd <repo>/.claude/worktrees/v3-surfaces && git branch --show-current` must print `v3-surfaces`.
 - **SAFETY (absolute):** never run `retro init` (any form), `retro start`, or `retro stop` — they write launchd plists/hooks OUTSIDE the RETRO_HOME sandbox. Live checks only via observe/brief/run/reindex/status/doctor/ui with isolated `RETRO_HOME` + `[paths] claude_dir` override. NEVER run `retro run` with a NON-EMPTY queue against a config whose backend could reach the real `claude` CLI (it would spend real tokens) — use empty queues or `--dry-run` for CLI checks; MockBackend in tests.
 - **Existing API you build on (all verified in the merged code):**
   - `store::{Store, Node, NodeType, Scope}`; `Store::{open, ensure_layout, load_all, get, write_node, invalidate, unique_slug}`; `store.load_all() -> LoadResult{nodes: Vec<(PathBuf, Node)>, warnings}`
@@ -1459,4 +1459,4 @@ The store is already live on this machine (Plan 2 smoke test). After merging Pla
 
 - `retro migrate` (v2 SQLite → v3 nodes, launchd removal, `[v3]` default flip, poisoned-store `git rm --cached` cleanup), v3 `retro uninstall`
 - Deletion of v1/v2 commands, modules, and tables; scenario-test rewrite; 3.0.0 release via publish workflow
-- Dashboard polish: node editing UI (API already exists), one-click history revert (spec §8 — history view is read-only in this plan), coverage list of seen-but-unwatched projects, AI-assisted lint stage
+- Dashboard polish: node editing UI (API already exists), one-click history revert (spec §8 — history view is read-only in this plan), coverage list of seen-but-unwatched projects, AI-assisted lint stage, confidence-based knowledge filtering (spec §8 names it; confidence is displayed but not filterable in this plan)

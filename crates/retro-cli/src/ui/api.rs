@@ -448,10 +448,14 @@ fn api_xray(store_root: &Path, config: &Config) -> (serde_json::Value, u16) {
         }
     };
     let store = Store::open(store_root);
-    let loaded = store.load_all().unwrap_or(retro_core::store::LoadResult {
-        nodes: vec![],
-        warnings: vec![],
-    });
+    // A whole-load failure must not render as "0 nodes" with no explanation —
+    // surface it through the same warnings channel per-file issues use.
+    let loaded = store
+        .load_all()
+        .unwrap_or_else(|e| retro_core::store::LoadResult {
+            nodes: vec![],
+            warnings: vec![format!("store load failed: {e}")],
+        });
     let map = PathMap::load(store_root).unwrap_or_default();
     let claude_dir = config.claude_dir();
 

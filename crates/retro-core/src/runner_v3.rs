@@ -329,11 +329,17 @@ pub fn run_v3(
     // projection, so a projection failure never blocks these writes from
     // landing in history (analysis and projection are independent stages).
     let nodes_changed = summary.nodes_created + summary.nodes_updated + summary.nodes_merged;
-    let learn_message = format!(
-        "retro: learn {} node(s), update {}",
-        summary.nodes_created,
-        summary.nodes_updated + summary.nodes_merged
-    );
+    // With zero node changes, anything sitting uncommitted is a stray (crash
+    // remnant, manual edit) — labeling it "learn 0 node(s)" would mislead.
+    let learn_message = if nodes_changed == 0 {
+        "retro: maintenance".to_string()
+    } else {
+        format!(
+            "retro: learn {} node(s), update {}",
+            summary.nodes_created,
+            summary.nodes_updated + summary.nodes_merged
+        )
+    };
     if store_git::commit_all(store_root, &learn_message)? {
         committed_any = true;
     }
@@ -374,12 +380,9 @@ pub fn run_v3(
     if let Err(e) = index::build(&store) {
         health::record(store_root, "index", false, &e.to_string())?;
     }
-    let straggler_message = if nodes_changed == 0 {
-        "retro: maintenance".to_string()
-    } else {
-        learn_message
-    };
-    let committed = store_git::commit_all(store_root, &straggler_message)?;
+    // learn_message already falls back to "retro: maintenance" when nothing
+    // changed, so stragglers get an honest label either way.
+    let committed = store_git::commit_all(store_root, &learn_message)?;
     committed_any = committed_any || committed;
     // Also push when an earlier commit (dashboard write, manual edit between
     // runs) is still sitting unpushed — this run made no commit of its own,
