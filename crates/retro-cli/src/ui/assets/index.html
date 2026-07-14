@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>retro</title>
+<style>
+  :root { --bg:#111; --fg:#ddd; --dim:#888; --accent:#7aa2f7; --warn:#e0af68; --err:#f7768e; --ok:#9ece6a; --card:#1a1a1f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 -apple-system, "SF Mono", Menlo, monospace; background:var(--bg); color:var(--fg); }
+  header { display:flex; gap:1rem; align-items:baseline; padding:0.8rem 1.2rem; border-bottom:1px solid #2a2a30; }
+  header h1 { font-size:1rem; margin:0; color:var(--accent); }
+  nav button { background:none; border:none; color:var(--dim); font:inherit; cursor:pointer; padding:0.2rem 0.6rem; }
+  nav button.active { color:var(--fg); border-bottom:2px solid var(--accent); }
+  main { padding:1rem 1.2rem; max-width:1000px; margin:0 auto; }
+  .card { background:var(--card); border-radius:8px; padding:0.8rem 1rem; margin:0.6rem 0; }
+  .row { display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; align-items:center; }
+  .dim { color:var(--dim); } .ok { color:var(--ok); } .warn { color:var(--warn); } .err { color:var(--err); }
+  .badge { font-size:0.75rem; padding:0.05rem 0.45rem; border-radius:8px; background:#26262e; }
+  .retro-owned { color:var(--accent); }
+  input, select { background:#0d0d10; color:var(--fg); border:1px solid #2a2a30; border-radius:6px; padding:0.3rem 0.5rem; font:inherit; }
+  textarea { width:100%; min-height:8rem; background:#0d0d10; color:var(--fg); border:1px solid #2a2a30; border-radius:6px; padding:0.5rem; font:inherit; }
+  button.action { background:#26262e; color:var(--fg); border:1px solid #3a3a44; border-radius:6px; padding:0.25rem 0.7rem; cursor:pointer; font:inherit; }
+  button.action:hover { border-color:var(--accent); }
+  button.danger:hover { border-color:var(--err); color:var(--err); }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:0.3rem 0.5rem; border-bottom:1px solid #22222a; vertical-align:top; }
+  pre { white-space:pre-wrap; word-break:break-word; }
+  .clickable { cursor:pointer; }
+  .clickable:hover { color:var(--accent); }
+  .hidden { display:none; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; padding:1rem; z-index:10; }
+  .modal-card { background:var(--card); color:var(--fg); border-radius:8px; padding:1rem 1.2rem; max-width:640px; width:100%; max-height:80vh; overflow:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>retro</h1>
+  <nav id="tabs">
+    <button data-tab="xray" class="active">X-ray</button>
+    <button data-tab="knowledge">Knowledge</button>
+    <button data-tab="health">Health</button>
+    <button data-tab="history">History</button>
+  </nav>
+</header>
+<main id="main"></main>
+<div id="modal" class="modal hidden" onclick="if (event.target === this) closeModal()">
+  <div class="modal-card" id="modalBody"></div>
+</div>
+<script>
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const get = async p => { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).error || r.status); return r.json(); };
+const post = async (p, body) => { const r = await fetch(p, {method:"POST", body: JSON.stringify(body)}); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
+const fileCell = f => f.present ? `${(f.bytes/1024).toFixed(1)} KB <span class="dim">(~${f.tokens_est} tok)</span>` : `<span class="dim">—</span>`;
+
+// Cache of registered project slugs, used to populate the Knowledge tab's
+// scope filter (node scope is matched exactly server-side, so "project"
+// scopes need a concrete slug: "project/<slug>"). Reset after excludeProject
+// succeeds so a removed project drops out of the list.
+let projectSlugsCache = null;
+async function getProjectSlugs() {
+  if (projectSlugsCache !== null) return projectSlugsCache;
+  try {
+    const x = await get("/api/xray");
+    projectSlugsCache = x.projects.map(p => p.slug);
+    return projectSlugsCache;
+  } catch (e) {
+    return []; // transient failure — don't cache, retry on next render
+  }
+}
+
+const views = {
+  async xray() {
+    const x = await get("/api/xray");
+    let html = `<div class="card"><div class="row">
+      <div><b>Global CLAUDE.md</b> ${fileCell(x.global_claude_md)}
+        <span class="badge retro-owned">${x.global_active_nodes} retro rules</span></div>
+      <div><b>Skills</b> ${x.skills_count}</div></div></div>`;
+    if (x.store_warnings.length)
+      html += `<div class="card warn">⚠ ${x.store_warnings.map(esc).join("<br>")}</div>`;
+    html += x.projects.map(p => `<div class="card">
+      <div class="row"><b>${esc(p.slug)}</b><span class="dim">${esc(p.path)}</span></div>
+      <table><tr>
+        <td>CLAUDE.md ${fileCell(p.claude_md)}</td>
+        <td>CLAUDE.local.md ${fileCell(p.claude_local_md)} <span class="badge retro-owned">retro</span></td>
+        <td>MEMORY.md ${fileCell(p.memory_md)}</td>
+        <td><span class="badge retro-owned">${p.active_nodes} nodes</span></td>
+        <td><button class="action danger" onclick="excludeProject('${esc(p.slug)}')">exclude</button></td>
+      </tr></table></div>`).join("");
+    return html;
+  },
+  async knowledge() {
+    const q = $("#kq")?.value ?? "";
+    const scope = $("#kscope")?.value ?? "";
+    const type = $("#ktype")?.value ?? "";
+    const active = $("#kactive")?.value ?? "";
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (scope) params.set("scope", scope);
+    if (type) params.set("type", type);
+    if (active) params.set("active", active);
+    const [nodes, slugs] = await Promise.all([get("/api/nodes?" + params), getProjectSlugs()]);
+    const scopeOpts = [["", "all scopes"], ["global", "global"], ...slugs.map(s => [`project/${s}`, s])]
+      .map(([v, label]) => `<option value="${esc(v)}" ${scope === v ? "selected" : ""}>${esc(label)}</option>`).join("");
+    const typeOpts = ["", "rule", "preference", "pattern", "memory"]
+      .map(t => `<option value="${esc(t)}" ${type === t ? "selected" : ""}>${t ? esc(t) : "all types"}</option>`).join("");
+    const activeOpts = [["", "all"], ["true", "active only"]]
+      .map(([v, label]) => `<option value="${esc(v)}" ${active === v ? "selected" : ""}>${esc(label)}</option>`).join("");
+    return `<div class="card row">
+        <input id="kq" placeholder="search…" value="${esc(q)}" onchange="render()">
+        <select id="kscope" onchange="render()">${scopeOpts}</select>
+        <select id="ktype" onchange="render()">${typeOpts}</select>
+        <select id="kactive" onchange="render()">${activeOpts}</select>
+      </div>` +
+      (nodes.map(n => `<div class="card" ${n.active ? "" : 'style="opacity:.5"'}>
+        <div class="row"><b class="clickable" onclick="viewNode('${esc(n.scope)}','${esc(n.id)}')">${esc(n.id)}</b>
+          <span><span class="badge">${esc(n.scope)}</span> <span class="badge">${esc(n.type)}</span>
+          <span class="badge">${n.confidence.toFixed(2)}</span>
+          ${n.active ? `<button class="action danger" onclick="invalidate('${esc(n.scope)}','${esc(n.id)}')">invalidate</button>` : `<span class="dim">invalidated</span>`}</span></div>
+        <pre class="dim">${esc(n.body)}</pre>
+        <span class="dim">sources: ${n.sources.map(esc).join(", ") || "—"} · updated ${esc(n.updated)}</span>
+      </div>`).join("") || `<div class="card dim">no nodes</div>`);
+  },
+  async health() {
+    const h = await get("/api/health"), d = await get("/api/doctor");
+    return `<div class="card"><b>Doctor</b><table>` +
+      d.checks.map(c => `<tr><td class="${c.ok?"ok":"err"}">${c.ok?"✓":"✗"}</td><td>${esc(c.name)}</td><td class="dim">${esc(c.detail)}</td></tr>`).join("") +
+      `</table></div><div class="card"><b>Stages</b><table>` +
+      Object.entries(h.stages).map(([n,s]) => `<tr><td class="${s.ok?"ok":"err"}">${s.ok?"✓":"✗"}</td><td>${esc(n)}</td><td class="dim">${esc(s.detail)}</td><td class="dim">${esc(s.at)}</td></tr>`).join("") +
+      `</table></div><div class="card dim">queue: ${h.queue_len} · budget left today: ${h.budget_remaining} · pending notifications: ${h.notifications_pending}</div>`;
+  },
+  async history() {
+    const commits = await get("/api/history?limit=50");
+    return `<div class="card"><table>` +
+      commits.map(c => `<tr><td class="dim">${esc(c.hash)}</td><td>${esc(c.subject)}</td><td class="dim">${esc(c.date)}</td></tr>`).join("") +
+      `</table></div>`;
+  },
+};
+
+let tab = "xray";
+let renderSeq = 0;
+async function render() {
+  // Sequence guard: rapid filter changes fire concurrent renders; only the
+  // most recently issued one may write the DOM (last-resolved ≠ last-issued).
+  const seq = ++renderSeq;
+  let html;
+  try { html = await views[tab](); }
+  catch (e) { html = `<div class="card err">${esc(e.message)}</div>`; }
+  if (seq !== renderSeq) return;
+  const focusedId = document.activeElement?.id;
+  $("#main").innerHTML = html;
+  // Re-rendering replaces the filter bar wholesale — put focus (and the
+  // cursor) back where the user was typing.
+  if (focusedId) {
+    const el = $("#" + focusedId);
+    if (el) {
+      el.focus();
+      if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }
+}
+async function viewNode(scope, id) {
+  try {
+    const params = new URLSearchParams({scope, id});
+    const n = await get("/api/node?" + params);
+    $("#modalBody").innerHTML = `
+      <div class="row"><b>${esc(n.id)}</b><button class="action" onclick="closeModal()">close</button></div>
+      <div class="dim">${esc(n.scope)} · ${esc(n.type)} · confidence ${n.confidence.toFixed(2)}</div>
+      <div class="dim">created ${esc(n.created)} · updated ${esc(n.updated)}</div>
+      ${n.invalidated_by ? `<div class="err">invalidated by: ${esc(n.invalidated_by)}</div>` : ""}
+      <pre>${esc(n.body)}</pre>
+      <div class="dim">sources: ${n.sources.map(esc).join(", ") || "—"}</div>
+      <div class="dim">path: ${esc(n.path)}</div>
+      ${!n.invalidated_by ? `<button class="action danger" onclick="invalidate('${esc(n.scope)}','${esc(n.id)}')">invalidate</button>` : ""}
+    `;
+    $("#modal").classList.remove("hidden");
+  } catch (e) { alert(e.message); }
+}
+function closeModal() {
+  $("#modal").classList.add("hidden");
+  $("#modalBody").innerHTML = "";
+}
+async function invalidate(scope, id) {
+  if (!confirm(`Invalidate ${id}? (recoverable via store git history)`)) return;
+  try { await post("/api/node/invalidate", {scope, id}); closeModal(); render(); } catch (e) { alert(e.message); }
+}
+async function excludeProject(slug) {
+  if (!confirm(`Stop watching ${slug} and DELETE its knowledge? (recoverable via store git history)`)) return;
+  try { await post("/api/project/exclude", {slug}); projectSlugsCache = null; render(); } catch (e) { alert(e.message); }
+}
+$("#tabs").addEventListener("click", e => {
+  if (e.target.dataset.tab) {
+    tab = e.target.dataset.tab;
+    document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b === e.target));
+    render();
+  }
+});
+render();
+</script>
+</body>
+</html>

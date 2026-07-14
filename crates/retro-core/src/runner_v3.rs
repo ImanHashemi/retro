@@ -131,7 +131,7 @@ pub fn run_v3(
     // BEFORE analysis — recorded ok=false so Health::warnings() carries them
     // into the briefing and nudge (visible, never silent).
     let loaded = store.load_all()?;
-    if !loaded.warnings.is_empty() {
+    if !loaded.warnings.is_empty() && !dry_run {
         let joined = loaded.warnings.join("; ");
         health::record(
             store_root,
@@ -191,7 +191,9 @@ pub fn run_v3(
             summary.sessions_skipped += 1;
             continue;
         }
-        if projects::is_excluded(&cwd, &config.privacy.exclude_projects) {
+        if projects::is_excluded(&cwd, &config.privacy.exclude_projects)
+            || projects::is_store_dir(store_root, &cwd)
+        {
             if !dry_run {
                 queue::remove(store_root, &entry.session_id)?;
             }
@@ -323,6 +325,25 @@ pub fn run_v3(
         health::record(store_root, "analyze", true, &detail)?;
     }
 
+    // Stage: commit newly-learned knowledge — right after analysis, before
+    // projection, so a projection failure never blocks these writes from
+    // landing in history (analysis and projection are independent stages).
+    let nodes_changed = summary.nodes_created + summary.nodes_updated + summary.nodes_merged;
+    // With zero node changes, anything sitting uncommitted is a stray (crash
+    // remnant, manual edit) — labeling it "learn 0 node(s)" would mislead.
+    let learn_message = if nodes_changed == 0 {
+        "retro: maintenance".to_string()
+    } else {
+        format!(
+            "retro: learn {} node(s), update {}",
+            summary.nodes_created,
+            summary.nodes_updated + summary.nodes_merged
+        )
+    };
+    if store_git::commit_all(store_root, &learn_message)? {
+        committed_any = true;
+    }
+
     // Anything still queued (budget exhaustion OR failed groups) is pending —
     // authoritative recount so the summary can't understate it.
     summary.sessions_pending = queue::list(store_root)?.len();
@@ -352,18 +373,21 @@ pub fn run_v3(
         st.save(store_root)?;
     }
 
-    // Stage: index, commit, push.
-    index::build(&store)?;
-    let committed = store_git::commit_all(
-        store_root,
-        &format!(
-            "retro: learn {} node(s), update {}",
-            summary.nodes_created,
-            summary.nodes_updated + summary.nodes_merged
-        ),
-    )?;
+    // Stage: index (best-effort — a rebuild failure must not abort the run;
+    // the knowledge commit above already landed the analysis writes),
+    // straggler commit (anything touched since, e.g. by projection or a
+    // concurrent manual edit), push.
+    if let Err(e) = index::build(&store) {
+        health::record(store_root, "index", false, &e.to_string())?;
+    }
+    // learn_message already falls back to "retro: maintenance" when nothing
+    // changed, so stragglers get an honest label either way.
+    let committed = store_git::commit_all(store_root, &learn_message)?;
     committed_any = committed_any || committed;
-    if committed_any {
+    // Also push when an earlier commit (dashboard write, manual edit between
+    // runs) is still sitting unpushed — this run made no commit of its own,
+    // but the backup remote should not lag indefinitely.
+    if committed_any || store_git::has_unpushed(store_root) {
         match store_git::push_best_effort(store_root) {
             store_git::PushOutcome::Pushed => {
                 summary.pushed = true;
@@ -494,6 +518,18 @@ mod tests {
             "got: {:?}",
             final_state.processed
         );
+        // the knowledge commit landed right after analysis (before projection)
+        let log = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["log", "--format=%s"])
+            .output()
+            .unwrap();
+        let subjects = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            subjects.lines().any(|s| s.starts_with("retro: learn")),
+            "got: {subjects}"
+        );
     }
 
     #[test]
@@ -608,6 +644,9 @@ mod tests {
             },
         )
         .unwrap();
+        // a corrupt knowledge file produces a store-parse warning — dry-run
+        // must not persist it to health.json (no writes at all).
+        std::fs::write(tmp.path().join("knowledge/global/bad.md"), "junk").unwrap();
         let backend = MockBackend::with_responses(vec![]);
         let summary = run_v3(tmp.path(), &config, &backend, true)
             .unwrap()
@@ -621,6 +660,10 @@ mod tests {
             "queue untouched — stale entry survives dry-run"
         );
         assert!(Store::open(tmp.path()).load_all().unwrap().nodes.is_empty());
+        assert!(
+            !tmp.path().join("health.json").exists(),
+            "dry-run must not write health.json even when store warnings exist"
+        );
     }
 
     /// Fix 1 regression: `util::backup_file` used to fail when the backup dir

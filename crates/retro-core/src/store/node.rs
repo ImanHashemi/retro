@@ -7,7 +7,9 @@ use crate::errors::CoreError;
 
 /// Ids and project slugs must be safe path segments: lowercase ASCII
 /// alphanumerics and dashes, starting alphanumeric (the slugify charset).
-pub(crate) fn is_valid_slug(s: &str) -> bool {
+/// Public so surfaces (dashboard API, CLI) can reject untrusted ids
+/// before they reach any path construction.
+pub fn is_valid_slug(s: &str) -> bool {
     let mut chars = s.chars();
     match chars.next() {
         Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}

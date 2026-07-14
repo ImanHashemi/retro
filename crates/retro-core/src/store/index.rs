@@ -410,6 +410,37 @@ mod tests {
     }
 
     #[test]
+    fn query_survives_hostile_fts_syntax() {
+        let (_tmp, store) = seeded_store();
+        build(&store).unwrap();
+        let conn = open(store.root()).unwrap();
+        // raw FTS5 operators/quotes typed into the dashboard search box must
+        // never surface as SQL errors — fts_escape neutralizes them
+        for hostile in [
+            "\"unbalanced",
+            "foo AND",
+            "(paren",
+            "col:on",
+            "*star",
+            "\"",
+            "\"\"",
+            "NEAR(",
+            "-",
+            "one \" two",
+        ] {
+            let err = query(
+                &conn,
+                &NodeFilter {
+                    text: Some(hostile.to_string()),
+                    ..Default::default()
+                },
+            )
+            .err();
+            assert!(err.is_none(), "input {hostile:?} errored: {err:?}");
+        }
+    }
+
+    #[test]
     fn open_before_build_errors_not_initialized() {
         let tmp = TempDir::new().unwrap();
         let store = Store::open(tmp.path());

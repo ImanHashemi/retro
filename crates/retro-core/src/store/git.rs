@@ -129,6 +129,17 @@ pub fn commit_all(root: &Path, message: &str) -> Result<bool, CoreError> {
     Ok(true)
 }
 
+/// True if HEAD has commits its upstream doesn't — or no upstream is set
+/// yet (the first `push -u` establishes it), which also warrants a push
+/// attempt. Lets the runner sweep up commits made between runs (dashboard
+/// writes, manual edits).
+pub fn has_unpushed(root: &Path) -> bool {
+    match git(root, &["rev-list", "--count", "@{upstream}..HEAD"]) {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim() != "0",
+        _ => true,
+    }
+}
+
 /// Push to origin if a remote exists. Never fails the caller.
 pub fn push_best_effort(root: &Path) -> PushOutcome {
     let remotes = match git(root, &["remote"]) {
@@ -198,6 +209,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         ensure_repo(tmp.path()).unwrap();
         assert!(!has_remote(tmp.path()));
+    }
+
+    #[test]
+    fn has_unpushed_true_without_upstream() {
+        let tmp = TempDir::new().unwrap();
+        ensure_repo(tmp.path()).unwrap();
+        // no upstream configured — a push attempt is warranted
+        assert!(has_unpushed(tmp.path()));
     }
 
     #[test]

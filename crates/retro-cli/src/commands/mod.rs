@@ -6,9 +6,11 @@ pub mod clean;
 pub mod curate;
 pub mod dash;
 pub mod diff;
+pub mod doctor;
 pub mod hooks;
 pub mod ingest;
 pub mod init;
+pub mod lint;
 pub mod log;
 pub mod observe;
 pub mod patterns;
@@ -19,6 +21,7 @@ pub mod start;
 pub mod status;
 pub mod stop;
 pub mod sync;
+pub mod ui;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -281,6 +284,25 @@ pub fn check_and_display_nudge() {
                 use colored::Colorize;
                 for w in health.warnings() {
                     eprintln!("  {} {}", "retro:".yellow(), w);
+                }
+            }
+            if let Ok(entries) = retro_core::store::queue::list(&dir) {
+                if !entries.is_empty() {
+                    // enqueued_at is RFC3339; oldest entry first (list is sorted)
+                    let oldest = &entries[0].enqueued_at;
+                    let stale = chrono::DateTime::parse_from_rfc3339(oldest)
+                        .map(|t| {
+                            chrono::Utc::now().signed_duration_since(t) > chrono::Duration::hours(24)
+                        })
+                        .unwrap_or(false);
+                    if stale {
+                        use colored::Colorize;
+                        eprintln!(
+                            "  {} {} session(s) queued (oldest > 24h) — run `retro run` or `retro doctor`",
+                            "retro:".yellow(),
+                            entries.len()
+                        );
+                    }
                 }
             }
         }

@@ -12,7 +12,7 @@ mod node;
 mod slug;
 
 pub use node::{Node, NodeType, Scope};
-pub(crate) use node::is_valid_slug;
+pub use node::is_valid_slug;
 pub use slug::slugify;
 
 use std::path::{Path, PathBuf};
@@ -119,6 +119,11 @@ impl Store {
     }
 
     pub fn get(&self, scope: &Scope, id: &str) -> Result<Option<Node>, CoreError> {
+        // An invalid slug can never name a stored node (the write path enforces
+        // slug validity), and joining it into a path could escape the store.
+        if !is_valid_slug(id) {
+            return Ok(None);
+        }
         let path = self.node_path(scope, id);
         if !path.exists() {
             return Ok(None);

@@ -1,6 +1,7 @@
 mod commands;
 mod launchd;
 mod tui;
+mod ui;
 
 use clap::{Parser, Subcommand};
 
@@ -144,6 +145,20 @@ enum Commands {
     Sync,
     /// Open the TUI dashboard
     Dash,
+    /// (v3) Open the dashboard (local web UI)
+    Ui {
+        /// Don't auto-open the browser
+        #[arg(long)]
+        no_open: bool,
+    },
+    /// (v3) End-to-end health verification (read-only)
+    Doctor,
+    /// (v3) Store-wide lint: near-duplicates and stale candidates (no AI calls)
+    Lint {
+        /// Report only; don't queue findings as briefing notifications
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Manage git hooks
     Hooks {
         #[command(subcommand)]
@@ -209,6 +224,9 @@ fn main() {
         Commands::Stop => commands::stop::run(verbose),
         Commands::Sync => commands::sync::run(verbose),
         Commands::Dash => commands::dash::run(verbose),
+        Commands::Ui { no_open } => commands::ui::run(no_open),
+        Commands::Doctor => commands::doctor::run(),
+        Commands::Lint { dry_run } => commands::lint::run(dry_run),
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),
         },
