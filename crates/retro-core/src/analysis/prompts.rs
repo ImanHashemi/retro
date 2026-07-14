@@ -8,6 +8,44 @@ const MAX_USER_MSGS_PER_SESSION: usize = 300;
 const MAX_PROMPT_CHARS: usize = 150_000;
 const MAX_CONTEXT_SUMMARY_CHARS: usize = 5_000;
 
+/// Extract `name` and `description` from `---`-delimited YAML frontmatter.
+/// Simple string parsing — no YAML crate needed.
+/// (Moved from the deleted `ingest::context` module — this is its only caller.)
+fn parse_skill_frontmatter(content: &str) -> Option<(String, String)> {
+    let trimmed = content.trim_start();
+    if !trimmed.starts_with("---") {
+        return None;
+    }
+
+    // Find closing ---
+    let after_open = &trimmed[3..];
+    let close_idx = after_open.find("\n---")?;
+    let frontmatter = &after_open[..close_idx];
+
+    let mut name = None;
+    let mut description = None;
+
+    for line in frontmatter.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("name:") {
+            let val = rest.trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                name = Some(val.to_string());
+            }
+        } else if let Some(rest) = line.strip_prefix("description:") {
+            let val = rest.trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                description = Some(val.to_string());
+            }
+        }
+    }
+
+    match (name, description) {
+        (Some(n), Some(d)) => Some((n, d)),
+        _ => None,
+    }
+}
+
 /// Build a compact summary of installed context for the analysis prompt.
 /// Includes project skills, plugin skills, retro-managed CLAUDE.md rules, global agents,
 /// and MEMORY.md notes (personal, informational only). Sections are omitted if empty.
@@ -19,7 +57,7 @@ pub fn build_context_summary(snapshot: &ContextSnapshot) -> String {
     let project_skills: Vec<(String, String)> = snapshot
         .skills
         .iter()
-        .filter_map(|s| crate::ingest::context::parse_skill_frontmatter(&s.content))
+        .filter_map(|s| parse_skill_frontmatter(&s.content))
         .collect();
 
     if !project_skills.is_empty() {
