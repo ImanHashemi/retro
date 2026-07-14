@@ -239,6 +239,101 @@ pub fn safety_import(
     Ok(imported)
 }
 
+const HOOK_MARKER: &str = "# retro hook - do not remove";
+
+/// Strip v1 retro hook lines (marker + the following line) from a repo's
+/// post-commit/post-merge hooks. Returns which hooks were modified. A hook
+/// left with only a shebang/blank lines is deleted outright.
+pub fn remove_v1_hooks(repo_root: &str) -> Vec<String> {
+    let mut removed = Vec::new();
+    for name in ["post-commit", "post-merge"] {
+        let path = Path::new(repo_root).join(".git/hooks").join(name);
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if !content.contains(HOOK_MARKER) {
+            continue;
+        }
+        let mut out: Vec<&str> = Vec::new();
+        let mut skip_next = false;
+        for line in content.lines() {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if line.trim() == HOOK_MARKER {
+                skip_next = true;
+                continue;
+            }
+            out.push(line);
+        }
+        let remaining = out.join("\n");
+        let only_boilerplate = out
+            .iter()
+            .all(|l| l.trim().is_empty() || l.starts_with("#!"));
+        if only_boilerplate {
+            let _ = std::fs::remove_file(&path);
+        } else {
+            let _ = std::fs::write(&path, remaining + "\n");
+        }
+        removed.push(name.to_string());
+    }
+    removed
+}
+
+/// `git rm -r --cached` every IGNORED_ENTRIES path that an older binary may
+/// have committed before the ignore rules existed. Returns true if anything
+/// was untracked (caller commits). `--ignore-unmatch` makes it idempotent.
+pub fn untrack_ignored_entries(store_root: &Path) -> Result<bool, CoreError> {
+    let mut any = false;
+    for entry in crate::store::IGNORED_ENTRIES {
+        let pathspec = entry.trim_end_matches('/');
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(store_root)
+            .args(["rm", "-r", "--cached", "--ignore-unmatch", pathspec])
+            .output()
+            .map_err(|e| CoreError::Io(e.to_string()))?;
+        if !out.status.success() {
+            continue; // pathspec oddity — non-fatal, entry stays for next run
+        }
+        // rm prints one "rm '<path>'" line per real removal — detect those
+        // directly, so unrelated pre-staged changes can't flip this flag.
+        if !out.stdout.is_empty() {
+            any = true;
+        }
+    }
+    if any {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(store_root)
+            .args(["commit", "-m", "retro: untrack machine-local files (migrate)"])
+            .output()
+            .map_err(|e| CoreError::Io(e.to_string()))?;
+        if !out.status.success() {
+            return Err(CoreError::Io(format!(
+                "committing untrack: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+    }
+    Ok(any)
+}
+
+/// Boot out + delete the v2 launchd runner. Both steps tolerate absence.
+/// Returns true if the plist file was removed.
+pub fn remove_v2_launchd() -> bool {
+    let uid = unsafe { libc::getuid() };
+    let _ = std::process::Command::new("launchctl")
+        .args(["bootout", &format!("gui/{uid}/com.retro.runner")])
+        .output();
+    let Ok(home) = std::env::var("HOME") else {
+        return false;
+    };
+    let plist = Path::new(&home).join("Library/LaunchAgents/com.retro.runner.plist");
+    std::fs::remove_file(&plist).is_ok()
+}
+
 /// Registered project paths from BOTH generations, for the v1 hook sweep:
 /// the v2 projects table plus the v3 path map. Missing db/table tolerated.
 pub fn all_known_project_paths(retro_dir: &Path) -> Vec<String> {
@@ -442,6 +537,46 @@ mod tests {
     }
 
     #[test]
+    fn untrack_survives_commit_all_on_stale_ignore_store() {
+        // Simulates a store whose last-run binary predates the current
+        // IGNORED_ENTRIES: tracked machine-local file AND stale ignore rules.
+        // After untrack, refreshed excludes must keep commit_all's `add -A`
+        // from re-adding the file (the migrate CLI calls apply_local_config
+        // for exactly this reason).
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        crate::store::git::ensure_repo(tmp.path()).unwrap();
+        // stale-ify both ignore mechanisms
+        std::fs::write(tmp.path().join(".gitignore"), "").unwrap();
+        std::fs::write(tmp.path().join(".git/info/exclude"), "").unwrap();
+        std::fs::write(tmp.path().join("health.json"), "{}").unwrap();
+        let force = std::process::Command::new("git")
+            .args(["-C", tmp.path().to_str().unwrap(), "add", "-f", "health.json"])
+            .output()
+            .unwrap();
+        assert!(force.status.success());
+        std::process::Command::new("git")
+            .args(["-C", tmp.path().to_str().unwrap(), "commit", "-m", "poisoned"])
+            .output()
+            .unwrap();
+
+        assert!(untrack_ignored_entries(tmp.path()).unwrap());
+        crate::store::git::apply_local_config(tmp.path()).unwrap();
+        // commit_all's outcome doesn't matter — the tracking state after
+        // its `add -A` is what the refreshed excludes must protect.
+        let _ = crate::store::git::commit_all(tmp.path(), "sweep").unwrap();
+        let ls = std::process::Command::new("git")
+            .args(["-C", tmp.path().to_str().unwrap(), "ls-files"])
+            .output()
+            .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&ls.stdout).contains("health.json"),
+            "refreshed excludes must prevent re-adding untracked machine-local files"
+        );
+    }
+
+    #[test]
     fn wal_mode_v2_db_reads_fine_and_bytes_unchanged() {
         let tmp = TempDir::new().unwrap();
         let store = Store::open(tmp.path());
@@ -551,5 +686,49 @@ mod tests {
             safety_import(&store, &tmp.path().join("nope.md"), &Scope::Global, &[], false).unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn v1_hook_sweep_strips_marker_pairs_and_leaves_user_lines() {
+        let repo = TempDir::new().unwrap();
+        let hooks = repo.path().join(".git/hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        std::fs::write(hooks.join("post-commit"),
+            "#!/bin/sh\necho mine\n# retro hook - do not remove\nretro ingest --auto 2>>~/.retro/hook-stderr.log &\n").unwrap();
+        std::fs::write(hooks.join("post-merge"),
+            "#!/bin/sh\n# retro hook - do not remove\nretro analyze --auto &\n").unwrap();
+        let removed = remove_v1_hooks(repo.path().to_str().unwrap());
+        assert_eq!(removed, vec!["post-commit".to_string(), "post-merge".to_string()]);
+        let pc = std::fs::read_to_string(hooks.join("post-commit")).unwrap();
+        assert!(pc.contains("echo mine") && !pc.contains("retro hook"));
+        assert!(!hooks.join("post-merge").exists(), "shebang-only hook is deleted");
+        // idempotent
+        assert!(remove_v1_hooks(repo.path().to_str().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn untrack_ignored_entries_removes_previously_committed_state() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        crate::store::git::ensure_repo(tmp.path()).unwrap();
+        // simulate a poisoned store: force-track a machine-local file
+        std::fs::write(tmp.path().join("health.json"), "{}").unwrap();
+        let force = std::process::Command::new("git")
+            .args(["-C", tmp.path().to_str().unwrap(), "add", "-f", "health.json"])
+            .output().unwrap();
+        assert!(force.status.success());
+        std::process::Command::new("git")
+            .args(["-C", tmp.path().to_str().unwrap(), "commit", "-m", "poisoned"])
+            .output().unwrap();
+
+        let untracked = untrack_ignored_entries(tmp.path()).unwrap();
+        assert!(untracked, "should have removed at least one tracked entry");
+        let ls = std::process::Command::new("git")
+            .args(["-C", tmp.path().to_str().unwrap(), "ls-files"])
+            .output().unwrap();
+        assert!(!String::from_utf8_lossy(&ls.stdout).contains("health.json"));
+        assert!(tmp.path().join("health.json").exists(), "--cached keeps the file on disk");
+        assert!(!untrack_ignored_entries(tmp.path()).unwrap(), "idempotent");
     }
 }
