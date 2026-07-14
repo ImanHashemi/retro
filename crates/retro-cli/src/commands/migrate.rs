@@ -43,8 +43,35 @@ pub fn run(dry_run: bool) -> Result<()> {
             report.skipped_invalid
         );
     }
-    // Tasks 2 and 3 extend this function (safety-import; env cleanup; commit;
-    // reindex; projection). Keep this ordering comment until they land.
+
+    // Safety-import: rescue any managed-block rules that aren't in the store
+    // yet (global CLAUDE.md, then every known project's CLAUDE.md). Guards
+    // against the first-projection-wipes-pre-v3-rules failure.
+    let mut safety_imported = retro_core::migrate::safety_import(
+        &store,
+        &config.claude_dir().join("CLAUDE.md"),
+        &retro_core::store::Scope::Global,
+        &report.imported_bodies,
+        dry_run,
+    )?;
+    if let Ok(map) = retro_core::store::projects::PathMap::load(&dir) {
+        for (slug, path) in &map.paths {
+            safety_imported += retro_core::migrate::safety_import(
+                &store,
+                &std::path::Path::new(path).join("CLAUDE.md"),
+                &retro_core::store::Scope::Project(slug.clone()),
+                &report.imported_bodies,
+                dry_run,
+            )?;
+        }
+    }
+    println!(
+        "  safety-import: {} rule(s) rescued from managed blocks",
+        safety_imported.to_string().green()
+    );
+
+    // Task 3 extends this function (env cleanup; commit; reindex;
+    // projection). Keep this ordering comment until it lands.
     if dry_run {
         println!(
             "\n  rollback note: migrate never modifies retro.db; store writes are git commits in {}",
@@ -54,6 +81,5 @@ pub fn run(dry_run: bool) -> Result<()> {
             "  (reading the db may leave empty retro.db-wal/-shm files behind — standard SQLite artifacts, harmless, cleaned by any 2.x run)"
         );
     }
-    let _ = config; // used from Task 3 on
     Ok(())
 }

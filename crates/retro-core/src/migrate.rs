@@ -17,6 +17,10 @@ pub struct MigrateReport {
     pub skipped_status: usize,  // dismissed/archived
     pub skipped_invalid: usize, // unknown type/scope/slug
     pub v2_db_missing: bool,
+    /// Bodies accepted this run (also on dry-run) — lets a following
+    /// safety_import dedup against what the import would have written,
+    /// keeping dry-run counts identical to a real run's.
+    pub imported_bodies: Vec<(Scope, String)>,
 }
 
 struct V2Node {
@@ -167,9 +171,72 @@ pub fn migrate_knowledge(
             };
             store.write_node(&node)?;
         }
+        report.imported_bodies.push((scope.clone(), v2.content.clone()));
         bodies.push((scope, v2.content));
     }
     Ok(report)
+}
+
+/// Import managed-block bullets that exist in a CLAUDE.md but not in the
+/// store, as rule nodes at 0.8 (the v2 reconcile-import convention). This is
+/// the guard against the "first projection wipes pre-v3 rules" failure.
+pub fn safety_import(
+    store: &Store,
+    claude_md: &Path,
+    scope: &Scope,
+    seed_bodies: &[(Scope, String)],
+    dry_run: bool,
+) -> Result<usize, CoreError> {
+    let Ok(content) = std::fs::read_to_string(claude_md) else {
+        return Ok(0);
+    };
+    let Some(rules) = crate::projection::claude_md::read_managed_section(&content) else {
+        return Ok(0);
+    };
+    // Dedup includes invalidated nodes — deliberately, so the rescue never
+    // resurrects knowledge the user already killed in v3.
+    let existing = store.load_all()?;
+    let mut bodies: Vec<String> = existing
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.scope == *scope)
+        .map(|(_, n)| n.body.clone())
+        .collect();
+    // Seed with bodies a preceding (possibly dry-run) knowledge import
+    // accepted, so dry-run previews report the same count a real run would.
+    bodies.extend(
+        seed_bodies
+            .iter()
+            .filter(|(s, _)| s == scope)
+            .map(|(_, b)| b.clone()),
+    );
+    let today = chrono::Utc::now().date_naive();
+    let mut imported = 0;
+    for rule in rules {
+        if bodies.iter().any(|b| normalized_similarity(b, &rule) > 0.8) {
+            continue;
+        }
+        imported += 1;
+        // In-loop push: near-identical bullets within ONE managed block must
+        // not all import (hand-edited blocks contain such pairs).
+        bodies.push(rule.clone());
+        if !dry_run {
+            let base: String = rule.split_whitespace().take(8).collect::<Vec<_>>().join(" ");
+            let id = store.unique_slug(&store::slugify(&base), scope);
+            store.write_node(&Node {
+                id,
+                scope: scope.clone(),
+                node_type: NodeType::Rule,
+                confidence: 0.8,
+                sources: vec!["managed-import".to_string()],
+                created: today,
+                updated: today,
+                invalidated_by: None,
+                body: rule,
+            })?;
+        }
+    }
+    Ok(imported)
 }
 
 /// Registered project paths from BOTH generations, for the v1 hook sweep:
@@ -401,5 +468,88 @@ mod tests {
         let report = migrate_knowledge(&store, tmp.path(), false).unwrap();
         assert_eq!(report.imported, 0);
         assert!(report.v2_db_missing);
+    }
+
+    #[test]
+    fn safety_import_rescues_managed_rules_not_in_store() {
+        let tmp = TempDir::new().unwrap();
+        let claude = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        std::fs::write(
+            claude.path().join("CLAUDE.md"),
+            "<!-- retro:managed:start -->\n## Retro-Discovered Patterns\n\n- Rule one from the old days\n- Rule two survives too\n\n<!-- retro:managed:end -->\n",
+        ).unwrap();
+        let imported =
+            safety_import(&store, &claude.path().join("CLAUDE.md"), &Scope::Global, &[], false).unwrap();
+        assert_eq!(imported, 2);
+        // idempotent: rerun imports nothing
+        let again =
+            safety_import(&store, &claude.path().join("CLAUDE.md"), &Scope::Global, &[], false).unwrap();
+        assert_eq!(again, 0);
+        let nodes = store.load_all().unwrap().nodes;
+        assert_eq!(nodes.len(), 2);
+        assert!(
+            nodes
+                .iter()
+                .all(|(_, n)| n.node_type == NodeType::Rule && (n.confidence - 0.8).abs() < 1e-9)
+        );
+    }
+
+    #[test]
+    fn safety_import_dedups_within_block_seeds_and_dry_runs() {
+        let tmp = TempDir::new().unwrap();
+        let claude = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        // two near-identical bullets in ONE block -> only one may import
+        std::fs::write(
+            claude.path().join("CLAUDE.md"),
+            "<!-- retro:managed:start -->\n- Always run the smoke tests first\n- Always run the smoke tests first!\n<!-- retro:managed:end -->\n",
+        )
+        .unwrap();
+        let path = claude.path().join("CLAUDE.md");
+
+        // seeded with a matching body (as a dry-run knowledge import would
+        // produce) -> nothing to rescue
+        let seed = vec![(Scope::Global, "Always run the smoke tests first".to_string())];
+        assert_eq!(
+            safety_import(&store, &path, &Scope::Global, &seed, true).unwrap(),
+            0
+        );
+
+        // dry run: counted once (within-block dedup), nothing written
+        assert_eq!(
+            safety_import(&store, &path, &Scope::Global, &[], true).unwrap(),
+            1
+        );
+        assert!(store.load_all().unwrap().nodes.is_empty());
+
+        // real run: one node, correct shape
+        assert_eq!(
+            safety_import(&store, &path, &Scope::Global, &[], false).unwrap(),
+            1
+        );
+        let nodes = store.load_all().unwrap().nodes;
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].1.scope, Scope::Global);
+        assert_eq!(nodes[0].1.sources, vec!["managed-import".to_string()]);
+    }
+
+    #[test]
+    fn safety_import_noop_without_managed_section() {
+        let tmp = TempDir::new().unwrap();
+        let claude = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        std::fs::write(claude.path().join("CLAUDE.md"), "# my own file\n").unwrap();
+        assert_eq!(
+            safety_import(&store, &claude.path().join("CLAUDE.md"), &Scope::Global, &[], false).unwrap(),
+            0
+        );
+        assert_eq!(
+            safety_import(&store, &tmp.path().join("nope.md"), &Scope::Global, &[], false).unwrap(),
+            0
+        );
     }
 }

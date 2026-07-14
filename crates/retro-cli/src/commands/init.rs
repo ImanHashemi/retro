@@ -208,6 +208,14 @@ fn init_v3(from: Option<&str>) -> Result<()> {
         println!("Cloned knowledge store from {remote}");
     }
 
+    // Re-running init over a live install (hooks already firing) must not
+    // interleave store writes with a runner pass — same lock discipline as
+    // migrate and the dashboard write handlers. Fresh machines have no
+    // retro dir yet, and the lock file needs a parent to live in.
+    std::fs::create_dir_all(&dir)?;
+    let Some(_lock) = retro_core::lock::LockFile::try_acquire(&dir.join("run.lock")) else {
+        anyhow::bail!("a retro run is in progress — retry shortly");
+    };
     let store = Store::open(&dir);
     store.ensure_layout()?; // BEFORE ensure_repo — see doc comment
     let created = store_git::ensure_repo(&dir)?;
@@ -225,6 +233,21 @@ fn init_v3(from: Option<&str>) -> Result<()> {
     let config_path = dir.join("config.toml");
     // Load-modify-save: Config captures all known sections; hand-added unknown keys/comments are dropped (acceptable — config is retro-owned).
     let mut config = Config::load(&config_path)?;
+
+    // Safety-import: rescue any managed-block rules from the user's global
+    // CLAUDE.md that aren't in the store yet, before anything can project
+    // over that file. Guards against the first-projection-wipes-pre-v3-rules
+    // failure (2026-07-13 dogfood incident).
+    let rescued = retro_core::migrate::safety_import(
+        &store,
+        &config.claude_dir().join("CLAUDE.md"),
+        &retro_core::store::Scope::Global,
+        &[],
+        false,
+    )?;
+    if rescued > 0 {
+        println!("  Imported {rescued} existing rule(s) from your CLAUDE.md managed section");
+    }
     let exe = std::env::current_exe()?.display().to_string();
     let settings_path = config.claude_dir().join("settings.json");
     if settings_path.exists() {
