@@ -51,3 +51,22 @@ pub(crate) fn json_response(
 pub(crate) fn index_html() -> &'static str {
     INDEX_HTML
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The modal starts as `class="modal hidden"`. `.hidden` and `.modal`
+    /// have equal specificity, so if `.modal { display:flex }` is declared
+    /// later, it wins and the backdrop permanently covers the page (real
+    /// bug found on first browser open). `!important` makes the utility
+    /// class immune to declaration order.
+    #[test]
+    fn hidden_utility_rule_wins_the_cascade() {
+        assert!(
+            INDEX_HTML.contains(".hidden { display:none !important; }"),
+            ".hidden must use !important — equal-specificity rules declared later \
+             (e.g. .modal's display:flex) would otherwise override it"
+        );
+    }
+}
