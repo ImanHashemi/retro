@@ -23,6 +23,7 @@ pub mod status;
 pub mod stop;
 pub mod sync;
 pub mod ui;
+pub mod uninstall;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};

@@ -202,6 +202,30 @@ pub fn apply_edits(content: &str, edits: &[ClaudeMdEdit]) -> String {
     result
 }
 
+/// Remove the managed block (markers inclusive) plus one adjacent trailing
+/// blank line; user content around it is untouched. No block -> unchanged.
+pub fn strip_managed_section(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let Some(start) = lines.iter().position(|l| l.trim() == MANAGED_START) else {
+        return content.to_string();
+    };
+    let Some(end_rel) = lines[start..].iter().position(|l| l.trim() == MANAGED_END) else {
+        return content.to_string();
+    };
+    let mut end = start + end_rel;
+    if lines.get(end + 1).map(|l| l.trim().is_empty()).unwrap_or(false) {
+        end += 1;
+    }
+    let mut out: Vec<&str> = Vec::new();
+    out.extend(&lines[..start]);
+    out.extend(&lines[end + 1..]);
+    let mut s = out.join("\n");
+    if content.ends_with('\n') && !s.ends_with('\n') {
+        s.push('\n');
+    }
+    s
+}
+
 /// Append a single rule to a CLAUDE.md file's managed section.
 /// Creates the file and managed section if missing. Skips duplicates.
 pub fn project_rule_to_claude_md(path: &Path, rule: &str) -> Result<(), CoreError> {
@@ -426,6 +450,18 @@ mod tests {
         assert!(content.contains("Always use snake_case"));
         assert!(content.contains("Run tests before committing"));
         assert_eq!(content.matches("retro:managed:start").count(), 1);
+    }
+
+    #[test]
+    fn strip_managed_section_removes_block_keeps_user_content() {
+        let content = "# Mine\n\n<!-- retro:managed:start -->\n- a rule\n<!-- retro:managed:end -->\n\n## Also mine\n";
+        let out = strip_managed_section(content);
+        assert!(out.contains("# Mine") && out.contains("## Also mine"));
+        assert!(!out.contains("retro:managed") && !out.contains("a rule"));
+        assert_eq!(strip_managed_section("no block here\n"), "no block here\n");
+        // unclosed block: leave the file alone rather than guess at bounds
+        let unclosed = "<!-- retro:managed:start -->\n- orphan\n";
+        assert_eq!(strip_managed_section(unclosed), unclosed);
     }
 
     #[test]

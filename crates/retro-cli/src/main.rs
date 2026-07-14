@@ -170,6 +170,12 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Remove retro (hooks, projections, launchd). Store kept unless --purge
+    Uninstall {
+        /// Also delete ~/.retro (asks for confirmation)
+        #[arg(long)]
+        purge: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -190,6 +196,8 @@ fn main() {
             | Commands::Apply { auto: true, .. }
             | Commands::Observe
             | Commands::Brief
+            // suppress the "run `retro run`" nudge on the way out the door
+            | Commands::Uninstall { .. }
             | Commands::Run {
                 background: true,
                 ..
@@ -237,6 +245,7 @@ fn main() {
             HooksAction::Remove => commands::hooks::run_remove(),
         },
         Commands::Migrate { dry_run } => commands::migrate::run(dry_run),
+        Commands::Uninstall { purge } => commands::uninstall::run(purge),
     };
 
     if let Err(e) = result {
