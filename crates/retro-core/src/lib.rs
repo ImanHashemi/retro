@@ -13,6 +13,7 @@ pub mod hook_event;
 pub mod ingest;
 pub mod lint;
 pub mod lock;
+pub mod migrate;
 pub mod models;
 pub mod observer;
 pub mod projection;

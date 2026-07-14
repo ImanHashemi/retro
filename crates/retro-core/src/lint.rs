@@ -48,7 +48,7 @@ pub fn run_lint(store: &Store, config: &Config) -> Result<LintReport, CoreError>
             if max_len > 0 && (la.abs_diff(lb) as f64) / (max_len as f64) > 0.2 {
                 continue;
             }
-            if crate::analysis::merge::normalized_similarity(&a.body, &b.body) > 0.8 {
+            if crate::util::normalized_similarity(&a.body, &b.body) > 0.8 {
                 let cross_type = if a.node_type == b.node_type {
                     "consider merging (invalidate one)"
                 } else {

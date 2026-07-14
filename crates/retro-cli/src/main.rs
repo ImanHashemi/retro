@@ -164,6 +164,12 @@ enum Commands {
         #[command(subcommand)]
         action: HooksAction,
     },
+    /// Migrate v2 knowledge and environment to v3 (idempotent, v2 db untouched)
+    Migrate {
+        /// Preview without writing
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -230,6 +236,7 @@ fn main() {
         Commands::Hooks { action } => match action {
             HooksAction::Remove => commands::hooks::run_remove(),
         },
+        Commands::Migrate { dry_run } => commands::migrate::run(dry_run),
     };
 
     if let Err(e) = result {
