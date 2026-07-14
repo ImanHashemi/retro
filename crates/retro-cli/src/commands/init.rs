@@ -57,18 +57,17 @@ pub fn run(from: Option<String>) -> Result<()> {
     // Unconditionally (ensure_repo early-returns for existing repos): covers
     // pre-existing store dirs created before machine-local excludes existed.
     store_git::apply_local_config(&dir)?;
-    let stats = index::build(&store)?;
-    println!("Indexed {} node(s)", stats.nodes);
 
-    // Global hooks in ~/.claude/settings.json (absolute binary path — hooks
-    // run outside any shell profile, PATH is not guaranteed).
     let config_path = dir.join("config.toml");
     let config = Config::load(&config_path)?;
 
     // Safety-import: rescue any managed-block rules from the user's global
     // CLAUDE.md that aren't in the store yet, before anything can project
     // over that file. Guards against the first-projection-wipes-pre-v3-rules
-    // failure (2026-07-13 dogfood incident).
+    // failure (2026-07-13 dogfood incident). MUST run before index::build
+    // (rescued nodes would otherwise leave the index stale — doctor fails
+    // right after a fresh init) and gets its own commit (otherwise the
+    // rescue lands mislabeled as "user: edit knowledge" on the next run).
     let rescued = retro_core::migrate::safety_import(
         &store,
         &config.claude_dir().join("CLAUDE.md"),
@@ -78,6 +77,24 @@ pub fn run(from: Option<String>) -> Result<()> {
     )?;
     if rescued > 0 {
         println!("  Imported {rescued} existing rule(s) from your CLAUDE.md managed section");
+        store_git::commit_all(&dir, "retro: import existing rules (init)")?;
+    }
+
+    let stats = index::build(&store)?;
+    println!("Indexed {} node(s)", stats.nodes);
+
+    // After a rescue the managed block no longer matches the store (the
+    // import dedups near-identical bullets) — reproject immediately so a
+    // fresh init ends with doctor green, not "projection out of date".
+    // Safe precisely because the rescue ran first.
+    if rescued > 0 {
+        let projected = retro_core::projection::local_md::project_global_md(
+            &store,
+            &config.claude_dir().join("CLAUDE.md"),
+            config.knowledge.confidence_threshold,
+            Some(&dir.join("backups")),
+        )?;
+        println!("  Projected {projected} rule(s) back to the managed section");
     }
     let exe = std::env::current_exe()?.display().to_string();
     let settings_path = config.claude_dir().join("settings.json");
