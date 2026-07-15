@@ -268,14 +268,14 @@ impl AnalysisBackend for ClaudeCliBackend {
         }
         // Set cwd to ~/.retro/ when spawning claude CLI. This prevents the claude
         // CLI from traversing the filesystem root or protected macOS directories
-        // (Documents, Desktop, Photos, network volumes) when launched by launchd
-        // where the default cwd is /. macOS TCC attributes child process file access
-        // to the parent (retro), causing spurious permission dialogs.
+        // (Documents, Desktop, Photos, network volumes) when the background
+        // worker inherits an arbitrary cwd. macOS TCC attributes child process
+        // file access to the parent (retro), causing spurious permission dialogs.
         let safe_cwd = crate::config::retro_dir();
         let child = Command::new("claude")
             .args(&args)
-            // Clear CLAUDECODE to avoid nested-session rejection when retro
-            // is invoked from a post-commit hook inside a Claude Code session.
+            // Clear CLAUDECODE to avoid nested-session rejection: retro's
+            // workers are spawned by hooks inside a Claude Code session.
             .env_remove("CLAUDECODE")
             .current_dir(&safe_cwd)
             .stdin(std::process::Stdio::piped())
