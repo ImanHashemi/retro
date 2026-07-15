@@ -158,6 +158,8 @@ pub fn run(from: Option<String>) -> Result<()> {
             }
         }
     }
-    println!("\nNote: smoke-test with one session before relying on it — see the rollout section of the plan.");
+    println!(
+        "\nretro is watching: it learns from your sessions automatically from here on. Run `retro doctor` anytime to verify the setup, and `retro ui` to see what it knows."
+    );
     Ok(())
 }

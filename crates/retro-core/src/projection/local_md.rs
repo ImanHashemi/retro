@@ -357,6 +357,38 @@ fn write_managed(
 /// (<common-git-dir>/info/exclude). Handles regular repos AND worktrees
 /// (where .git is a file); git reads info/exclude from the COMMON dir.
 /// Non-git directories are a no-op.
+/// Uninstall counterpart of `ensure_git_exclude`: drop the CLAUDE.local.md
+/// line retro added to the repo's info/exclude. Missing repo/file tolerated.
+pub fn remove_git_exclude(project_root: &Path) -> Result<(), CoreError> {
+    let io = |e: std::io::Error| CoreError::Io(e.to_string());
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .map_err(io)?;
+    if !out.status.success() {
+        return Ok(()); // not a git repo
+    }
+    let common = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if common.is_empty() {
+        return Ok(());
+    }
+    let exclude = std::path::Path::new(&common).join("info").join("exclude");
+    let Ok(existing) = std::fs::read_to_string(&exclude) else {
+        return Ok(());
+    };
+    if !existing.lines().any(|l| l.trim() == "CLAUDE.local.md") {
+        return Ok(());
+    }
+    let updated: String = existing
+        .lines()
+        .filter(|l| l.trim() != "CLAUDE.local.md")
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&exclude, updated).map_err(io)
+}
+
 fn ensure_git_exclude(project_root: &Path) -> Result<(), CoreError> {
     let io = |e: std::io::Error| CoreError::Io(e.to_string());
     let out = std::process::Command::new("git")

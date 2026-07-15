@@ -271,12 +271,16 @@ pub fn remove_v1_hooks(repo_root: &str) -> Vec<String> {
         let only_boilerplate = out
             .iter()
             .all(|l| l.trim().is_empty() || l.starts_with("#!"));
-        if only_boilerplate {
-            let _ = std::fs::remove_file(&path);
+        // Only report hooks we actually cleaned — a failed write (read-only
+        // file) leaves the marker in place for the next run to retry.
+        let cleaned = if only_boilerplate {
+            std::fs::remove_file(&path).is_ok()
         } else {
-            let _ = std::fs::write(&path, remaining + "\n");
+            std::fs::write(&path, remaining + "\n").is_ok()
+        };
+        if cleaned {
+            removed.push(name.to_string());
         }
-        removed.push(name.to_string());
     }
     removed
 }

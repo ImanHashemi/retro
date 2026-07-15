@@ -85,6 +85,11 @@ pub fn run(purge: bool) -> Result<()> {
                     local.display()
                 );
             }
+            // Drop the CLAUDE.local.md ignore line retro added to the repo's
+            // info/exclude; failure is non-fatal (read-only repo, etc.).
+            let _ = retro_core::projection::local_md::remove_git_exclude(std::path::Path::new(
+                path,
+            ));
         }
     }
 
