@@ -46,7 +46,14 @@ impl RunnerState {
     }
 
     /// Load-modify-save; callers relying on atomicity must hold the run lockfile.
-    pub fn save(&self, store_root: &Path) -> Result<(), CoreError> {
+    pub fn save(&mut self, store_root: &Path) -> Result<(), CoreError> {
+        // Briefings drain these, but a machine with no new sessions can pile
+        // them up forever — keep only the newest 50.
+        const MAX_NOTIFICATIONS: usize = 50;
+        if self.notifications.len() > MAX_NOTIFICATIONS {
+            let excess = self.notifications.len() - MAX_NOTIFICATIONS;
+            self.notifications.drain(..excess);
+        }
         let io = |e: std::io::Error| CoreError::Io(e.to_string());
         let path = state_path(store_root);
         if let Some(parent) = path.parent() {
@@ -168,5 +175,19 @@ mod tests {
         assert!(s.processed.len() <= 1000);
         assert!(s.processed.contains_key("s1099"), "newest kept");
         assert!(!s.processed.contains_key("a"), "oldest pruned");
+    }
+
+    #[test]
+    fn notifications_capped_at_50_keeping_newest() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut st = RunnerState::default();
+        for i in 0..60 {
+            st.notifications.push(format!("note {i}"));
+        }
+        st.save(tmp.path()).unwrap();
+        let loaded = RunnerState::load(tmp.path()).unwrap();
+        assert_eq!(loaded.notifications.len(), 50);
+        assert_eq!(loaded.notifications.first().unwrap(), "note 10"); // oldest 10 dropped
+        assert_eq!(loaded.notifications.last().unwrap(), "note 59");
     }
 }

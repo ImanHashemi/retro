@@ -45,20 +45,14 @@ pub fn ensure_hook(mut settings: Value, event: &str, command: &str) -> Result<Va
     };
 
     // Update an existing retro entry in place.
+    let marker_sub = retro_marker.rsplit_once(' ').map(|(_, s)| s).unwrap_or("");
     for group in arr.iter_mut() {
         if let Some(inner) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) {
             for hook in inner.iter_mut() {
                 let is_retro = hook
                     .get("command")
                     .and_then(|c| c.as_str())
-                    .map(|c| {
-                        let mut parts = c.split_whitespace();
-                        let prog = parts.next().unwrap_or("");
-                        let sub = parts.next().unwrap_or("");
-                        let marker_sub =
-                            retro_marker.rsplit_once(' ').map(|(_, s)| s).unwrap_or("");
-                        (prog == "retro" || prog.ends_with("/retro")) && sub == marker_sub
-                    })
+                    .map(|c| is_retro_command(c, marker_sub))
                     .unwrap_or(false);
                 if is_retro {
                     hook["command"] = json!(command);
@@ -72,6 +66,64 @@ pub fn ensure_hook(mut settings: Value, event: &str, command: &str) -> Result<Va
         "hooks": [{"type": "command", "command": command}]
     }));
     Ok(settings)
+}
+
+/// Word-boundary identity for retro-owned hook commands: the program must BE
+/// retro (bare or path-suffixed), not merely contain the word — mirrors
+/// ensure_hook's never-hijack rule so install and uninstall agree on what
+/// counts as ours (`my-retro observe` is foreign to both).
+fn is_retro_command(command: &str, subcommand: &str) -> bool {
+    let mut parts = command.split_whitespace();
+    let prog = parts.next().unwrap_or("");
+    let sub = parts.next().unwrap_or("");
+    (prog == "retro" || prog.ends_with("/retro")) && sub == subcommand
+}
+
+/// Remove retro-owned hooks for `subcommand` from the event (word-boundary
+/// identity — never third-party commands that merely contain "retro").
+pub fn remove_retro_hook(settings: &mut Value, event: &str, subcommand: &str) -> bool {
+    remove_hooks_where(settings, event, |c| is_retro_command(c, subcommand))
+}
+
+/// Remove hooks whose command contains `needle` — for retro-owned helper
+/// scripts with distinctive filenames (e.g. `retro-briefing.sh`).
+pub fn remove_hooks_containing(settings: &mut Value, event: &str, needle: &str) -> bool {
+    remove_hooks_where(settings, event, |c| c.contains(needle))
+}
+
+/// Shared removal core. Emptied groups (and an emptied event key) are
+/// dropped so the settings stay tidy. Returns true if anything was removed.
+fn remove_hooks_where<F: Fn(&str) -> bool>(settings: &mut Value, event: &str, matches: F) -> bool {
+    let Some(groups) = settings
+        .get_mut("hooks")
+        .and_then(|h| h.get_mut(event))
+        .and_then(|e| e.as_array_mut())
+    else {
+        return false;
+    };
+    let mut removed = false;
+    for group in groups.iter_mut() {
+        if let Some(hooks) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) {
+            let before = hooks.len();
+            hooks.retain(|h| {
+                !h.get("command")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(&matches)
+            });
+            removed |= hooks.len() != before;
+        }
+    }
+    groups.retain(|g| {
+        g.get("hooks")
+            .and_then(|h| h.as_array())
+            .is_none_or(|h| !h.is_empty())
+    });
+    if groups.is_empty() {
+        if let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) {
+            hooks.remove(event);
+        }
+    }
+    removed
 }
 
 #[cfg(test)]
@@ -138,5 +190,54 @@ mod tests {
         let arr = existing["hooks"]["SessionEnd"].as_array().unwrap();
         assert_eq!(arr.len(), 2, "foreign command preserved, retro appended");
         assert_eq!(arr[0]["hooks"][0]["command"], "my-retro observe");
+    }
+
+    #[test]
+    fn remove_hook_strips_matching_entries_and_leaves_others() {
+        let settings = ensure_hook(json!({}), "SessionEnd", "/some/retro observe").unwrap();
+        let mut settings = ensure_hook(
+            settings,
+            "SessionEnd",
+            "~/.masko-desktop/hooks/hook-sender.sh",
+        )
+        .unwrap();
+        // a foreign command that merely CONTAINS "retro observe" must survive —
+        // same never-hijack identity ensure_hook uses
+        settings["hooks"]["SessionEnd"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"matcher": "", "hooks": [
+                {"type": "command", "command": "~/scripts/my-retro observe.sh"},
+                {"type": "command", "command": "/opt/retro observe"}
+            ]}));
+
+        assert!(remove_retro_hook(&mut settings, "SessionEnd", "observe"));
+        let rendered = settings.to_string();
+        assert!(!rendered.contains("/some/retro observe"));
+        assert!(!rendered.contains("/opt/retro observe"), "path-suffixed retro removed");
+        assert!(rendered.contains("hook-sender.sh"), "unrelated hooks preserved");
+        assert!(
+            rendered.contains("my-retro observe.sh"),
+            "partial retain within a group: foreign near-name preserved"
+        );
+        assert!(
+            !remove_retro_hook(&mut settings, "SessionEnd", "observe"),
+            "idempotent"
+        );
+
+        // removing the last retro-owned event empties and drops the key
+        let mut only_retro = ensure_hook(json!({}), "SessionStart", "retro brief").unwrap();
+        assert!(remove_retro_hook(&mut only_retro, "SessionStart", "brief"));
+        assert!(
+            only_retro["hooks"].get("SessionStart").is_none(),
+            "emptied event key dropped"
+        );
+
+        // contains-matching for retro-owned helper scripts
+        let mut with_script = json!({"hooks": {"SessionStart": [
+            {"matcher": "", "hooks": [{"type": "command", "command": "bash .claude/hooks/retro-briefing.sh"}]}
+        ]}});
+        assert!(remove_hooks_containing(&mut with_script, "SessionStart", "retro-briefing.sh"));
+        assert!(with_script["hooks"].get("SessionStart").is_none());
     }
 }

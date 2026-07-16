@@ -7,10 +7,10 @@ use retro_core::{briefing, health, observer};
 /// Same never-fail contract as observe.
 pub fn run() -> Result<()> {
     let dir = retro_dir();
-    let config = Config::load(&dir.join("config.toml")).unwrap_or_default();
-    if !config.v3.enabled {
+    if !dir.join("knowledge").exists() {
         return Ok(());
     }
+    let config = Config::load(&dir.join("config.toml")).unwrap_or_default();
     let mut state = RunnerState::load(&dir).unwrap_or_default();
 
     // Catch-up: enqueue sessions modified since the watermark (crashed

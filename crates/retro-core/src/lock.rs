@@ -35,7 +35,7 @@ impl LockFile {
     }
 
     /// Try to acquire the lockfile, returning None if already locked (instead of an error).
-    /// Used by --auto mode to silently skip when another process is running.
+    /// Used by background runs to silently skip when another process is running.
     pub fn try_acquire(path: &Path) -> Option<Self> {
         match Self::acquire(path) {
             Ok(lock) => Some(lock),

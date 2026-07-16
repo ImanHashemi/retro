@@ -1,130 +1,4 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Deserializer, Serialize};
-
-/// Deserialize a String that may be null — converts null to empty string.
-fn null_to_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    Option::<String>::deserialize(d).map(|o| o.unwrap_or_default())
-}
-
-// ── Pattern types ──
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum PatternType {
-    RepetitiveInstruction,
-    RecurringMistake,
-    WorkflowPattern,
-    StaleContext,
-    RedundantContext,
-}
-
-impl std::fmt::Display for PatternType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::RepetitiveInstruction => write!(f, "repetitive_instruction"),
-            Self::RecurringMistake => write!(f, "recurring_mistake"),
-            Self::WorkflowPattern => write!(f, "workflow_pattern"),
-            Self::StaleContext => write!(f, "stale_context"),
-            Self::RedundantContext => write!(f, "redundant_context"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum PatternStatus {
-    Discovered,
-    Active,
-    Archived,
-    Dismissed,
-}
-
-impl std::fmt::Display for PatternStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Discovered => write!(f, "discovered"),
-            Self::Active => write!(f, "active"),
-            Self::Archived => write!(f, "archived"),
-            Self::Dismissed => write!(f, "dismissed"),
-        }
-    }
-}
-
-impl PatternStatus {
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "discovered" => Self::Discovered,
-            "active" => Self::Active,
-            "archived" => Self::Archived,
-            "dismissed" => Self::Dismissed,
-            _ => Self::Discovered,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SuggestedTarget {
-    Skill,
-    ClaudeMd,
-    GlobalAgent,
-    DbOnly,
-}
-
-impl std::fmt::Display for SuggestedTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Skill => write!(f, "skill"),
-            Self::ClaudeMd => write!(f, "claude_md"),
-            Self::GlobalAgent => write!(f, "global_agent"),
-            Self::DbOnly => write!(f, "db_only"),
-        }
-    }
-}
-
-impl SuggestedTarget {
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "skill" => Self::Skill,
-            "claude_md" => Self::ClaudeMd,
-            "global_agent" => Self::GlobalAgent,
-            "db_only" => Self::DbOnly,
-            _ => Self::DbOnly,
-        }
-    }
-}
-
-impl PatternType {
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "repetitive_instruction" => Self::RepetitiveInstruction,
-            "recurring_mistake" => Self::RecurringMistake,
-            "workflow_pattern" => Self::WorkflowPattern,
-            "stale_context" => Self::StaleContext,
-            "redundant_context" => Self::RedundantContext,
-            _ => Self::WorkflowPattern,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Pattern {
-    pub id: String,
-    pub pattern_type: PatternType,
-    pub description: String,
-    pub confidence: f64,
-    pub times_seen: i64,
-    pub first_seen: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
-    pub last_projected: Option<DateTime<Utc>>,
-    pub status: PatternStatus,
-    pub source_sessions: Vec<String>,
-    pub related_files: Vec<String>,
-    pub suggested_content: String,
-    pub suggested_target: SuggestedTarget,
-    pub project: Option<String>,
-    pub generation_failed: bool,
-}
+use serde::{Deserialize, Serialize};
 
 // ── Session JSONL types ──
 
@@ -365,146 +239,6 @@ pub struct SessionMetadata {
     pub model: Option<String>,
 }
 
-// ── History entry ──
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HistoryEntry {
-    #[serde(default)]
-    pub display: Option<String>,
-    #[serde(default)]
-    pub timestamp: Option<u64>,
-    #[serde(default)]
-    pub project: Option<String>,
-    #[serde(default)]
-    pub session_id: Option<String>,
-}
-
-// ── Context snapshot ──
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginSkillSummary {
-    pub plugin_name: String,
-    pub skill_name: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextSnapshot {
-    pub claude_md: Option<String>,
-    pub skills: Vec<SkillFile>,
-    pub memory_md: Option<String>,
-    pub global_agents: Vec<AgentFile>,
-    #[serde(default)]
-    pub plugin_skills: Vec<PluginSkillSummary>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillFile {
-    pub path: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentFile {
-    pub path: String,
-    pub content: String,
-}
-
-// ── Ingestion tracking ──
-
-#[derive(Debug, Clone)]
-pub struct IngestedSession {
-    pub session_id: String,
-    pub project: String,
-    pub session_path: String,
-    pub file_size: u64,
-    pub file_mtime: String,
-    pub ingested_at: DateTime<Utc>,
-}
-
-// ── Analysis types ──
-
-/// AI response: either a new pattern or an update to an existing one.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "action")]
-pub enum PatternUpdate {
-    #[serde(rename = "new")]
-    New(NewPattern),
-    #[serde(rename = "update")]
-    Update(UpdateExisting),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NewPattern {
-    pub pattern_type: PatternType,
-    #[serde(deserialize_with = "null_to_empty")]
-    pub description: String,
-    pub confidence: f64,
-    #[serde(default)]
-    pub source_sessions: Vec<String>,
-    #[serde(default)]
-    pub related_files: Vec<String>,
-    #[serde(default, deserialize_with = "null_to_empty")]
-    pub suggested_content: String,
-    pub suggested_target: SuggestedTarget,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateExisting {
-    #[serde(deserialize_with = "null_to_empty")]
-    pub existing_id: String,
-    #[serde(default)]
-    pub new_sessions: Vec<String>,
-    pub new_confidence: f64,
-}
-
-/// Top-level AI response wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnalysisResponse {
-    #[serde(default)]
-    pub reasoning: String,
-    pub patterns: Vec<PatternUpdate>,
-    #[serde(default)]
-    pub claude_md_edits: Vec<ClaudeMdEdit>,
-}
-
-// ── CLAUDE.md edit types ──
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ClaudeMdEditType {
-    Add,
-    Remove,
-    Reword,
-    Move,
-}
-
-impl std::fmt::Display for ClaudeMdEditType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Add => write!(f, "add"),
-            Self::Remove => write!(f, "remove"),
-            Self::Reword => write!(f, "reword"),
-            Self::Move => write!(f, "move"),
-        }
-    }
-}
-
-/// A proposed edit to existing CLAUDE.md content (when full_management = true).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClaudeMdEdit {
-    pub edit_type: ClaudeMdEditType,
-    #[serde(default)]
-    pub original_text: String,
-    #[serde(default)]
-    pub suggested_content: Option<String>,
-    #[serde(default)]
-    pub target_section: Option<String>,
-    #[serde(default)]
-    pub reasoning: String,
-}
-
 /// Claude CLI --output-format json wrapper.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaudeCliOutput {
@@ -555,54 +289,6 @@ impl ClaudeCliOutput {
     }
 }
 
-/// Audit log entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub timestamp: DateTime<Utc>,
-    pub action: String,
-    pub details: serde_json::Value,
-}
-
-/// Per-batch analysis detail for diagnostics.
-#[derive(Debug, Clone)]
-pub struct BatchDetail {
-    pub batch_index: usize,
-    pub session_count: usize,
-    pub session_ids: Vec<String>,
-    pub prompt_chars: usize,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub new_patterns: usize,
-    pub updated_patterns: usize,
-    pub reasoning: String,
-    pub ai_response_preview: String,
-}
-
-/// Result of an analysis run.
-#[derive(Debug, Clone)]
-pub struct AnalyzeResult {
-    pub sessions_analyzed: usize,
-    pub new_patterns: usize,
-    pub updated_patterns: usize,
-    pub total_patterns: usize,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub batch_details: Vec<BatchDetail>,
-}
-
-/// Result of a v2 graph-based analysis run.
-#[derive(Debug, Clone)]
-pub struct AnalyzeV2Result {
-    pub sessions_analyzed: usize,
-    pub nodes_created: usize,
-    pub nodes_updated: usize,
-    pub edges_created: usize,
-    pub nodes_merged: usize,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub batch_count: usize,
-}
-
 /// Compact session format for serialization to AI prompts.
 #[derive(Debug, Clone, Serialize)]
 pub struct CompactSession {
@@ -622,136 +308,8 @@ pub struct CompactUserMessage {
     pub timestamp: Option<String>,
 }
 
-/// Compact pattern format for inclusion in AI prompts.
-#[derive(Debug, Clone, Serialize)]
-pub struct CompactPattern {
-    pub id: String,
-    pub pattern_type: String,
-    pub description: String,
-    pub confidence: f64,
-    pub times_seen: i64,
-    pub suggested_target: String,
-}
-
-// ── Projection types ──
-
-/// A projection record — tracks what was generated and where it was applied.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Projection {
-    pub id: String,
-    pub pattern_id: String,
-    pub target_type: String,
-    pub target_path: String,
-    pub content: String,
-    pub applied_at: DateTime<Utc>,
-    pub pr_url: Option<String>,
-    pub status: ProjectionStatus,
-}
-
-/// A generated skill draft (output of AI skill generation).
-#[derive(Debug, Clone)]
-pub struct SkillDraft {
-    pub name: String,
-    pub content: String,
-    pub pattern_id: String,
-}
-
-/// Skill validation result from AI.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillValidation {
-    pub valid: bool,
-    #[serde(default)]
-    pub feedback: String,
-}
-
-/// A generated global agent draft.
-#[derive(Debug, Clone)]
-pub struct AgentDraft {
-    pub name: String,
-    pub content: String,
-    pub pattern_id: String,
-}
-
-/// A planned action for `retro apply`.
-#[derive(Debug, Clone)]
-pub struct ApplyAction {
-    pub pattern_id: String,
-    pub pattern_description: String,
-    pub target_type: SuggestedTarget,
-    pub target_path: String,
-    pub content: String,
-    pub track: ApplyTrack,
-}
-
-/// Status of a projection in the review queue.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ProjectionStatus {
-    PendingReview,
-    Applied,
-    Dismissed,
-}
-
-impl std::fmt::Display for ProjectionStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PendingReview => write!(f, "pending_review"),
-            Self::Applied => write!(f, "applied"),
-            Self::Dismissed => write!(f, "dismissed"),
-        }
-    }
-}
-
-impl ProjectionStatus {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "pending_review" => Some(Self::PendingReview),
-            "applied" => Some(Self::Applied),
-            "dismissed" => Some(Self::Dismissed),
-            _ => None,
-        }
-    }
-}
-
-/// Whether a change is auto-applied (personal) or needs a PR (shared).
-#[derive(Debug, Clone, PartialEq)]
-pub enum ApplyTrack {
-    /// Auto-apply: global agents
-    Personal,
-    /// Needs PR (Phase 4): skills, CLAUDE.md rules
-    Shared,
-}
-
-impl std::fmt::Display for ApplyTrack {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Personal => write!(f, "personal"),
-            Self::Shared => write!(f, "shared"),
-        }
-    }
-}
-
-/// The full apply plan — all actions to take.
-#[derive(Debug, Clone)]
-pub struct ApplyPlan {
-    pub actions: Vec<ApplyAction>,
-}
-
-impl ApplyPlan {
-    pub fn is_empty(&self) -> bool {
-        self.actions.is_empty()
-    }
-
-    pub fn personal_actions(&self) -> Vec<&ApplyAction> {
-        self.actions.iter().filter(|a| a.track == ApplyTrack::Personal).collect()
-    }
-
-    pub fn shared_actions(&self) -> Vec<&ApplyAction> {
-        self.actions.iter().filter(|a| a.track == ApplyTrack::Shared).collect()
-    }
-}
-
-// ── Knowledge graph types (v2) ──
+// ── Knowledge graph types (v2 shim — the graph-analysis prompt/response
+// machinery reused by v3; see analysis/mod.rs and analysis/v3.rs) ──
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -818,38 +376,6 @@ impl NodeScope {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum NodeStatus {
-    Active,
-    PendingReview,
-    Dismissed,
-    Archived,
-}
-
-impl std::fmt::Display for NodeStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Active => write!(f, "active"),
-            Self::PendingReview => write!(f, "pending_review"),
-            Self::Dismissed => write!(f, "dismissed"),
-            Self::Archived => write!(f, "archived"),
-        }
-    }
-}
-
-impl NodeStatus {
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "active" => Self::Active,
-            "pending_review" => Self::PendingReview,
-            "dismissed" => Self::Dismissed,
-            "archived" => Self::Archived,
-            _ => Self::Active,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub enum EdgeType {
     Supports,
     Contradicts,
@@ -883,41 +409,17 @@ impl EdgeType {
     }
 }
 
-/// A node in the knowledge graph.
+/// Shim: presents a v3 store node to the v2 graph-analysis prompt builder
+/// (`build_graph_analysis_prompt`). Only the fields the prompt actually reads
+/// are kept — see `analysis/v3.rs`'s `shim()` for the store `Node` -> this
+/// conversion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgeNode {
     pub id: String,
     pub node_type: NodeType,
     pub scope: NodeScope,
-    pub project_id: Option<String>,
     pub content: String,
     pub confidence: f64,
-    pub status: NodeStatus,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    #[serde(default)]
-    pub projected_at: Option<String>,
-    #[serde(default)]
-    pub pr_url: Option<String>,
-}
-
-/// An edge in the knowledge graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KnowledgeEdge {
-    pub source_id: String,
-    pub target_id: String,
-    pub edge_type: EdgeType,
-    pub created_at: DateTime<Utc>,
-}
-
-/// A tracked project.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KnowledgeProject {
-    pub id: String,
-    pub path: String,
-    pub remote_url: Option<String>,
-    pub agent_type: String,
-    pub last_seen: DateTime<Utc>,
 }
 
 /// Operations the analyzer produces to mutate the knowledge graph.
@@ -991,70 +493,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_projection_status_display() {
-        assert_eq!(ProjectionStatus::PendingReview.to_string(), "pending_review");
-        assert_eq!(ProjectionStatus::Applied.to_string(), "applied");
-        assert_eq!(ProjectionStatus::Dismissed.to_string(), "dismissed");
-    }
-
-    #[test]
-    fn test_projection_status_from_str() {
-        assert_eq!(ProjectionStatus::from_str("pending_review"), Some(ProjectionStatus::PendingReview));
-        assert_eq!(ProjectionStatus::from_str("applied"), Some(ProjectionStatus::Applied));
-        assert_eq!(ProjectionStatus::from_str("dismissed"), Some(ProjectionStatus::Dismissed));
-        assert_eq!(ProjectionStatus::from_str("unknown"), None);
-    }
-
-    #[test]
-    fn test_claude_md_edit_type_serde() {
-        let edit = ClaudeMdEdit {
-            edit_type: ClaudeMdEditType::Reword,
-            original_text: "No async".to_string(),
-            suggested_content: Some("Sync only — no tokio, no async".to_string()),
-            target_section: None,
-            reasoning: "Too terse".to_string(),
-        };
-        let json = serde_json::to_string(&edit).unwrap();
-        let parsed: ClaudeMdEdit = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.edit_type, ClaudeMdEditType::Reword);
-        assert_eq!(parsed.original_text, "No async");
-        assert_eq!(parsed.suggested_content.unwrap(), "Sync only — no tokio, no async");
-    }
-
-    #[test]
-    fn test_claude_md_edit_type_display() {
-        assert_eq!(ClaudeMdEditType::Add.to_string(), "add");
-        assert_eq!(ClaudeMdEditType::Remove.to_string(), "remove");
-        assert_eq!(ClaudeMdEditType::Reword.to_string(), "reword");
-        assert_eq!(ClaudeMdEditType::Move.to_string(), "move");
-    }
-
-    #[test]
-    fn test_analysis_response_with_edits() {
-        let json = r#"{
-            "reasoning": "test",
-            "patterns": [],
-            "claude_md_edits": [
-                {
-                    "edit_type": "remove",
-                    "original_text": "stale rule",
-                    "reasoning": "no longer relevant"
-                }
-            ]
-        }"#;
-        let resp: AnalysisResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(resp.claude_md_edits.len(), 1);
-        assert_eq!(resp.claude_md_edits[0].edit_type, ClaudeMdEditType::Remove);
-    }
-
-    #[test]
-    fn test_analysis_response_without_edits() {
-        let json = r#"{"reasoning": "test", "patterns": []}"#;
-        let resp: AnalysisResponse = serde_json::from_str(json).unwrap();
-        assert!(resp.claude_md_edits.is_empty());
-    }
-
-    #[test]
     fn test_node_type_display_and_from_str() {
         assert_eq!(NodeType::Preference.to_string(), "preference");
         assert_eq!(NodeType::Pattern.to_string(), "pattern");
@@ -1075,16 +513,6 @@ mod tests {
     }
 
     #[test]
-    fn test_node_status_display_and_from_str() {
-        assert_eq!(NodeStatus::Active.to_string(), "active");
-        assert_eq!(NodeStatus::PendingReview.to_string(), "pending_review");
-        assert_eq!(NodeStatus::Dismissed.to_string(), "dismissed");
-        assert_eq!(NodeStatus::Archived.to_string(), "archived");
-        assert_eq!(NodeStatus::from_str("pending_review"), NodeStatus::PendingReview);
-        assert_eq!(NodeStatus::from_str("unknown"), NodeStatus::Active); // default
-    }
-
-    #[test]
     fn test_edge_type_display_and_from_str() {
         assert_eq!(EdgeType::Supports.to_string(), "supports");
         assert_eq!(EdgeType::Contradicts.to_string(), "contradicts");
@@ -1101,29 +529,12 @@ mod tests {
             id: "test-id".to_string(),
             node_type: NodeType::Rule,
             scope: NodeScope::Project,
-            project_id: Some("my-app".to_string()),
             content: "Always run tests".to_string(),
             confidence: 0.85,
-            status: NodeStatus::Active,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            projected_at: None,
-            pr_url: None,
         };
         assert_eq!(node.node_type, NodeType::Rule);
         assert_eq!(node.scope, NodeScope::Project);
-        assert!(node.project_id.is_some());
-    }
-
-    #[test]
-    fn test_knowledge_edge_struct() {
-        let edge = KnowledgeEdge {
-            source_id: "node-1".to_string(),
-            target_id: "node-2".to_string(),
-            edge_type: EdgeType::Supports,
-            created_at: Utc::now(),
-        };
-        assert_eq!(edge.edge_type, EdgeType::Supports);
+        assert_eq!(node.content, "Always run tests");
     }
 
     #[test]

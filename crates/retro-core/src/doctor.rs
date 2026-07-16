@@ -35,7 +35,6 @@ mod tests {
 
     fn config_for(claude_dir: &Path) -> Config {
         let mut config = Config::default();
-        config.v3.enabled = true;
         config.paths.claude_dir = claude_dir.display().to_string();
         config
     }
@@ -57,7 +56,7 @@ mod tests {
 
         let report = run_checks_for_tests(tmp.path(), &config_for(claude.path()));
         let by_name = |n: &str| report.checks.iter().find(|c| c.name == n).unwrap();
-        assert!(by_name("v3-enabled").ok);
+        assert!(by_name("store-present").ok);
         assert!(by_name("store-repo").ok);
         assert!(by_name("index").ok);
         assert!(by_name("hooks").ok);
@@ -80,15 +79,15 @@ mod tests {
     }
 
     #[test]
-    fn disabled_v3_short_circuits() {
+    fn missing_store_short_circuits() {
         let tmp = TempDir::new().unwrap();
         let claude = TempDir::new().unwrap();
-        let mut config = config_for(claude.path());
-        config.v3.enabled = false;
+        // no ensure_layout() call — the knowledge dir does not exist yet.
+        let config = config_for(claude.path());
         let report = run_checks_for_tests(tmp.path(), &config);
         assert_eq!(report.checks.len(), 1);
         assert!(!report.checks[0].ok);
-        assert!(report.checks[0].detail.contains("init --v3"));
+        assert!(report.checks[0].detail.contains("retro init"));
     }
 }
 
@@ -112,18 +111,19 @@ fn run_checks_inner(
 ) -> DoctorReport {
     let mut checks = Vec::new();
 
-    if !config.v3.enabled {
+    let store = crate::store::Store::open(store_root);
+    if !store.knowledge_dir().is_dir() {
         checks.push(Check {
-            name: "v3-enabled".to_string(),
+            name: "store-present".to_string(),
             ok: false,
-            detail: "v3 is disabled — run `retro init --v3`".to_string(),
+            detail: "no knowledge store found — run `retro init`".to_string(),
         });
         return DoctorReport { checks };
     }
     checks.push(Check {
-        name: "v3-enabled".to_string(),
+        name: "store-present".to_string(),
         ok: true,
-        detail: "enabled".to_string(),
+        detail: "initialized".to_string(),
     });
 
     // Store repo
@@ -134,12 +134,11 @@ fn run_checks_inner(
         detail: if repo_ok {
             format!("git repo at {}", store_root.display())
         } else {
-            "store is not a git repo — run `retro init --v3`".to_string()
+            "store is not a git repo — run `retro init`".to_string()
         },
     });
 
     // Index built + fresh
-    let store = crate::store::Store::open(store_root);
     let index_check = match crate::store::index::open(store_root) {
         Ok(conn) => match crate::store::index::is_fresh(&store, &conn) {
             Ok(true) => (true, "built and fresh".to_string()),
@@ -194,7 +193,7 @@ fn run_checks_inner(
             "SessionEnd + SessionStart installed".to_string()
         } else {
             format!(
-                "missing in {} — run `retro init --v3`",
+                "missing in {} — run `retro init`",
                 settings_path.display()
             )
         },
@@ -289,7 +288,7 @@ fn run_checks_inner(
         checks.push(Check {
             name: "v2-runner".to_string(),
             ok: false,
-            detail: "v2 launchd runner still installed — run `retro stop` (v3 replaces it; `retro migrate` in Plan 4 removes it)".to_string(),
+            detail: "v2 launchd runner still installed — run `retro migrate` to remove it".to_string(),
         });
     }
 
@@ -301,7 +300,7 @@ fn run_checks_inner(
         detail: if has_remote {
             "remote configured".to_string()
         } else {
-            "no backup remote (optional) — rerun `retro init --v3` to set one up".to_string()
+            "no backup remote (optional) — rerun `retro init` to set one up".to_string()
         },
     });
 

@@ -17,10 +17,10 @@ enum ObserveOutcome {
 /// in health and swallowed; stdout stays clean; exit code is always 0.
 pub fn run() -> Result<()> {
     let dir = retro_dir();
-    let config = Config::load(&dir.join("config.toml")).unwrap_or_default();
-    if !config.v3.enabled {
+    if !dir.join("knowledge").exists() {
         return Ok(());
     }
+    let config = Config::load(&dir.join("config.toml")).unwrap_or_default();
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let Some(event) = HookEvent::parse(&input) else {

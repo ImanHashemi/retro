@@ -75,6 +75,54 @@ pub fn log_parse_warning(msg: &str) {
     }
 }
 
+/// Compute normalized Levenshtein similarity between two strings.
+/// Returns a value in [0.0, 1.0] where 1.0 means identical.
+pub fn normalized_similarity(a: &str, b: &str) -> f64 {
+    let a_chars: Vec<char> = a.to_lowercase().chars().collect();
+    let b_chars: Vec<char> = b.to_lowercase().chars().collect();
+    let a_len = a_chars.len();
+    let b_len = b_chars.len();
+
+    let max_len = std::cmp::max(a_len, b_len);
+    if max_len == 0 {
+        return 1.0;
+    }
+
+    let distance = levenshtein(&a_chars, &b_chars);
+    1.0 - (distance as f64 / max_len as f64)
+}
+
+/// Levenshtein edit distance between two character slices.
+pub fn levenshtein(a: &[char], b: &[char]) -> usize {
+    let a_len = a.len();
+    let b_len = b.len();
+
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    // Two-row optimization
+    let mut prev: Vec<usize> = (0..=b_len).collect();
+    let mut curr = vec![0; b_len + 1];
+
+    for (i, a_ch) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, b_ch) in b.iter().enumerate() {
+            let cost = if a_ch == b_ch { 0 } else { 1 };
+            curr[j + 1] = std::cmp::min(
+                std::cmp::min(prev[j + 1] + 1, curr[j] + 1),
+                prev[j] + cost,
+            );
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b_len]
+}
+
 /// Strip markdown code fences from an AI response.
 /// Handles ```json, ```yaml, ```markdown, and bare ``` fences.
 /// Returns the inner content if fences are found, otherwise returns the input trimmed.
@@ -111,6 +159,36 @@ pub fn strip_code_fences(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_identical_strings() {
+        assert!((normalized_similarity("hello", "hello") - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_completely_different() {
+        let sim = normalized_similarity("abc", "xyz");
+        assert!(sim < 0.5);
+    }
+
+    #[test]
+    fn test_similar_strings() {
+        let sim = normalized_similarity(
+            "Always use uv for Python packages",
+            "Always use uv for Python package management",
+        );
+        assert!(sim > 0.7);
+    }
+
+    #[test]
+    fn test_empty_strings() {
+        assert!((normalized_similarity("", "") - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_case_insensitive() {
+        assert!((normalized_similarity("Hello World", "hello world") - 1.0).abs() < f64::EPSILON);
+    }
 
     #[test]
     fn test_strip_json_fences() {

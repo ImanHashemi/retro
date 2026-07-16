@@ -449,7 +449,6 @@ mod tests {
         store.ensure_layout().unwrap();
         store_git::ensure_repo(tmp.path()).unwrap();
         let mut config = Config::default();
-        config.v3.enabled = true;
         config.paths.claude_dir = claude.path().display().to_string();
         (tmp, claude, config)
     }
@@ -743,7 +742,6 @@ mod tests {
         std::fs::write(tmp.path().join("backups/x.bak"), "backup").unwrap();
 
         let mut config = Config::default();
-        config.v3.enabled = true;
         config.paths.claude_dir = claude.path().display().to_string();
         let backend = MockBackend::with_responses(vec![]);
         run_v3(tmp.path(), &config, &backend, false)
@@ -821,7 +819,6 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let claude = TempDir::new().unwrap();
         let mut config = Config::default();
-        config.v3.enabled = true;
         config.paths.claude_dir = claude.path().display().to_string();
 
         let backend = MockBackend::with_responses(vec![]);
