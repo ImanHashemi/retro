@@ -1294,9 +1294,15 @@ mod tests {
     #[test]
     fn config_post_persists_whitelisted_fields_and_preserves_the_rest() {
         let tmp = TempDir::new().unwrap();
+        let claude = TempDir::new().unwrap();
         let cfg_path = tmp.path().join("config.toml");
         let mut base = Config::default();
         base.ui.port = 9191; // a non-whitelisted field that MUST survive
+        // MUST isolate claude_dir: a threshold change reprojects, and the
+        // default "~/.claude" would target the developer's REAL global
+        // CLAUDE.md during `cargo test` (this exact leak wiped a user's file
+        // on 2026-07-23 before the empty-wipe guard caught it).
+        base.paths.claude_dir = claude.path().display().to_string();
         base.save(&cfg_path).unwrap();
         retro_core::store::git::ensure_repo(tmp.path()).unwrap();
 
