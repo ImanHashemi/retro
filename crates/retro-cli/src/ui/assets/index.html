@@ -113,6 +113,37 @@ body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
 /* generic state tint helpers (hooks dot, error text) */
 .ok{color:var(--accent)}
 .bad{color:var(--alert)}
+.dim{color:var(--ink-faint)}
+.link{text-decoration:underline;cursor:pointer}
+/* ── overview layout ── */
+.ov-grid{display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;gap:12px}
+.ov-learned{grid-column:1;grid-row:1/3;display:flex;flex-direction:column}
+.ov-context{grid-column:2;grid-row:1}
+.ov-bottom{grid-column:2;grid-row:2;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* learned-this-week */
+.learn-list{padding:8px 16px 12px;font-size:12px;flex:1}
+.learn{padding:8px 0;border-bottom:1px dotted var(--line-soft)}
+.learn:last-child{border-bottom:0}
+.learn-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.learn-meta{color:var(--ink-faint);font-size:11px}
+.learn-desc{color:var(--ink-soft);font-size:11.5px;margin-top:2px}
+.learn-foot{border-top:1px solid var(--line);padding:8px 16px;font-size:11px;color:var(--ink-faint);display:flex;justify-content:space-between;gap:12px}
+.conf{color:var(--ink-faint);font-size:11px;white-space:nowrap}
+/* context bars */
+.ctx-body{padding:16px 18px;display:grid;grid-template-columns:150px 1fr 68px;gap:11px 14px;align-items:center;font-size:12px}
+.ctx-name{font-weight:700}
+.ctx-total{text-align:right;font-weight:700;font-size:14px}
+.ctx-legend{grid-column:1/-1;display:flex;gap:18px;font-size:10px;color:var(--ink-faint);margin-top:3px;flex-wrap:wrap}
+.swatch{display:inline-block;width:9px;height:9px;vertical-align:-1px}
+.bar-agg{height:15px;border:1px dashed var(--line-soft);display:flex;background:transparent}
+/* stat numerals + file list */
+.pad{padding:12px 16px}
+.stats{display:flex;gap:20px;align-items:baseline}
+.stat-n{font-size:26px;font-weight:700}
+.stat-lbl{font-size:10px;color:var(--ink-faint)}
+.filelist{margin-top:10px;padding-top:8px;border-top:1px dotted var(--line-soft);font-size:11px;color:var(--ink-soft);line-height:1.9}
+.kv{display:flex;justify-content:space-between;gap:12px}
+.pipe{padding:10px 16px;font-size:11.5px;color:var(--ink-soft);line-height:2.05}
 /* Carried-over discipline: a later task's modal sets display:flex at equal
    specificity and is declared later — without !important the backdrop would
    permanently cover the page. Keep the !important. */
@@ -151,6 +182,29 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const get = async p => { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).error || r.status); return r.json(); };
 const post = async (p, body) => { const r = await fetch(p, { method: "POST", body: JSON.stringify(body) }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
 
+/* ── formatting ─────────────────────────────────────────────────────── */
+// Thousands separators (17658 -> "17,658"). Non-finite -> "—".
+const fmtNum = n => Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "—";
+// Compact abbreviation for aggregate totals (21342 -> "21.3K").
+const kAbbr = n => !Number.isFinite(n) ? "—" : n < 1000 ? String(Math.round(n)) : (n / 1000).toFixed(1) + "K";
+// 5-block confidence glyph as TEXT (not a widget): 0.80 -> "■■■■□ .80".
+function glyph(conf) {
+  const c = Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : 0;
+  const filled = Math.round(c * 5);
+  const frac = c.toFixed(2).replace(/^0/, ""); // "0.80" -> ".80"
+  return "■".repeat(filled) + "□".repeat(5 - filled) + " " + frac;
+}
+// tokens_est of an xray file object, 0 when absent.
+const tok = f => (f && f.present && Number.isFinite(f.tokens_est)) ? f.tokens_est : 0;
+// A window with a centered-title bar (the desktop chrome recipe).
+function win(title, meta, bodyHtml, extraClass) {
+  const m = meta ? `<span class="meta">${esc(meta)}</span>` : "";
+  return `<div class="window${extraClass ? " " + extraClass : ""}">
+    <div class="titlebar"><span class="box"></span><span class="title">${esc(title)}</span>${m}</div>
+    ${bodyHtml}
+  </div>`;
+}
+
 /* ── theme ──────────────────────────────────────────────────────────── */
 const prefersDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 function themeMode() { try { return localStorage.getItem('retro-theme') || 'auto'; } catch (e) { return 'auto'; } }
@@ -182,6 +236,139 @@ const views = {
   config: () => stub("Config"),
 };
 
+/* ── Overview tab (frames 1a/1b/1c) — every value from a real endpoint ── */
+let overviewExpanded = false; // Context: show all projects vs top 5 + aggregate
+function toggleOverviewExpand() { overviewExpanded = !overviewExpanded; render(); }
+
+// Veto = the real permanent-invalidate. Honest copy (retro has no "blacklist"):
+// the rule is marked invalid and won't be re-projected. Task 4 upgrades this
+// plain confirm to the desk-dimmed modal; the endpoint call is the same.
+async function vetoRule(scope, id) {
+  if (!confirm(`Veto ${id}?\n\nRemoved from its managed file and marked invalid — retro won't re-project it. Recoverable via the store's git history.`)) return;
+  try { await post("/api/node/invalidate", { scope, id }); render(); refreshStatus(); }
+  catch (e) { alert(e.message); }
+}
+
+const SCALE = 20000; // shared context-bar scale: 0–20K tokens
+
+views.overview = async () => {
+  const [xray, nodes, health, cfg] = await Promise.all([
+    get("/api/xray"), get("/api/nodes?active=true"), get("/api/health"), get("/api/config"),
+  ]);
+  const threshold = Number.isFinite(cfg && cfg.confidence_threshold) ? cfg.confidence_threshold : 0.7;
+
+  // — Learned this week — active nodes updated within 7 days, held = below threshold —
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  const recent = (nodes || [])
+    .filter(n => { const t = Date.parse(n.updated); return !isNaN(t) && t >= weekAgo; })
+    .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  const held = recent.filter(n => n.confidence < threshold).length;
+  const fresh = recent.length - held;
+  const shown = recent.slice(0, 6);
+  const learnRows = shown.map(n => {
+    const isHeld = n.confidence < threshold;
+    const meta = isHeld ? `${n.scope} · held` : `${n.scope} · ${n.type}`;
+    return `<div class="learn"${isHeld ? ' style="opacity:.55"' : ''}>
+      <div class="learn-head">
+        <span><b>${esc(n.id)}</b> <span class="learn-meta">${esc(meta)}</span></span>
+        <span style="display:flex;gap:8px;align-items:center">
+          <span class="conf">${esc(glyph(n.confidence))}</span>
+          <span class="btn" onclick="vetoRule('${esc(n.scope)}','${esc(n.id)}')">Veto</span>
+        </span>
+      </div>
+      <div class="learn-desc">${esc(n.body)}</div>
+    </div>`;
+  }).join("") || `<div class="learn learn-desc">Nothing learned in the last 7 days.</div>`;
+  const more = Math.max(0, recent.length - shown.length);
+  const learnFoot = `<div class="learn-foot">
+    <span>${more ? `+ ${more} more this week · ${held} held` : "vetoed rules never return"}</span>
+    <span class="link" onclick="goTab('knowledge')">view all in Knowledge →</span></div>`;
+  const learned = `<div class="window ov-learned">
+    <div class="titlebar"><span class="box"></span><span class="title">Learned this week</span><span class="meta">${fresh} new · ${held} held</span></div>
+    <div class="learn-list">${learnRows}</div>${learnFoot}</div>`;
+
+  // — Context session load — per-project stacked bar of the 4 token sources —
+  const g = tok(xray.global_claude_md);
+  const projs = (xray.projects || []).map(p => {
+    const proj = tok(p.claude_md), retro = tok(p.claude_local_md), mem = tok(p.memory_md);
+    return { slug: p.slug, g, proj, retro, mem, total: g + proj + retro + mem };
+  }).sort((a, b) => b.total - a.total);
+  const seg = (w, cls, extra) => w > 0 ? `<div class="${cls}" style="width:${Math.min(w / SCALE * 100, 100)}%${extra || ""}"></div>` : "";
+  const barRow = p => `<span class="ctx-name">${esc(p.slug)}</span>
+    <div class="bar">${seg(p.g, "seg-global")}${seg(p.proj, "seg-project")}${seg(p.retro, "seg-retro")}${seg(p.mem, "seg-memory")}</div>
+    <span class="ctx-total">${fmtNum(p.total)}</span>`;
+  const TOP = 5;
+  const showAll = overviewExpanded || projs.length <= TOP;
+  let ctxRows = (showAll ? projs : projs.slice(0, TOP)).map(barRow).join("");
+  if (!showAll) {
+    const rest = projs.slice(TOP), restSum = rest.reduce((s, p) => s + p.total, 0);
+    ctxRows += `<span class="ctx-name link dim" onclick="toggleOverviewExpand()">+ ${rest.length} more ▸</span>
+      <div class="bar-agg"><div style="width:${Math.min(restSum / SCALE * 100, 100)}%;background:repeating-linear-gradient(90deg,var(--line-soft) 0 4px,transparent 4px 8px)"></div></div>
+      <span class="ctx-total dim">${kAbbr(restSum)}</span>`;
+  } else if (projs.length > TOP) {
+    ctxRows += `<span class="link dim" onclick="toggleOverviewExpand()">show less ▴</span><div></div><span></span>`;
+  }
+  const legend = `<div class="ctx-legend">
+    <span><span class="swatch seg-global"></span> global CLAUDE.md</span>
+    <span><span class="swatch seg-project" style="border:1px solid var(--line-soft)"></span> project CLAUDE.md</span>
+    <span><span class="swatch seg-retro"></span> retro-owned</span>
+    <span><span class="swatch seg-memory" style="border:1px solid var(--accent)"></span> MEMORY.md</span>
+    <span style="margin-left:auto">scale 0 – 20K</span></div>`;
+  const ctxMeta = overviewExpanded && projs.length > TOP ? `all ${projs.length} · expanded`
+    : projs.length > TOP ? `top ${TOP} of ${projs.length} · by weight` : "tokens at session start";
+  const context = `<div class="window ov-context">
+    <div class="titlebar"><span class="box"></span><span class="title">Context — session load</span><span class="meta">${esc(ctxMeta)}</span></div>
+    <div class="ctx-body">${ctxRows || '<span class="dim" style="grid-column:1/-1">no projects tracked yet</span>'}${legend}</div></div>`;
+
+  // — Retro owns — global managed block + each CLAUDE.local.md (NOT MEMORY.md) —
+  const owned = [];
+  if (xray.global_claude_md && xray.global_claude_md.present)
+    owned.push({ label: "~/.claude/CLAUDE.md", nodes: xray.global_active_nodes || 0, toks: g });
+  (xray.projects || []).forEach(p => {
+    if (p.claude_local_md && p.claude_local_md.present)
+      owned.push({ label: `${p.slug}/CLAUDE.local.md`, nodes: p.active_nodes || 0, toks: tok(p.claude_local_md) });
+  });
+  const ownTokens = owned.reduce((s, f) => s + f.toks, 0);
+  const ownRules = (xray.global_active_nodes || 0) + (xray.projects || []).reduce((s, p) => s + (p.active_nodes || 0), 0);
+  const top3 = owned.slice(0, 3).map(f => `<div class="kv"><span>${esc(f.label)}</span><span>${f.nodes} · ${fmtNum(f.toks)}</span></div>`).join("");
+  const restF = owned.slice(3);
+  const fileRows = (top3 || '<div class="kv dim">nothing projected yet</div>') + (restF.length
+    ? `<div class="kv dim"><span>+ ${restF.length} more files</span><span>${restF.reduce((s, f) => s + f.nodes, 0)} · ${fmtNum(restF.reduce((s, f) => s + f.toks, 0))}</span></div>` : "");
+  const owns = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Retro owns</span></div>
+    <div class="pad">
+      <div class="stats">
+        <span><span class="stat-n ok">${fmtNum(ownTokens)}</span> <span class="stat-lbl">tok</span></span>
+        <span><span class="stat-n">${fmtNum(ownRules)}</span> <span class="stat-lbl">rules</span></span>
+        <span><span class="stat-n">${owned.length}</span> <span class="stat-lbl">files</span></span>
+      </div>
+      <div class="filelist">${fileRows}</div>
+    </div></div>`;
+
+  // — Pipeline — store/queue/budget + last observe→analyze→project + push —
+  const st = health.stages || {};
+  const hhmm = at => { const t = Date.parse(at); if (isNaN(t)) return ""; const d = new Date(t); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  const chain = ["observe", "analyze", "project"];
+  const failed = chain.find(k => st[k] && !st[k].ok);
+  const lastAt = chain.map(k => st[k] && st[k].at).filter(Boolean).sort().pop();
+  const runCell = failed ? `<b><span class="bad">✗ ${esc(failed)}</span> ${esc(hhmm(st[failed].at))}</b>`
+    : lastAt ? `<b class="ok">✓ ${esc(hhmm(lastAt))}</b>` : `<b class="dim">—</b>`;
+  const push = st.push;
+  const pushCell = push ? `<b class="${push.ok ? "ok" : "bad"}">${esc(relTime(push.at))} ${push.ok ? "✓" : "✗"}</b>` : `<b class="dim">—</b>`;
+  const budR = health.budget_remaining, budM = health.budget_max, queueN = health.queue_len || 0;
+  const pipe = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Pipeline</span></div>
+    <div class="pipe">
+      <div class="kv"><span>store</span><b>${fmtNum(xray.total_nodes)} nodes</b></div>
+      <div class="kv"><span>session queue</span><b class="${queueN > 0 ? "bad" : ""}">${queueN}</b></div>
+      <div class="kv"><span>AI budget today</span><b class="${budR === 0 ? "bad" : ""}">${fmtNum(budR)}/${fmtNum(budM)}</b></div>
+      <div class="kv"><span>observe → analyze → project</span>${runCell}</div>
+      <div class="kv"><span>push</span>${pushCell}</div>
+    </div></div>`;
+
+  return `<div class="ov-grid">${learned}${context}<div class="ov-bottom">${owns}${pipe}</div></div>`;
+};
+
 let tab = "overview";
 let renderSeq = 0;
 async function render() {
@@ -203,15 +390,17 @@ async function render() {
   }
 }
 
+// Switch tab + repaint the active underline. Called by the menu and by
+// in-view "view all in X →" links.
+function goTab(name) {
+  if (!views[name]) return;
+  tab = name;
+  document.querySelectorAll(".menubar .tab").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  render();
+}
 // Top menu bar is the ONLY navigation. The meta cell carries no data-tab, so
 // clicking it does nothing (never nav — handoff rule).
-$(".menubar").addEventListener("click", e => {
-  const t = e.target.dataset.tab;
-  if (!t) return;
-  tab = t;
-  document.querySelectorAll(".menubar .tab").forEach(b => b.classList.toggle("active", b === e.target));
-  render();
-});
+$(".menubar").addEventListener("click", e => { if (e.target.dataset.tab) goTab(e.target.dataset.tab); });
 
 /* ── status: menu meta + front panel (pure status, never nav) ───────── */
 let hooksState = { ok: true, label: "hooks ok" };
