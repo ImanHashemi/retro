@@ -2,11 +2,11 @@
 //! Global nodes -> ~/.claude/CLAUDE.md; project nodes -> <project>/CLAUDE.local.md.
 //! Managed blocks are build output — edits belong in the store.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::errors::CoreError;
-use crate::projection::claude_md::update_claude_md_content;
-use crate::store::{NodeType, Scope, Store};
+use crate::projection::claude_md::{read_managed_section, update_claude_md_content};
+use crate::store::{LoadResult, Node, NodeType, Scope, Store};
 
 #[cfg(test)]
 mod tests {
@@ -111,6 +111,19 @@ mod tests {
         let store_tmp = TempDir::new().unwrap();
         let store = Store::open(store_tmp.path());
         store.ensure_layout().unwrap();
+        // A healthy store read that simply has no projectable rules for "p"
+        // (a rule in a DIFFERENT scope). This is the real "no rules for this
+        // project" case — distinct from a zero-node read glitch, which the
+        // empty-wipe guard now (correctly) refuses.
+        store
+            .write_node(&node(
+                "other",
+                Scope::Project("q".to_string()),
+                NodeType::Rule,
+                0.9,
+                "other-project rule",
+            ))
+            .unwrap();
         let proj = TempDir::new().unwrap();
         // pre-existing file with a stale managed block and user content
         std::fs::write(
@@ -258,6 +271,57 @@ mod tests {
         let exclude = std::fs::read_to_string(main.path().join(".git/info/exclude")).unwrap();
         assert!(exclude.contains("CLAUDE.local.md"), "got: {exclude}");
     }
+
+    #[test]
+    fn refuses_to_wipe_populated_block_when_store_read_is_empty() {
+        // Reproduces the data-loss bug: a transient empty store read (files
+        // momentarily gone, e.g. a concurrent git op) must NOT wipe a file
+        // that already has a populated managed block.
+        let store_tmp = TempDir::new().unwrap();
+        let store = Store::open(store_tmp.path());
+        store.ensure_layout().unwrap();
+        store
+            .write_node(&node("g", Scope::Global, NodeType::Rule, 0.9, "global rule"))
+            .unwrap();
+        let claude = TempDir::new().unwrap();
+        let md = claude.path().join("CLAUDE.md");
+        project_global_md(&store, &md, 0.7, None).unwrap();
+        assert!(std::fs::read_to_string(&md).unwrap().contains("- global rule"));
+
+        // simulate the glitch: the node files momentarily vanish
+        std::fs::remove_dir_all(store.knowledge_dir().join("global")).unwrap();
+        std::fs::create_dir_all(store.knowledge_dir().join("global")).unwrap();
+
+        let res = project_global_md(&store, &md, 0.7, None);
+        assert!(res.is_err(), "must refuse to project an empty read over a populated file");
+        assert!(
+            std::fs::read_to_string(&md).unwrap().contains("- global rule"),
+            "the populated managed block must be preserved"
+        );
+    }
+
+    #[test]
+    fn genuinely_empty_scope_still_clears_block() {
+        // The guard must NOT break the legit case: a rule vetoed (invalidated)
+        // still loads, so the read is healthy and the block empties correctly.
+        let store_tmp = TempDir::new().unwrap();
+        let store = Store::open(store_tmp.path());
+        store.ensure_layout().unwrap();
+        let mut n = node("g", Scope::Global, NodeType::Rule, 0.9, "rule");
+        store.write_node(&n).unwrap();
+        let claude = TempDir::new().unwrap();
+        let md = claude.path().join("CLAUDE.md");
+        project_global_md(&store, &md, 0.7, None).unwrap();
+        assert!(std::fs::read_to_string(&md).unwrap().contains("- rule"));
+
+        n.invalidated_by = Some("user".to_string());
+        store.write_node(&n).unwrap();
+        project_global_md(&store, &md, 0.7, None).unwrap();
+        assert!(
+            !std::fs::read_to_string(&md).unwrap().contains("- rule"),
+            "a genuinely vetoed rule is removed (healthy read, real empty)"
+        );
+    }
 }
 
 /// Bodies of projectable nodes for a scope: active, non-memory, confidence >= threshold.
@@ -268,17 +332,22 @@ pub fn projectable_rules(
     threshold: f64,
 ) -> Result<Vec<String>, CoreError> {
     let loaded = store.load_all()?;
-    let mut nodes: Vec<_> = loaded
-        .nodes
-        .into_iter()
+    Ok(projectable_from(&loaded.nodes, scope, threshold))
+}
+
+/// Pure filter over an already-loaded node set, so callers that also need the
+/// full `LoadResult` (for the empty-wipe guard) don't load twice.
+fn projectable_from(nodes: &[(PathBuf, Node)], scope: &Scope, threshold: f64) -> Vec<String> {
+    let mut ns: Vec<&Node> = nodes
+        .iter()
         .map(|(_, n)| n)
         .filter(|n| n.is_active())
         .filter(|n| n.node_type != NodeType::Memory)
         .filter(|n| n.confidence >= threshold)
         .filter(|n| &n.scope == scope)
         .collect();
-    nodes.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(nodes.into_iter().map(|n| flatten_body(&n.body)).collect())
+    ns.sort_by(|a, b| a.id.cmp(&b.id));
+    ns.into_iter().map(|n| flatten_body(&n.body)).collect()
 }
 
 /// Managed-block bullets are single-line (the v2-compatible, renderer-safe
@@ -300,14 +369,38 @@ pub fn project_global_md(
     threshold: f64,
     backup_dir: Option<&Path>,
 ) -> Result<usize, CoreError> {
-    let rules = projectable_rules(store, &Scope::Global, threshold)?;
-    // Parity with project_local_md: never create an empty shell on a machine
-    // that has no CLAUDE.md and no rules yet.
-    if rules.is_empty() && !claude_md_path.exists() {
-        return Ok(0);
+    let loaded = store.load_all()?;
+    let rules = projectable_from(&loaded.nodes, &Scope::Global, threshold);
+    if rules.is_empty() {
+        // Parity with project_local_md: never create an empty shell on a
+        // machine that has no CLAUDE.md and no rules yet.
+        if !claude_md_path.exists() {
+            return Ok(0);
+        }
+        guard_against_empty_wipe(&loaded, claude_md_path)?;
     }
     write_managed(claude_md_path, &rules, backup_dir)?;
     Ok(rules.len())
+}
+
+/// Refuse to overwrite a populated managed block when the store read returned
+/// ZERO nodes — that is a read glitch (a concurrent store git op, a partial
+/// read), not a real "nothing to project". A genuine empty (all rules vetoed
+/// or below threshold) still LOADS its nodes, so `loaded.nodes` is non-empty
+/// and this never trips. Without this, a transient empty read silently wipes
+/// the user's projected rules (the 2026-07-23 data-loss incident).
+fn guard_against_empty_wipe(loaded: &LoadResult, path: &Path) -> Result<(), CoreError> {
+    if !loaded.nodes.is_empty() {
+        return Ok(());
+    }
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    if read_managed_section(&existing).is_some() {
+        return Err(CoreError::Io(format!(
+            "projection aborted: store read returned no nodes but {} has a populated managed block — refusing to overwrite it (likely a concurrent store write; the next run retries)",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 /// Regenerate <project>/CLAUDE.local.md and ensure it is ignored via
@@ -318,11 +411,15 @@ pub fn project_local_md(
     project_root: &Path,
     threshold: f64,
 ) -> Result<usize, CoreError> {
-    let rules = projectable_rules(store, &Scope::Project(slug.to_string()), threshold)?;
+    let loaded = store.load_all()?;
+    let rules = projectable_from(&loaded.nodes, &Scope::Project(slug.to_string()), threshold);
     let path = project_root.join("CLAUDE.local.md");
-    // No rules and no existing file: don't create an empty shell.
-    if rules.is_empty() && !path.exists() {
-        return Ok(0);
+    if rules.is_empty() {
+        // No rules and no existing file: don't create an empty shell.
+        if !path.exists() {
+            return Ok(0);
+        }
+        guard_against_empty_wipe(&loaded, &path)?;
     }
     write_managed(&path, &rules, None)?;
     ensure_git_exclude(project_root)?;
