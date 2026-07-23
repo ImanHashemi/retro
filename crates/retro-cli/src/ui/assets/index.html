@@ -100,7 +100,10 @@ body{margin:0;font:13px/1.5 var(--font);color:var(--ink);
    to the host page (brand cell, menu meta, view padding). No inline styles. ==== */
 html{height:100%}
 body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
-#main{flex:1;min-height:0;overflow:auto;padding:12px}
+/* the page is the ONE scroll surface (vertical only) — never scroll
+   horizontally, and no tab scrolls internally, so every tab behaves the
+   same way regardless of length */
+#main{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:12px}
 /* brand is bold, and accent-tinted in dark (matches frames 1a/1b) */
 .menubar .brand{font-weight:700}
 [data-theme=dark] .menubar .brand{color:var(--accent)}
@@ -161,8 +164,12 @@ body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
 .titlebar .box{border-color:var(--line-soft);opacity:.45}
 /* ── knowledge + activity + config: two-column layouts ── */
 .kn-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:12px;align-items:start}
-.col-left{display:flex;flex-direction:column}
-.col-right{display:flex;flex-direction:column;gap:12px}
+/* min-width:0 lets grid tracks shrink below their content's intrinsic width —
+   without it a long unbreakable rule id forces the column (and the whole page)
+   wider than the viewport, pushing the right column off-screen */
+.kn-grid>*,.cfg-grid>*,.ov-grid>*,.ov-bottom>*{min-width:0}
+.col-left{display:flex;flex-direction:column;min-width:0}
+.col-right{display:flex;flex-direction:column;gap:12px;min-width:0}
 /* filter bar */
 .filters{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line-soft);font-size:11px}
 .search{border:1px solid var(--line);background:var(--field);padding:2px 10px;flex:1;display:flex;gap:8px;align-items:center;color:var(--ink-faint)}
@@ -173,10 +180,11 @@ body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
 .rt-head{padding:6px 14px;border-bottom:1px solid var(--line);font-size:10px;color:var(--ink-faint);letter-spacing:1px}
 .rt-row{padding:9px 14px;border-bottom:1px dotted var(--line-soft);cursor:pointer;font-size:12px}
 .rt-row:last-child{border-bottom:0}
+.rt-head>span,.rt-row>span{min-width:0}
+.rt-row b{overflow-wrap:anywhere}
 .rt-desc{color:var(--ink-soft);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rt-num{text-align:right;font-variant-numeric:tabular-nums}
 .rt-veto{text-align:center}
-.rt-body{overflow:auto}
 /* rule detail */
 .detail-box{border:1px solid var(--line-soft);background:var(--field);padding:8px 12px;font-size:12px;white-space:pre-wrap;word-break:break-word}
 .detail-grid{display:grid;grid-template-columns:auto 1fr;gap:2px 16px;margin-top:10px;font-size:11.5px;color:var(--ink-soft);line-height:1.9}
@@ -269,6 +277,17 @@ function glyph(conf) {
 }
 // tokens_est of an xray file object, 0 when absent.
 const tok = f => (f && f.present && Number.isFinite(f.tokens_est)) ? f.tokens_est : 0;
+// git --date=iso is "YYYY-MM-DD HH:MM:SS +ZZZZ"; the space before the offset
+// makes Date.parse() return NaN, so parse the first 19 chars as local time.
+function parseGitDate(s) { const t = Date.parse(String(s).slice(0, 19).replace(" ", "T")); return isNaN(t) ? null : t; }
+// friendlier labels for retro's doctor check names (UI-only; the CLI keeps the
+// raw names). Falls back to the raw name for anything unmapped.
+const CHECK_LABELS = {
+  "v3-enabled": "v3 enabled", "store-present": "store initialized", "store-repo": "store git repo",
+  "index": "search index", "hooks": "session hooks", "queue": "session queue", "stages": "pipeline stages",
+  "projection": "projected files", "v2-runner": "legacy v2 runner", "backup": "backup remote", "claude-cli": "claude CLI",
+};
+const checkLabel = name => CHECK_LABELS[name] || name;
 // A window with a centered-title bar (the desktop chrome recipe).
 function win(title, meta, bodyHtml, extraClass) {
   const m = meta ? `<span class="meta">${esc(meta)}</span>` : "";
@@ -342,7 +361,7 @@ async function vetoRule(scope, id) {
     </div>`);
 }
 async function confirmVeto(scope, id) {
-  try { await post("/api/node/invalidate", { scope, id }); closeModal(); render(); refreshStatus(); }
+  try { await post("/api/node/invalidate", { scope, id }); closeModal(); knInvalidate(); render(); refreshStatus(); }
   catch (e) { alert(e.message); }
 }
 // Edit a rule's text via the real update endpoint (inline prompt for now).
@@ -353,12 +372,12 @@ async function editRule(scope, id) {
     if (next === null) return;
     if (!next.trim() || next === n.body) return;
     await post("/api/node/update", { scope, id, body: next });
-    render(); refreshStatus();
+    knInvalidate(); render(); refreshStatus();
   } catch (e) { alert(e.message); }
 }
 // Config: persist a whitelisted setting (threshold/budget/model) then re-render.
 async function cfgSet(key, value) {
-  try { await post("/api/config", { [key]: value }); render(); refreshStatus(); }
+  try { await post("/api/config", { [key]: value }); knInvalidate(); render(); refreshStatus(); }
   catch (e) { alert(e.message); }
 }
 // Exclude a project — real destructive action (deletes its retro-owned
@@ -376,7 +395,7 @@ function excludeProject(slug) {
     </div>`);
 }
 async function confirmExclude(slug) {
-  try { await post("/api/project/exclude", { slug }); closeModal(); render(); refreshStatus(); }
+  try { await post("/api/project/exclude", { slug }); closeModal(); knInvalidate(); render(); refreshStatus(); }
   catch (e) { alert(e.message); }
 }
 
@@ -511,28 +530,37 @@ views.overview = async () => {
 };
 
 /* ── Knowledge tab (frames 2a/3b) ── */
-let kn = { q: "", scope: "", type: "", status: "all", sort: "weight", selId: null, selScope: null, page: 0 };
-const KN_PAGE = 12;
-function knSet(k, v) { kn[k] = v; kn.page = 0; render(); }
+let kn = { q: "", scope: "", type: "", status: "all", sort: "weight", selId: null, selScope: null };
+// Cache the fetched node set keyed by scope|type so search/status/sort are pure
+// client-side ops — search is live (no per-keystroke server round-trip). Writes
+// and scope/type changes invalidate the cache so counts refresh.
+let knCache = null; // { key, xray, cfg, nodes }
+function knInvalidate() { knCache = null; }
+function knSet(k, v) { kn[k] = v; if (k === "scope" || k === "type") knInvalidate(); render(); }
 function knSelect(scope, id) { kn.selScope = scope; kn.selId = id; render(); }
-function knPage(d) { kn.page = Math.max(0, kn.page + d); render(); }
 
 views.knowledge = async () => {
-  const params = new URLSearchParams();
-  if (kn.scope) params.set("scope", kn.scope);
-  if (kn.type) params.set("type", kn.type);
-  if (kn.q) params.set("q", kn.q);
-  let xray, cfg, all;
-  try {
-    [xray, cfg, all] = await Promise.all([get("/api/xray"), get("/api/config"), get("/api/nodes?" + params)]);
-  } catch (e) {
-    return `<div class="kn-grid"><div class="window col-left">
-      <div class="titlebar"><span class="box"></span><span class="title">Rule store</span></div>
-      <div class="stub bad">${esc(e.message)}</div></div><div class="col-right"></div></div>`;
+  const key = kn.scope + "|" + kn.type;
+  if (!knCache || knCache.key !== key) {
+    const params = new URLSearchParams();
+    if (kn.scope) params.set("scope", kn.scope);
+    if (kn.type) params.set("type", kn.type);
+    try {
+      const [xray, cfg, nodes] = await Promise.all([get("/api/xray"), get("/api/config"), get("/api/nodes?" + params)]);
+      knCache = { key, xray, cfg, nodes: nodes || [] };
+    } catch (e) {
+      return `<div class="kn-grid"><div class="window col-left">
+        <div class="titlebar"><span class="box"></span><span class="title">Rule store</span></div>
+        <div class="stub bad">${esc(e.message)}</div></div><div class="col-right"></div></div>`;
+    }
   }
+  const { xray, cfg, nodes } = knCache;
   const thr = Number.isFinite(cfg.confidence_threshold) ? cfg.confidence_threshold : 0.7;
   const statusOf = n => !n.active ? "vetoed" : (n.confidence < thr ? "held" : "live");
-  let list = (all || []).map(n => ({ ...n, st: statusOf(n) }));
+  // live search: case-insensitive substring over id + body, client-side.
+  const q = kn.q.trim().toLowerCase();
+  let list = nodes.map(n => ({ ...n, st: statusOf(n) }));
+  if (q) list = list.filter(n => (n.id + " " + (n.body || "")).toLowerCase().includes(q));
   if (kn.status !== "all") list = list.filter(n => n.st === kn.status);
   const sorters = {
     weight: (a, b) => b.confidence - a.confidence,
@@ -540,9 +568,6 @@ views.knowledge = async () => {
     tokens: (a, b) => (b.tokens_est || 0) - (a.tokens_est || 0),
   };
   list.sort(sorters[kn.sort] || sorters.weight);
-  const pages = Math.max(1, Math.ceil(list.length / KN_PAGE));
-  if (kn.page >= pages) kn.page = pages - 1;
-  const pageItems = list.slice(kn.page * KN_PAGE, kn.page * KN_PAGE + KN_PAGE);
 
   // filter controls (native selects styled as flat chips)
   const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
@@ -552,7 +577,7 @@ views.knowledge = async () => {
   const statusSel = `<select class="sel" onchange="knSet('status',this.value)">${["all", "live", "held", "vetoed"].map(s => opt(s, "status: " + s, kn.status)).join("")}</select>`;
   const sortSel = `<select class="sel" onchange="knSet('sort',this.value)">${["weight", "recent", "tokens"].map(s => opt(s, "sort: " + s, kn.sort)).join("")}</select>`;
 
-  const rows = pageItems.map(n => {
+  const rows = list.map(n => {
     const stCls = n.st === "vetoed" ? " row-vetoed" : n.st === "held" ? " row-held" : "";
     const selCls = (n.id === kn.selId && n.scope === kn.selScope) ? " row-selected" : "";
     const conf = n.st === "vetoed" ? "vetoed" : glyph(n.confidence) + (n.st === "held" ? " held" : "");
@@ -567,23 +592,21 @@ views.knowledge = async () => {
       <span class="rt-num">${esc(toks)}</span>
       <span class="rt-veto">${veto}</span>
     </div>`;
-  }).join("") || `<div class="stub dim">no rules match these filters.</div>`;
+  }).join("") || `<div class="stub dim">${q || kn.status !== "all" ? "no rules match." : "no rules yet."}</div>`;
 
   const store = xray.store || { live: 0, held: 0, vetoed: 0 };
-  const footL = `showing ${pageItems.length} of ${fmtNum(xray.total_nodes)} · ${store.live} live · ${store.held} held · ${store.vetoed} vetoed`;
-  const pager = pages > 1
-    ? `<span>${kn.page > 0 ? `<span class="link" onclick="knPage(-1)">← prev</span> ` : ""}${kn.page + 1}/${pages}${kn.page < pages - 1 ? ` <span class="link" onclick="knPage(1)">next →</span>` : ""}</span>`
-    : `<span></span>`;
+  const shownNote = list.length === (xray.total_nodes || 0) ? `${list.length}` : `${list.length} of ${fmtNum(xray.total_nodes)}`;
+  const footL = `showing ${shownNote} · ${store.live} live · ${store.held} held · ${store.vetoed} vetoed`;
 
   const left = `<div class="window col-left">
     <div class="titlebar"><span class="box"></span><span class="title">Rule store — ${fmtNum(xray.total_nodes)} nodes</span></div>
     <div class="filters">
-      <span class="search">⌕ <input id="knq" placeholder="search rules…" value="${esc(kn.q)}" onchange="knSet('q',this.value)"></span>
+      <span class="search">⌕ <input id="knq" placeholder="search rules…" value="${esc(kn.q)}" oninput="kn.q=this.value;render()"></span>
       ${scopeSel}${typeSel}${statusSel}${sortSel}
     </div>
     <div class="rt-head"><span>RULE</span><span>SCOPE</span><span>CONFIDENCE</span><span class="rt-num">TOKENS</span><span></span></div>
     <div class="rt-body">${rows}</div>
-    <div class="kn-foot">${footL}${pager}</div>
+    <div class="kn-foot"><span>${footL}</span><span></span></div>
   </div>`;
 
   return `<div class="kn-grid">${left}<div class="col-right">${await knDetail(thr)}${knStore(store)}</div></div>`;
@@ -690,7 +713,7 @@ views.activity = async () => {
 
   // — this-week counts (real; omits decay/growth/dollar — none tracked) —
   const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
-  const within = c => { const t = Date.parse(String(c.date).replace(" ", "T")); return !isNaN(t) && t >= weekAgo; };
+  const within = c => { const t = parseGitDate(c.date); return t !== null && t >= weekAgo; };
   const wk = (commits || []).filter(within);
   const runs = wk.filter(c => /^retro: /.test(c.subject)).length;
   const learned = wk.reduce((s, c) => { const m = /^retro: learn (\d+) node/.exec(c.subject); return s + (m ? +m[1] : 0); }, 0);
@@ -711,7 +734,7 @@ views.activity = async () => {
 
   // — health checks from doctor (+ real version; no update-check) —
   const checks = (doctor.checks || []).map(c =>
-    `<div class="chk"><span>${esc(c.name)}</span><b class="cv ${c.ok ? "ok" : "bad"}">${c.ok ? "✓" : "✗"} ${esc(c.detail)}</b></div>`).join("");
+    `<div class="chk"><span>${esc(checkLabel(c.name))}</span><b class="cv ${c.ok ? "ok" : "bad"}">${c.ok ? "✓" : "✗"} ${esc(c.detail)}</b></div>`).join("");
   const healthWin = `<div class="window">
     <div class="titlebar"><span class="box"></span><span class="title">Health checks</span></div>
     <div class="pad" style="padding-top:8px">${checks || '<div class="chk dim">no checks</div>'}
@@ -783,14 +806,20 @@ views.config = async () => {
     </div></div>`;
 
   const projRows = (xray.projects || []).map(p => {
-    const files = [
+    const fileList = [
       p.claude_local_md && p.claude_local_md.present ? "CLAUDE.local.md" : null,
       p.memory_md && p.memory_md.present ? "MEMORY.md" : null,
-    ].filter(Boolean).join(" · ") || "—";
+    ].filter(Boolean);
+    // A project is watched as soon as retro sees sessions there, but only gets
+    // an owned file once it has learned project-scoped rules above threshold.
+    // Zero owned files → watched, nothing written yet.
+    const files = fileList.length
+      ? `<span class="dim">${esc(fileList.join(" · "))}</span>`
+      : `<span class="dim">watching · no rules yet</span>`;
     const toks = p.claude_local_md && p.claude_local_md.present ? p.claude_local_md.tokens_est : 0;
     return `<div class="proj-row">
       <span><b>${esc(p.slug)}</b><div class="cfg-hint">${esc(p.path)}</div></span>
-      <span class="dim">${esc(files)}</span>
+      ${files}
       <span class="rt-num">${fmtNum(toks)}</span>
       <span style="text-align:center"><span class="btn" onclick="excludeProject('${esc(p.slug)}')">Exclude</span></span>
     </div>`;
