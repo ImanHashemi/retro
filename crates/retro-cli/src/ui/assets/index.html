@@ -159,6 +159,31 @@ body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
 /* the titlebar corner mark is decorative (old-Mac close box) — dim it so it
    doesn't read as a clickable checkbox (checkpoint feedback) */
 .titlebar .box{border-color:var(--line-soft);opacity:.45}
+/* ── knowledge + activity + config: two-column layouts ── */
+.kn-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:12px;align-items:start}
+.col-left{display:flex;flex-direction:column}
+.col-right{display:flex;flex-direction:column;gap:12px}
+/* filter bar */
+.filters{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line-soft);font-size:11px}
+.search{border:1px solid var(--line);background:var(--field);padding:2px 10px;flex:1;display:flex;gap:8px;align-items:center;color:var(--ink-faint)}
+.search input{border:0;background:transparent;color:var(--ink);flex:1;font:inherit;outline:none;padding:2px 0}
+.sel{border:1px solid var(--line);background:var(--chip);color:var(--ink);padding:3px 8px;font:inherit;font-size:11px;cursor:pointer}
+/* rule table */
+.rt-head,.rt-row{display:grid;grid-template-columns:1fr 110px 92px 64px 56px;gap:0 12px;align-items:center}
+.rt-head{padding:6px 14px;border-bottom:1px solid var(--line);font-size:10px;color:var(--ink-faint);letter-spacing:1px}
+.rt-row{padding:9px 14px;border-bottom:1px dotted var(--line-soft);cursor:pointer;font-size:12px}
+.rt-row:last-child{border-bottom:0}
+.rt-desc{color:var(--ink-soft);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt-num{text-align:right;font-variant-numeric:tabular-nums}
+.rt-veto{text-align:center}
+.rt-body{overflow:auto}
+/* rule detail */
+.detail-box{border:1px solid var(--line-soft);background:var(--field);padding:8px 12px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+.detail-grid{display:grid;grid-template-columns:auto 1fr;gap:2px 16px;margin-top:10px;font-size:11.5px;color:var(--ink-soft);line-height:1.9}
+.detail-grid .k{color:var(--ink-faint)}
+.detail-actions{display:flex;gap:8px;margin-top:12px}
+/* veto modal dialog */
+.dialog .box{opacity:.45}
 /* Carried-over discipline: a later task's modal sets display:flex at equal
    specificity and is declared later — without !important the backdrop would
    permanently cover the page. Keep the !important. */
@@ -182,6 +207,11 @@ body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
   <span id="fpBudget">budget —</span>
   <span id="fpPush">push —</span>
   <span class="health" id="fpHealth">…</span>
+</div>
+<!-- Veto/exclude confirm modal. Lives OUTSIDE #main so it survives the
+     wholesale innerHTML swaps in render(). -->
+<div id="modal" class="overlay hidden" onclick="if(event.target===this)closeModal()">
+  <div class="dialog window" id="modalBody"></div>
 </div>
 <script>
 // Version shown in the menu meta. The release task (bump-to-3.1.0) keeps this
@@ -255,13 +285,48 @@ const views = {
 let overviewExpanded = false; // Context: show all projects vs top 5 + aggregate
 function toggleOverviewExpand() { overviewExpanded = !overviewExpanded; render(); }
 
-// Veto = the real permanent-invalidate. Honest copy (retro has no "blacklist"):
-// the rule is marked invalid and won't be re-projected. Task 4 upgrades this
-// plain confirm to the desk-dimmed modal; the endpoint call is the same.
+/* ── modal (veto confirm, frame 4c; also project exclude in Config) ── */
+function openModal(html) { $("#modalBody").innerHTML = html; $("#modal").classList.remove("hidden"); }
+function closeModal() { $("#modal").classList.add("hidden"); $("#modalBody").innerHTML = ""; }
+
+// Which managed file a scope projects to (for the veto consequence copy).
+function scopeFile(scope, path) {
+  if (path) return path;
+  if (scope === "global") return "~/.claude/CLAUDE.md";
+  return scope.replace(/^project\//, "") + "/CLAUDE.local.md";
+}
+
+// Veto = retro's real permanent-invalidate. Honest copy: the rule is marked
+// invalid and won't be re-projected — NOT a content "blacklist" (retro has
+// none); it stays recoverable via the store's git history.
 async function vetoRule(scope, id) {
-  if (!confirm(`Veto ${id}?\n\nRemoved from its managed file and marked invalid — retro won't re-project it. Recoverable via the store's git history.`)) return;
-  try { await post("/api/node/invalidate", { scope, id }); render(); refreshStatus(); }
+  let path = "";
+  try { const n = await get(`/api/node?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`); path = n.path || ""; } catch (e) { }
+  openModal(`
+    <div class="titlebar"><span class="box"></span><span class="title">Veto rule?</span></div>
+    <div style="padding:14px 18px;font-size:12px">
+      <div class="detail-box" style="white-space:normal"><b>${esc(id)}</b> <span class="dim">${esc(scope)}</span></div>
+      <div style="margin-top:10px;color:var(--ink-soft);font-size:11.5px">Removed from <b>${esc(scopeFile(scope, path))}</b> and marked invalid — retro won't re-project it. Recoverable via the store's git history.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <span class="btn" onclick="closeModal()">Cancel</span>
+        <span class="btn btn-danger" onclick="confirmVeto('${esc(scope)}','${esc(id)}')">Veto — mark invalid</span>
+      </div>
+    </div>`);
+}
+async function confirmVeto(scope, id) {
+  try { await post("/api/node/invalidate", { scope, id }); closeModal(); render(); refreshStatus(); }
   catch (e) { alert(e.message); }
+}
+// Edit a rule's text via the real update endpoint (inline prompt for now).
+async function editRule(scope, id) {
+  try {
+    const n = await get(`/api/node?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`);
+    const next = prompt("Edit rule text:", n.body);
+    if (next === null) return;
+    if (!next.trim() || next === n.body) return;
+    await post("/api/node/update", { scope, id, body: next });
+    render(); refreshStatus();
+  } catch (e) { alert(e.message); }
 }
 
 const SCALE = 20000; // shared context-bar scale: 0–20K tokens
@@ -393,6 +458,128 @@ views.overview = async () => {
 
   return `<div class="ov-grid">${learned}${context}<div class="ov-bottom">${owns}${pipe}</div></div>`;
 };
+
+/* ── Knowledge tab (frames 2a/3b) ── */
+let kn = { q: "", scope: "", type: "", status: "all", sort: "weight", selId: null, selScope: null, page: 0 };
+const KN_PAGE = 12;
+function knSet(k, v) { kn[k] = v; kn.page = 0; render(); }
+function knSelect(scope, id) { kn.selScope = scope; kn.selId = id; render(); }
+function knPage(d) { kn.page = Math.max(0, kn.page + d); render(); }
+
+views.knowledge = async () => {
+  const params = new URLSearchParams();
+  if (kn.scope) params.set("scope", kn.scope);
+  if (kn.type) params.set("type", kn.type);
+  if (kn.q) params.set("q", kn.q);
+  let xray, cfg, all;
+  try {
+    [xray, cfg, all] = await Promise.all([get("/api/xray"), get("/api/config"), get("/api/nodes?" + params)]);
+  } catch (e) {
+    return `<div class="kn-grid"><div class="window col-left">
+      <div class="titlebar"><span class="box"></span><span class="title">Rule store</span></div>
+      <div class="stub bad">${esc(e.message)}</div></div><div class="col-right"></div></div>`;
+  }
+  const thr = Number.isFinite(cfg.confidence_threshold) ? cfg.confidence_threshold : 0.7;
+  const statusOf = n => !n.active ? "vetoed" : (n.confidence < thr ? "held" : "live");
+  let list = (all || []).map(n => ({ ...n, st: statusOf(n) }));
+  if (kn.status !== "all") list = list.filter(n => n.st === kn.status);
+  const sorters = {
+    weight: (a, b) => b.confidence - a.confidence,
+    recent: (a, b) => String(b.updated).localeCompare(String(a.updated)),
+    tokens: (a, b) => (b.tokens_est || 0) - (a.tokens_est || 0),
+  };
+  list.sort(sorters[kn.sort] || sorters.weight);
+  const pages = Math.max(1, Math.ceil(list.length / KN_PAGE));
+  if (kn.page >= pages) kn.page = pages - 1;
+  const pageItems = list.slice(kn.page * KN_PAGE, kn.page * KN_PAGE + KN_PAGE);
+
+  // filter controls (native selects styled as flat chips)
+  const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
+  const projSlugs = (xray.projects || []).map(p => p.slug);
+  const scopeSel = `<select class="sel" onchange="knSet('scope',this.value)">${opt("", "scope: all", kn.scope)}${opt("global", "scope: global", kn.scope)}${projSlugs.map(s => opt("project/" + s, "scope: " + s, kn.scope)).join("")}</select>`;
+  const typeSel = `<select class="sel" onchange="knSet('type',this.value)">${["", "rule", "preference", "pattern", "memory"].map(t => opt(t, "type: " + (t || "all"), kn.type)).join("")}</select>`;
+  const statusSel = `<select class="sel" onchange="knSet('status',this.value)">${["all", "live", "held", "vetoed"].map(s => opt(s, "status: " + s, kn.status)).join("")}</select>`;
+  const sortSel = `<select class="sel" onchange="knSet('sort',this.value)">${["weight", "recent", "tokens"].map(s => opt(s, "sort: " + s, kn.sort)).join("")}</select>`;
+
+  const rows = pageItems.map(n => {
+    const stCls = n.st === "vetoed" ? " row-vetoed" : n.st === "held" ? " row-held" : "";
+    const selCls = (n.id === kn.selId && n.scope === kn.selScope) ? " row-selected" : "";
+    const conf = n.st === "vetoed" ? "vetoed" : glyph(n.confidence) + (n.st === "held" ? " held" : "");
+    const toks = n.st === "vetoed" ? "—" : fmtNum(n.tokens_est);
+    const veto = n.active
+      ? `<span class="btn" onclick="event.stopPropagation();vetoRule('${esc(n.scope)}','${esc(n.id)}')">Veto</span>`
+      : `<span class="dim">✗</span>`;
+    return `<div class="rt-row${stCls}${selCls}" onclick="knSelect('${esc(n.scope)}','${esc(n.id)}')">
+      <span><b>${esc(n.id)}</b><div class="rt-desc">${esc(n.body)}</div></span>
+      <span class="dim">${esc(n.scope)}</span>
+      <span class="conf">${esc(conf)}</span>
+      <span class="rt-num">${esc(toks)}</span>
+      <span class="rt-veto">${veto}</span>
+    </div>`;
+  }).join("") || `<div class="stub dim">no rules match these filters.</div>`;
+
+  const store = xray.store || { live: 0, held: 0, vetoed: 0 };
+  const footL = `showing ${pageItems.length} of ${fmtNum(xray.total_nodes)} · ${store.live} live · ${store.held} held · ${store.vetoed} vetoed`;
+  const pager = pages > 1
+    ? `<span>${kn.page > 0 ? `<span class="link" onclick="knPage(-1)">← prev</span> ` : ""}${kn.page + 1}/${pages}${kn.page < pages - 1 ? ` <span class="link" onclick="knPage(1)">next →</span>` : ""}</span>`
+    : `<span></span>`;
+
+  const left = `<div class="window col-left">
+    <div class="titlebar"><span class="box"></span><span class="title">Rule store — ${fmtNum(xray.total_nodes)} nodes</span></div>
+    <div class="filters">
+      <span class="search">⌕ <input id="knq" placeholder="search rules…" value="${esc(kn.q)}" onchange="knSet('q',this.value)"></span>
+      ${scopeSel}${typeSel}${statusSel}${sortSel}
+    </div>
+    <div class="rt-head"><span>RULE</span><span>SCOPE</span><span>CONFIDENCE</span><span class="rt-num">TOKENS</span><span></span></div>
+    <div class="rt-body">${rows}</div>
+    <div class="kn-foot">${footL}${pager}</div>
+  </div>`;
+
+  return `<div class="kn-grid">${left}<div class="col-right">${await knDetail(thr)}${knStore(store)}</div></div>`;
+};
+
+// Rule detail — real fields only (no fabricated history timeline / "seen N×
+// across M projects" / Pin). Evidence = source-session count from `sources`.
+async function knDetail(thr) {
+  const head = t => `<div class="titlebar"><span class="box"></span><span class="title">${esc(t)}</span></div>`;
+  if (!kn.selId) return `<div class="window">${head("Rule detail")}<div class="stub dim">select a rule to inspect it.</div></div>`;
+  let n;
+  try { n = await get(`/api/node?scope=${encodeURIComponent(kn.selScope)}&id=${encodeURIComponent(kn.selId)}`); }
+  catch (e) { return `<div class="window">${head("Rule detail")}<div class="stub bad">${esc(e.message)}</div></div>`; }
+  const st = n.invalidated_by ? "vetoed" : (n.confidence < thr ? "held" : "live");
+  const statusLine = st === "vetoed" ? `<b class="bad">vetoed — won't be re-projected</b>`
+    : st === "held" ? `<b class="dim">held · below threshold, not projected</b>`
+      : `<b class="ok">live · in ${esc(n.path || "managed file")}</b>`;
+  const srcs = (n.sources || []).length;
+  const cost = Math.round((n.body || "").length / 4);
+  const actions = st === "vetoed" ? "" : `<div class="detail-actions">
+    <span class="btn" onclick="vetoRule('${esc(n.scope)}','${esc(n.id)}')">Veto</span>
+    <span class="btn" onclick="editRule('${esc(n.scope)}','${esc(n.id)}')">Edit text</span></div>`;
+  return `<div class="window">${head(n.id)}
+    <div class="pad">
+      <div class="detail-box">${esc(n.body)}</div>
+      <div class="detail-grid">
+        <span class="k">status</span><span>${statusLine}</span>
+        <span class="k">type</span><span>${esc(n.type)}</span>
+        <span class="k">confidence</span><span>${esc(glyph(n.confidence))}</span>
+        <span class="k">evidence</span><span>${srcs} source session${srcs === 1 ? "" : "s"}</span>
+        <span class="k">first seen</span><span>${esc(n.created)}</span>
+        <span class="k">last updated</span><span>${esc(n.updated)}</span>
+        <span class="k">cost</span><span>${fmtNum(cost)} tokens</span>
+      </div>
+      ${actions}
+    </div></div>`;
+}
+
+function knStore(store) {
+  return `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Store</span></div>
+    <div class="pipe"><div class="pipe-grid">
+      <span>live rules</span><b>${fmtNum(store.live)}</b>
+      <span>held (below threshold)</span><b>${fmtNum(store.held)}</b>
+      <span>vetoed</span><b>${fmtNum(store.vetoed)}</b>
+    </div></div></div>`;
+}
 
 let tab = "overview";
 let renderSeq = 0;

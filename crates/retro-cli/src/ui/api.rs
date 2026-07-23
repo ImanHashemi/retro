@@ -442,6 +442,10 @@ fn api_nodes(store_root: &Path, url: &str) -> (serde_json::Value, u16) {
                         "id": r.id, "scope": r.scope, "type": r.node_type,
                         "confidence": r.confidence, "active": r.active,
                         "updated": r.updated,
+                        // token estimate from the FULL body (the `body` field
+                        // is truncated for transport) so the rule table's
+                        // TOKENS column is honest, not capped at the preview.
+                        "tokens_est": r.body.len() / 4,
                         "body": retro_core::util::truncate_str(&r.body, 200),
                         "sources": r.sources,
                     }))
