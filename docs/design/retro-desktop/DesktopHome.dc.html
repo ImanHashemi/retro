@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<!-- @template name="Desktop home (5c)" description="Hi-fi retro dashboard home in the tiled-desktop direction, light + dark" -->
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap">
+<style>body{margin:0}a{color:inherit}a:hover{color:inherit}</style>
+</helmet>
+
+<section id="4a" style="position:absolute;left:40px;top:70px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#2ee85c;color:#0d0f0c;padding:4px 10px;border-radius:4px;letter-spacing:1px">4a · CONFIG — dark</div>
+<div data-screen-label="Config dark" style="background:repeating-conic-gradient(#15170f 0 25%,#181a12 0 50%) 0 0/8px 8px;color:#d6d8cc;font:13px/1.5 'Space Mono',monospace;border:1px solid #3c4034">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#1e211a;border-bottom:1px solid #3c4034;font-size:12px">
+    <span style="font-weight:700;color:#2ee85c">▞ retro</span>
+    <span style="color:#767b6c">Overview</span><span style="color:#767b6c">Knowledge</span><span style="color:#767b6c">Activity</span><span style="border-bottom:2px solid #2ee85c;padding-bottom:1px">Config</span>
+    <span style="margin-left:auto;color:#767b6c">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#2ee85c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px">
+    <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #3c4034;background:#1e211a"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Learning</span>
+      </div>
+      <div style="padding:14px 18px;font-size:12px;display:grid;gap:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>confidence threshold<div style="color:#767b6c;font-size:11px">rules promote to files at or above this</div></span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:120px;height:10px;border:1px solid #3c4034;background:#0b0d09;position:relative"><span style="position:absolute;left:0;top:0;bottom:0;width:70%;background:repeating-linear-gradient(45deg,#767b6c 0 3px,#0b0d09 3px 6px)"></span><span style="position:absolute;left:calc(70% - 5px);top:-4px;width:10px;height:16px;background:#1e211a;border:1px solid #3c4034;box-shadow:2px 2px 0 rgba(0,0,0,.45)"></span></span><b style="width:32px;text-align:right">.70</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>AI budget per day<div style="color:#767b6c;font-size:11px">analyze runs allowed daily</div></span>
+          <span style="display:flex;align-items:center;gap:6px"><span style="border:1px solid #3c4034;background:#0b0d09;padding:2px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(0,0,0,.45)">−</span><b style="width:32px;text-align:center">10</b><span style="border:1px solid #3c4034;background:#0b0d09;padding:2px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(0,0,0,.45)">+</span></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>decay window<div style="color:#767b6c;font-size:11px">unseen rules age out after</div></span>
+          <span style="border:1px solid #3c4034;background:#262a20;padding:3px 10px;cursor:pointer;font-size:11px">30 days ▾</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>token cap per project<div style="color:#767b6c;font-size:11px">retro-owned files never exceed this</div></span>
+          <span style="border:1px solid #3c4034;background:#262a20;padding:3px 10px;cursor:pointer;font-size:11px">2,000 tok ▾</span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #3c4034;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Appearance</span>
+        </div>
+        <div style="padding:14px 18px;font-size:12px;display:grid;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span>theme</span>
+            <span style="display:flex;gap:0;font-size:11px">
+              <span style="border:1px solid #3c4034;background:#0b0d09;padding:3px 12px;color:#767b6c;cursor:pointer">light</span>
+              <span style="border:1px solid #3c4034;border-left:0;background:#262a20;padding:3px 12px;font-weight:700">dark</span>
+              <span style="border:1px solid #3c4034;border-left:0;background:#0b0d09;padding:3px 12px;color:#767b6c;cursor:pointer">auto</span>
+            </span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span>skin<div style="color:#767b6c;font-size:11px">community skins drop into ~/.retro/skins</div></span>
+            <span style="border:1px solid #3c4034;background:#262a20;padding:3px 10px;cursor:pointer;font-size:11px">desktop (default) ▾</span>
+          </div>
+          <div style="border:1px dashed #4a4f41;padding:8px 12px;font-size:11px;color:#767b6c">installed: desktop · vhs-84 <span style="color:#2ee85c">·</span> get more ↗</div>
+        </div>
+      </div>
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #3c4034;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Hooks & API</span>
+        </div>
+        <div style="padding:12px 18px;font-size:12px;display:grid;gap:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span>SessionEnd / SessionStart</span><b style="color:#2ee85c">✓ installed</b></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span>API key</span><span style="display:flex;gap:8px;align-items:center"><span style="border:1px solid #4a4f41;background:#0b0d09;padding:2px 10px;color:#767b6c">sk-ant-····9f2</span><span style="border:1px solid #3c4034;background:#0b0d09;padding:2px 10px;cursor:pointer;box-shadow:2px 2px 0 rgba(0,0,0,.45);font-size:11px">Change</span></span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span>model for analyze</span><span style="border:1px solid #3c4034;background:#262a20;padding:3px 10px;cursor:pointer;font-size:11px">claude-haiku ▾</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="grid-column:1/-1;background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #3c4034;background:#1e211a"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Projects — 3 tracked</span>
+      </div>
+      <div style="font-size:12px">
+        <div style="display:grid;grid-template-columns:1fr 190px 130px 110px 80px;gap:0 12px;padding:6px 16px;border-bottom:1px solid #3c4034;font-size:10px;color:#767b6c;letter-spacing:1px">
+          <span>PROJECT</span><span>OWNED FILE</span><span>TOKEN CAP</span><span>LEARNING</span><span></span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 190px 130px 110px 80px;gap:0 12px;padding:9px 16px;border-bottom:1px dotted #4a4f41;align-items:center">
+          <span><b>payments-api</b><div style="color:#767b6c;font-size:11px">~/repositories/payments-api</div></span>
+          <span style="color:#a3a894">CLAUDE.local.md · MEMORY.md</span><span style="color:#a3a894">478 / 2,000</span>
+          <span><span style="display:inline-block;width:26px;height:14px;border:1px solid #3c4034;background:#2ee85c;position:relative;vertical-align:-2px"><span style="position:absolute;right:1px;top:1px;width:10px;height:10px;background:#1e211a;border:1px solid #3c4034"></span></span> on</span>
+          <span style="border:1px solid #3c4034;background:#0b0d09;padding:1px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(0,0,0,.45);font-size:10px;text-align:center">Pause</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 190px 130px 110px 80px;gap:0 12px;padding:9px 16px;border-bottom:1px dotted #4a4f41;align-items:center">
+          <span><b>infra</b><div style="color:#767b6c;font-size:11px">~/repositories/infra</div></span>
+          <span style="color:#a3a894">CLAUDE.local.md</span><span style="color:#a3a894">214 / 2,000</span>
+          <span><span style="display:inline-block;width:26px;height:14px;border:1px solid #3c4034;background:#2ee85c;position:relative;vertical-align:-2px"><span style="position:absolute;right:1px;top:1px;width:10px;height:10px;background:#1e211a;border:1px solid #3c4034"></span></span> on</span>
+          <span style="border:1px solid #3c4034;background:#0b0d09;padding:1px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(0,0,0,.45);font-size:10px;text-align:center">Pause</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 190px 130px 110px 80px;gap:0 12px;padding:9px 16px;align-items:center;opacity:.6">
+          <span><b>web-dashboard</b><div style="color:#767b6c;font-size:11px">~/repositories/web-dashboard</div></span>
+          <span style="color:#a3a894">—</span><span style="color:#a3a894">0 / 2,000</span>
+          <span><span style="display:inline-block;width:26px;height:14px;border:1px solid #3c4034;background:#0b0d09;position:relative;vertical-align:-2px"><span style="position:absolute;left:1px;top:1px;width:10px;height:10px;background:#1e211a;border:1px solid #3c4034"></span></span> paused</span>
+          <span style="border:1px solid #3c4034;background:#0b0d09;padding:1px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(0,0,0,.45);font-size:10px;text-align:center">Resume</span>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#1e211a;border-top:1px solid #3c4034;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;font-weight:700;color:#2ee85c">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">store 214</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">queue 0</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">budget 6/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #3c4034;color:#2ee85c">✓ healthy</span>
+  </footer>
+</div>
+</section>
+
+
+<section id="4b" style="position:absolute;left:1560px;top:70px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#2ee85c;color:#0d0f0c;padding:4px 10px;border-radius:4px;letter-spacing:1px">4b · ACTIVITY — dark</div>
+<div data-screen-label="Activity dark" style="background:repeating-conic-gradient(#15170f 0 25%,#181a12 0 50%) 0 0/8px 8px;color:#d6d8cc;font:13px/1.5 'Space Mono',monospace;border:1px solid #3c4034">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#1e211a;border-bottom:1px solid #3c4034;font-size:12px">
+    <span style="font-weight:700;color:#2ee85c">▞ retro</span>
+    <span style="color:#767b6c">Overview</span><span style="color:#767b6c">Knowledge</span><span style="border-bottom:2px solid #2ee85c;padding-bottom:1px">Activity</span><span style="color:#767b6c">Config</span>
+    <span style="margin-left:auto;color:#767b6c">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#2ee85c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1.6fr 1fr;gap:12px;padding:12px">
+    <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #3c4034;background:#1e211a"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Pipeline log</span>
+        <span style="margin-left:auto;background:#1e211a;padding:0 6px;font-size:10px;color:#767b6c">this week · 23 runs</span>
+      </div>
+      <div style="padding:6px 0;font-size:12px;flex:1">
+        <div style="padding:4px 16px;font-size:10px;letter-spacing:2px;color:#767b6c;background:#22261d;border-bottom:1px solid #4a4f41">TODAY — WED JUL 17</div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #4a4f41;align-items:baseline">
+          <span style="color:#767b6c;width:44px">07:42</span>
+          <span style="flex:1"><b>run ok</b> · payments-api session <span style="color:#a3a894">observe → analyze → project</span><div style="color:#a3a894;font-size:11px">2 candidates · 1 promoted (<b>no-force-push-main</b> reinforced) · 1 duplicate dropped</div></span>
+          <span style="color:#2ee85c">✓</span>
+        </div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #4a4f41;align-items:baseline">
+          <span style="color:#767b6c;width:44px">07:41</span>
+          <span style="flex:1"><b>push</b> · wrote 3 files <span style="color:#a3a894">+214 tok, −126 tok (2 decayed out)</span><div style="color:#a3a894;font-size:11px">payments-api/CLAUDE.local.md · infra/CLAUDE.local.md · ~/.claude/CLAUDE.md</div></span>
+          <span style="color:#2ee85c">✓</span>
+        </div>
+        <div style="padding:4px 16px;font-size:10px;letter-spacing:2px;color:#767b6c;background:#22261d;border-bottom:1px solid #4a4f41">TUE JUL 16</div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #4a4f41;align-items:baseline">
+          <span style="color:#767b6c;width:44px">18:03</span>
+          <span style="flex:1"><b>run ok</b> · web-dashboard session<div style="color:#a3a894;font-size:11px">1 candidate · held below threshold (<b>tailwind-no-arbitrary</b> .68)</div></span>
+          <span style="color:#2ee85c">✓</span>
+        </div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #4a4f41;align-items:baseline">
+          <span style="color:#767b6c;width:44px">11:16</span>
+          <span style="flex:1"><b>run failed</b> · analyze stage <span style="color:#e85c48">API rate limit</span><div style="color:#a3a894;font-size:11px">session re-queued · retried 14:00 ✓</div></span>
+          <span style="color:#e85c48">✗</span>
+        </div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #4a4f41;align-items:baseline">
+          <span style="color:#767b6c;width:44px">09:22</span>
+          <span style="flex:1"><b>veto</b> · you removed <b style="text-decoration:line-through">always-rebase-feature</b><div style="color:#a3a894;font-size:11px">removed from ~/.claude/CLAUDE.md · blacklisted permanently</div></span>
+          <span style="color:#d6d8cc">✋</span>
+        </div>
+        <div style="padding:4px 16px;font-size:10px;letter-spacing:2px;color:#767b6c;background:#22261d;border-bottom:1px solid #4a4f41">MON JUL 15</div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #4a4f41;align-items:baseline">
+          <span style="color:#767b6c;width:44px">16:40</span>
+          <span style="flex:1"><b>run ok</b> · infra session<div style="color:#a3a894;font-size:11px">3 candidates · 2 promoted (<b>no-force-push-main</b> ↑.92, <b>k8s-context-check</b> new)</div></span>
+          <span style="color:#2ee85c">✓</span>
+        </div>
+        <div style="display:flex;gap:12px;padding:9px 16px;align-items:baseline">
+          <span style="color:#767b6c;width:44px">08:15</span>
+          <span style="flex:1"><b>maintenance</b> · decay sweep<div style="color:#a3a894;font-size:11px">2 rules aged out (unseen 30d) · store compacted 214 → 212 nodes</div></span>
+          <span style="color:#767b6c">♻</span>
+        </div>
+      </div>
+      <div style="border-top:1px solid #3c4034;padding:8px 14px;font-size:11px;display:flex;justify-content:space-between;color:#767b6c"><span>23 runs · 21 ok · 1 failed · 1 veto</span><span style="text-decoration:underline;cursor:pointer">older →</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #3c4034;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">This week</span>
+        </div>
+        <div style="padding:12px 16px">
+          <div style="display:flex;gap:20px;align-items:baseline">
+            <span><span style="font-size:26px;font-weight:700;color:#2ee85c">23</span> <span style="font-size:10px;color:#767b6c">runs</span></span>
+            <span><span style="font-size:26px;font-weight:700">17</span> <span style="font-size:10px;color:#767b6c">learned</span></span>
+            <span><span style="font-size:26px;font-weight:700">2</span> <span style="font-size:10px;color:#767b6c">decayed</span></span>
+            <span><span style="font-size:26px;font-weight:700">1</span> <span style="font-size:10px;color:#767b6c">vetoed</span></span>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px dotted #4a4f41;font-size:11px;color:#a3a894;line-height:1.9">
+            <div style="display:flex;justify-content:space-between"><span>net context growth</span><b>+341 tok</b></div>
+            <div style="display:flex;justify-content:space-between"><span>AI spend</span><b>$0.41 · 38 calls</b></div>
+          </div>
+        </div>
+      </div>
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #3c4034;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Health checks</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#a3a894;line-height:2.05">
+          <div style="display:flex;justify-content:space-between"><span>hooks installed</span><b style="color:#2ee85c">✓ SessionEnd · SessionStart</b></div>
+          <div style="display:flex;justify-content:space-between"><span>store integrity</span><b style="color:#2ee85c">✓ 212 nodes</b></div>
+          <div style="display:flex;justify-content:space-between"><span>owned files in sync</span><b style="color:#2ee85c">✓ 4/4</b></div>
+          <div style="display:flex;justify-content:space-between"><span>API key</span><b style="color:#2ee85c">✓ valid</b></div>
+          <div style="display:flex;justify-content:space-between"><span>version</span><b>0.4.2 · <span style="color:#767b6c">0.4.3 available</span></b></div>
+        </div>
+      </div>
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #3c4034;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Context growth — 4 wks</span>
+        </div>
+        <div style="padding:12px 16px">
+          <div style="display:flex;align-items:flex-end;gap:6px;height:64px">
+            <div style="flex:1;height:38%;background:repeating-linear-gradient(45deg,#4a4f41 0 3px,#1e211a 3px 6px);border:1px solid #3c4034"></div>
+            <div style="flex:1;height:52%;background:repeating-linear-gradient(45deg,#4a4f41 0 3px,#1e211a 3px 6px);border:1px solid #3c4034"></div>
+            <div style="flex:1;height:47%;background:repeating-linear-gradient(45deg,#4a4f41 0 3px,#1e211a 3px 6px);border:1px solid #3c4034"></div>
+            <div style="flex:1;height:64%;background:#2ee85c;border:1px solid #3c4034"></div>
+          </div>
+          <div style="display:flex;gap:6px;font-size:10px;color:#767b6c;margin-top:4px">
+            <span style="flex:1;text-align:center">w25</span><span style="flex:1;text-align:center">w26</span><span style="flex:1;text-align:center">w27</span><span style="flex:1;text-align:center;font-weight:700;color:#d6d8cc">w28</span>
+          </div>
+          <div style="font-size:11px;color:#a3a894;margin-top:6px">7,503 tok owned · +4.8% this week</div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#1e211a;border-top:1px solid #3c4034;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;font-weight:700;color:#2ee85c">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">store 212</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">queue 0</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">budget 6/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #3c4034;color:#2ee85c">✓ healthy</span>
+  </footer>
+</div>
+</section>
+
+
+<section id="4c" style="position:absolute;left:3080px;top:70px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#4a463c;color:#f4f2ea;padding:4px 10px;border-radius:4px;letter-spacing:1px">4c · INTERACTIONS — expanded list + veto confirm</div>
+<div data-screen-label="Interactions" style="position:relative;background:repeating-conic-gradient(#dcd9cf 0 25%,#d7d4c9 0 50%) 0 0/8px 8px;color:#26231c;font:13px/1.5 'Space Mono',monospace;border:1px solid #4a463c">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#f4f2ea;border-bottom:1px solid #4a463c;font-size:12px">
+    <span style="font-weight:700">▞ retro</span>
+    <span style="border-bottom:2px solid #0da53c;padding-bottom:1px">Overview</span><span style="color:#7d7668">Knowledge</span><span style="color:#7d7668">Activity</span><span style="color:#7d7668">Config</span>
+    <span style="margin-left:auto;color:#7d7668">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#0da53c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;gap:12px;padding:12px">
+    <div style="grid-column:2;background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Context — session load</span>
+        <span style="margin-left:auto;background:#f4f2ea;padding:0 6px;font-size:10px;color:#7d7668">all 8 · expanded</span>
+      </div>
+      <div style="padding:16px 18px;display:grid;grid-template-columns:150px 1fr 68px;gap:11px 14px;align-items:center;font-size:12px">
+        <span style="font-weight:700">payments-api</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:50%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:2.7%;background:#0da53c"></div><div style="width:2%;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">17,658</span>
+        <span style="font-weight:700">monorepo</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:38%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:4.1%;background:#0da53c"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">15,204</span>
+        <span style="font-weight:700">infra</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:8%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:1.2%;background:#0da53c"></div><div style="width:1.7%;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">8,888</span>
+        <span style="font-weight:700">web-dashboard</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:5.4%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">7,797</span>
+        <span style="font-weight:700">ml-pipeline</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:4.2%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:.8%;background:#0da53c"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">7,591</span>
+        <span style="font-weight:700">retro-cli</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff"><div style="width:34%;background:#57503f"></div><div style="width:3.2%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div></div>
+        <span style="text-align:right;font-weight:700;font-size:14px">7,442</span>
+        <span style="font-weight:700">dotfiles</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff"><div style="width:34%;background:#57503f"></div><div style="width:2.4%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:.6%;background:#0da53c"></div></div>
+        <span style="text-align:right;font-weight:700;font-size:14px">7,281</span>
+        <span style="font-weight:700">sandbox</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff"><div style="width:34%;background:#57503f"></div></div>
+        <span style="text-align:right;font-weight:700;font-size:14px">6,612</span>
+        <span style="color:#7d7668;cursor:pointer;text-decoration:underline">show less ▴</span><div></div><span></span>
+        <div style="grid-column:1/-1;display:flex;gap:18px;font-size:10px;color:#7d7668;margin-top:3px">
+          <span><span style="display:inline-block;width:9px;height:9px;background:#57503f;vertical-align:-1px"></span> global CLAUDE.md</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px);border:1px solid #a89f8d;vertical-align:-1px"></span> project CLAUDE.md</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:#0da53c;vertical-align:-1px"></span> retro-owned</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px);border:1px solid #0da53c;vertical-align:-1px"></span> MEMORY.md</span>
+          <span style="margin-left:auto">scale 0 – 20K</span>
+        </div>
+      </div>
+    </div>
+    <div style="grid-column:1;grid-row:1/3;background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Learned this week</span>
+        <span style="margin-left:auto;background:#f4f2ea;padding:0 6px;font-size:10px;color:#26231c;font-weight:700">17 new · 2 held</span>
+      </div>
+      <div style="padding:8px 16px 12px;font-size:12px;flex:1">
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>no-force-push-main</b> <span style="color:#7d7668;font-size:11px">global · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■■ .92</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Never force-push to main; use revert commits instead.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>use-uv-for-python-scripts</b> <span style="color:#7d7668;font-size:11px">global · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .80</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Always use uv instead of pip for Python package management.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>prefer-thiserror</b> <span style="color:#7d7668;font-size:11px">payments-api · pattern</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .74</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Use thiserror for error enums; anyhow only at binary boundaries.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>sqlx-offline-mode</b> <span style="color:#7d7668;font-size:11px">payments-api · preference</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .71</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Run cargo sqlx prepare before committing query changes.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>k8s-context-check</b> <span style="color:#7d7668;font-size:11px">infra · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .70</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Verify kubectl context before any apply against prod.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>vitest-not-jest</b> <span style="color:#7d7668;font-size:11px">web-dashboard · preference</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .70</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">New tests use vitest; jest is legacy only.</div>
+        </div>
+      </div>
+      <div style="border-top:1px solid #4a463c;padding:8px 16px;font-size:11px;display:flex;justify-content:space-between"><span style="font-weight:700">+ 11 more this week · 2 held</span><span style="text-decoration:underline;cursor:pointer;color:#7d7668">view all in Knowledge →</span></div>
+    </div>
+    <div style="grid-column:2;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Retro owns</span>
+        </div>
+        <div style="padding:12px 16px">
+          <div style="display:flex;gap:20px;align-items:baseline">
+            <span><span style="font-size:26px;font-weight:700;color:#0da53c">11,940</span> <span style="font-size:10px;color:#7d7668">tok</span></span>
+            <span><span style="font-size:26px;font-weight:700">132</span> <span style="font-size:10px;color:#7d7668">rules</span></span>
+            <span><span style="font-size:26px;font-weight:700">9</span> <span style="font-size:10px;color:#7d7668">files</span></span>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px dotted #a89f8d;font-size:11px;color:#5a5548;line-height:1.9">
+            <div style="display:flex;justify-content:space-between"><span>~/.claude/CLAUDE.md</span><span>84 · 8,102</span></div>
+            <div style="display:flex;justify-content:space-between"><span>monorepo/CLAUDE.local.md</span><span>18 · 1,644</span></div>
+            <div style="display:flex;justify-content:space-between"><span>payments-api/CLAUDE.local.md</span><span>11 · 512</span></div>
+            <div style="display:flex;justify-content:space-between;color:#7d7668"><span>+ 6 more files</span><span>19 · 1,682</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Pipeline</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#5a5548;line-height:2.05">
+          <div style="display:flex;justify-content:space-between"><span>store</span><b>587 nodes</b></div>
+          <div style="display:flex;justify-content:space-between"><span>session queue</span><b style="color:#a8402e">7 waiting</b></div>
+          <div style="display:flex;justify-content:space-between"><span>AI budget today</span><b style="color:#a8402e">0/10 left</b></div>
+          <div style="display:flex;justify-content:space-between"><span>observe → analyze → project</span><b><span style="color:#a8402e">✗ analyze</span> 11:16</b></div>
+          <div style="display:flex;justify-content:space-between"><span>push</span><b style="color:#0da53c">2h ago ✓</b></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#f4f2ea;border-top:1px solid #4a463c;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;font-weight:700">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">store 587</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#a8402e">queue 7</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#a8402e">budget 0/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #4a463c;color:#a8402e">⚠ budget exhausted · 7 queued</span>
+  </footer>
+  <div style="position:absolute;inset:0;background:rgba(38,35,28,.5);display:flex;align-items:center;justify-content:center">
+    <div style="width:460px;background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c;box-shadow:8px 8px 0 rgba(20,19,15,.4)">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Veto rule?</span>
+      </div>
+      <div style="padding:14px 18px;font-size:12px">
+        <div style="border:1px solid #a89f8d;background:#fff;padding:8px 12px"><b>use-uv-for-python-scripts</b> <span style="color:#7d7668;font-size:11px">global · rule</span><div style="color:#5a5548;font-size:11px">Always use uv instead of pip for Python package management.</div></div>
+        <div style="margin-top:10px;color:#5a5548;font-size:11.5px">Removed from <b>~/.claude/CLAUDE.md</b> immediately and blacklisted — retro will never learn this rule again.</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+          <span style="border:1px solid #4a463c;padding:3px 14px;font-size:11px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Cancel</span>
+          <span style="border:1px solid #4a463c;padding:3px 14px;font-size:11px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#a8402e;color:#f4f2ea;font-weight:700">Veto — never returns</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+<section id="3a" style="position:absolute;left:40px;top:1160px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#0da53c;color:#fff;padding:4px 10px;border-radius:4px;letter-spacing:1px">3a · CONFIG</div>
+<div data-screen-label="Config" style="background:repeating-conic-gradient(#dcd9cf 0 25%,#d7d4c9 0 50%) 0 0/8px 8px;color:#26231c;font:13px/1.5 'Space Mono',monospace;border:1px solid #4a463c">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#f4f2ea;border-bottom:1px solid #4a463c;font-size:12px">
+    <span style="font-weight:700">▞ retro</span>
+    <span style="color:#7d7668">Overview</span><span style="color:#7d7668">Knowledge</span><span style="color:#7d7668">Activity</span><span style="border-bottom:2px solid #0da53c;padding-bottom:1px">Config</span>
+    <span style="margin-left:auto;color:#7d7668">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#0da53c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px">
+    <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Learning</span>
+      </div>
+      <div style="padding:14px 18px;font-size:12px;display:grid;gap:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>confidence threshold<div style="color:#7d7668;font-size:11px">rules promote to files at or above this</div></span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:120px;height:10px;border:1px solid #4a463c;background:#fff;position:relative"><span style="position:absolute;left:0;top:0;bottom:0;width:70%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></span><span style="position:absolute;left:calc(70% - 5px);top:-4px;width:10px;height:16px;background:#f4f2ea;border:1px solid #4a463c;box-shadow:2px 2px 0 rgba(20,19,15,.2)"></span></span><b style="width:32px;text-align:right">.70</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>AI budget per day<div style="color:#7d7668;font-size:11px">analyze runs allowed daily</div></span>
+          <span style="display:flex;align-items:center;gap:6px"><span style="border:1px solid #4a463c;background:#fff;padding:2px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(20,19,15,.2)">−</span><b style="width:32px;text-align:center">10</b><span style="border:1px solid #4a463c;background:#fff;padding:2px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(20,19,15,.2)">+</span></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>decay window<div style="color:#7d7668;font-size:11px">unseen rules age out after</div></span>
+          <span style="border:1px solid #4a463c;background:#e6e3d8;padding:3px 10px;cursor:pointer;font-size:11px">30 days ▾</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>token cap per project<div style="color:#7d7668;font-size:11px">retro-owned files never exceed this</div></span>
+          <span style="border:1px solid #4a463c;background:#e6e3d8;padding:3px 10px;cursor:pointer;font-size:11px">2,000 tok ▾</span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Appearance</span>
+        </div>
+        <div style="padding:14px 18px;font-size:12px;display:grid;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span>theme</span>
+            <span style="display:flex;gap:0;font-size:11px">
+              <span style="border:1px solid #4a463c;background:#e6e3d8;padding:3px 12px;font-weight:700">light</span>
+              <span style="border:1px solid #4a463c;border-left:0;background:#fff;padding:3px 12px;color:#7d7668;cursor:pointer">dark</span>
+              <span style="border:1px solid #4a463c;border-left:0;background:#fff;padding:3px 12px;color:#7d7668;cursor:pointer">auto</span>
+            </span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span>skin<div style="color:#7d7668;font-size:11px">community skins drop into ~/.retro/skins</div></span>
+            <span style="border:1px solid #4a463c;background:#e6e3d8;padding:3px 10px;cursor:pointer;font-size:11px">desktop (default) ▾</span>
+          </div>
+          <div style="border:1px dashed #a89f8d;padding:8px 12px;font-size:11px;color:#7d7668">installed: desktop · vhs-84 <span style="color:#0da53c">·</span> get more ↗</div>
+        </div>
+      </div>
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Hooks & API</span>
+        </div>
+        <div style="padding:12px 18px;font-size:12px;display:grid;gap:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span>SessionEnd / SessionStart</span><b style="color:#0da53c">✓ installed</b></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span>API key</span><span style="display:flex;gap:8px;align-items:center"><span style="border:1px solid #a89f8d;background:#fff;padding:2px 10px;color:#7d7668">sk-ant-····9f2</span><span style="border:1px solid #4a463c;background:#fff;padding:2px 10px;cursor:pointer;box-shadow:2px 2px 0 rgba(20,19,15,.2);font-size:11px">Change</span></span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span>model for analyze</span><span style="border:1px solid #4a463c;background:#e6e3d8;padding:3px 10px;cursor:pointer;font-size:11px">claude-haiku ▾</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="grid-column:1/-1;background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Projects — 3 tracked</span>
+      </div>
+      <div style="font-size:12px">
+        <div style="display:grid;grid-template-columns:1fr 190px 130px 110px 80px;gap:0 12px;padding:6px 16px;border-bottom:1px solid #4a463c;font-size:10px;color:#7d7668;letter-spacing:1px">
+          <span>PROJECT</span><span>OWNED FILE</span><span>TOKEN CAP</span><span>LEARNING</span><span></span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 190px 130px 110px 80px;gap:0 12px;padding:9px 16px;border-bottom:1px dotted #a89f8d;align-items:center">
+          <span><b>payments-api</b><div style="color:#7d7668;font-size:11px">~/repositories/payments-api</div></span>
+          <span style="color:#5a5548">CLAUDE.local.md · MEMORY.md</span><span style="color:#5a5548">478 / 2,000</span>
+          <span><span style="display:inline-block;width:26px;height:14px;border:1px solid #4a463c;background:#0da53c;position:relative;vertical-align:-2px"><span style="position:absolute;right:1px;top:1px;width:10px;height:10px;background:#f4f2ea;border:1px solid #4a463c"></span></span> on</span>
+          <span style="border:1px solid #4a463c;background:#fff;padding:1px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(20,19,15,.2);font-size:10px;text-align:center">Pause</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 190px 130px 110px 80px;gap:0 12px;padding:9px 16px;border-bottom:1px dotted #a89f8d;align-items:center">
+          <span><b>infra</b><div style="color:#7d7668;font-size:11px">~/repositories/infra</div></span>
+          <span style="color:#5a5548">CLAUDE.local.md</span><span style="color:#5a5548">214 / 2,000</span>
+          <span><span style="display:inline-block;width:26px;height:14px;border:1px solid #4a463c;background:#0da53c;position:relative;vertical-align:-2px"><span style="position:absolute;right:1px;top:1px;width:10px;height:10px;background:#f4f2ea;border:1px solid #4a463c"></span></span> on</span>
+          <span style="border:1px solid #4a463c;background:#fff;padding:1px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(20,19,15,.2);font-size:10px;text-align:center">Pause</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 190px 130px 110px 80px;gap:0 12px;padding:9px 16px;align-items:center;opacity:.6">
+          <span><b>web-dashboard</b><div style="color:#7d7668;font-size:11px">~/repositories/web-dashboard</div></span>
+          <span style="color:#5a5548">—</span><span style="color:#5a5548">0 / 2,000</span>
+          <span><span style="display:inline-block;width:26px;height:14px;border:1px solid #4a463c;background:#fff;position:relative;vertical-align:-2px"><span style="position:absolute;left:1px;top:1px;width:10px;height:10px;background:#f4f2ea;border:1px solid #4a463c"></span></span> paused</span>
+          <span style="border:1px solid #4a463c;background:#fff;padding:1px 8px;cursor:pointer;box-shadow:2px 2px 0 rgba(20,19,15,.2);font-size:10px;text-align:center">Resume</span>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#f4f2ea;border-top:1px solid #4a463c;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;font-weight:700">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">store 214</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">queue 0</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">budget 6/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #4a463c;color:#0da53c">✓ healthy</span>
+  </footer>
+</div>
+</section>
+
+<section id="3b" style="position:absolute;left:1560px;top:1160px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#2ee85c;color:#0d0f0c;padding:4px 10px;border-radius:4px;letter-spacing:1px">3b · KNOWLEDGE — dark</div>
+<div data-screen-label="Knowledge dark" style="background:repeating-conic-gradient(#15170f 0 25%,#181a12 0 50%) 0 0/8px 8px;color:#d6d8cc;font:13px/1.5 'Space Mono',monospace;border:1px solid #3c4034">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#1e211a;border-bottom:1px solid #3c4034;font-size:12px">
+    <span style="font-weight:700;color:#2ee85c">▞ retro</span>
+    <span style="color:#767b6c">Overview</span><span style="border-bottom:2px solid #2ee85c;padding-bottom:1px">Knowledge</span><span style="color:#767b6c">Activity</span><span style="color:#767b6c">Config</span>
+    <span style="margin-left:auto;color:#767b6c">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#2ee85c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1.6fr 1fr;gap:12px;padding:12px">
+    <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #767b6c;background:#1e211a"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Rule store — 214 nodes</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #3c4034;font-size:11px">
+        <span style="border:1px solid #3c4034;background:#0b0d09;padding:3px 10px;display:flex;gap:8px;align-items:center;flex:1;color:#767b6c">⌕ search rules…</span>
+        <span style="border:1px solid #3c4034;background:#262a20;padding:3px 10px;cursor:pointer">scope: all ▾</span>
+        <span style="border:1px solid #3c4034;background:#262a20;padding:3px 10px;cursor:pointer">type: all ▾</span>
+        <span style="border:1px solid #3c4034;background:#262a20;padding:3px 10px;cursor:pointer">status: live ▾</span>
+        <span style="border:1px solid #3c4034;background:#0b0d09;padding:3px 10px;cursor:pointer">sort: weight ▾</span>
+      </div>
+      <div style="font-size:12px;flex:1">
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:6px 14px;border-bottom:1px solid #3c4034;font-size:10px;color:#767b6c;letter-spacing:1px">
+          <span>RULE</span><span>SCOPE</span><span>CONFIDENCE</span><span style="text-align:right">TOKENS</span><span></span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #3c4034;align-items:center;background:#232c1d;outline:1px solid #2ee85c;outline-offset:-3px">
+          <span><b style="color:#e8ebdd">no-force-push-main</b><div style="color:#a3a894;font-size:11px">Never force-push to main; use revert commits instead.</div></span>
+          <span style="color:#a3a894">global</span><span style="color:#767b6c;font-size:11px">■■■■■ .92</span><span style="text-align:right;color:#e8ebdd">31</span>
+          <span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #3c4034;align-items:center">
+          <span><b style="color:#e8ebdd">conventional-commits</b><div style="color:#a3a894;font-size:11px">Commit messages follow conventional commits (feat:, fix:, chore:).</div></span>
+          <span style="color:#a3a894">global</span><span style="color:#767b6c;font-size:11px">■■■■■ .95</span><span style="text-align:right;color:#e8ebdd">28</span>
+          <span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #3c4034;align-items:center">
+          <span><b style="color:#e8ebdd">use-uv-for-python-scripts</b><div style="color:#a3a894;font-size:11px">Always use uv instead of pip for Python package management.</div></span>
+          <span style="color:#a3a894">global</span><span style="color:#767b6c;font-size:11px">■■■■□ .80</span><span style="text-align:right;color:#e8ebdd">24</span>
+          <span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #3c4034;align-items:center">
+          <span><b style="color:#e8ebdd">prefer-thiserror</b><div style="color:#a3a894;font-size:11px">Use thiserror for error enums; anyhow only at binary boundaries.</div></span>
+          <span style="color:#a3a894">payments-api</span><span style="color:#767b6c;font-size:11px">■■■■□ .74</span><span style="text-align:right;color:#e8ebdd">36</span>
+          <span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #3c4034;align-items:center;opacity:.55">
+          <span><b style="color:#e8ebdd">tailwind-no-arbitrary</b><div style="color:#a3a894;font-size:11px">Avoid arbitrary values in Tailwind classes; extend the theme.</div></span>
+          <span style="color:#a3a894">web-dashboard</span><span style="color:#767b6c;font-size:11px">■■■□□ .68 held</span><span style="text-align:right">—</span>
+          <span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;align-items:center;opacity:.4">
+          <span><b style="text-decoration:line-through;color:#e8ebdd">always-rebase-feature</b><div style="color:#a3a894;font-size:11px">Vetoed Jul 8 — never returns.</div></span>
+          <span style="color:#a3a894">global</span><span style="color:#767b6c;font-size:11px">vetoed</span><span style="text-align:right">—</span>
+          <span style="font-size:10px;color:#767b6c;text-align:center">✗</span>
+        </div>
+      </div>
+      <div style="border-top:1px solid #3c4034;padding:8px 14px;font-size:11px;display:flex;justify-content:space-between;color:#767b6c"><span>showing 6 of 214 · 197 live · 12 held · 5 vetoed</span><span style="text-decoration:underline;cursor:pointer">next page →</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #767b6c;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">no-force-push-main</span>
+        </div>
+        <div style="padding:12px 16px;font-size:12px">
+          <div style="border:1px solid #3c4034;background:#0b0d09;padding:8px 12px;font-size:12px;color:#e8ebdd">Never force-push to main; use revert commits instead.</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 16px;margin-top:10px;font-size:11.5px;color:#a3a894;line-height:1.9">
+            <span style="color:#767b6c">status</span><b style="color:#2ee85c">live · in ~/.claude/CLAUDE.md</b>
+            <span style="color:#767b6c">type</span><span>rule · git</span>
+            <span style="color:#767b6c">confidence</span><span>■■■■■ .92</span>
+            <span style="color:#767b6c">evidence</span><span>seen 7× across 3 projects</span>
+            <span style="color:#767b6c">first seen</span><span>Jun 12 · payments-api</span>
+            <span style="color:#767b6c">last reinforced</span><span>Jul 15 · infra</span>
+            <span style="color:#767b6c">cost</span><span>31 tokens</span>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <span style="border:1px solid #3c4034;padding:3px 12px;font-size:11px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#d6d8cc">Veto</span>
+            <span style="border:1px solid #3c4034;padding:3px 12px;font-size:11px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#d6d8cc">Edit text</span>
+            <span style="border:1px solid #3c4034;padding:3px 12px;font-size:11px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#d6d8cc">Pin ↑</span>
+          </div>
+        </div>
+      </div>
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #767b6c;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">History</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#a3a894;line-height:2">
+          <div><span style="color:#767b6c">Jul 15</span> reinforced in <b style="color:#e8ebdd">infra</b> · .89 → .92</div>
+          <div><span style="color:#767b6c">Jul 09</span> reinforced in <b style="color:#e8ebdd">web-dashboard</b> · .84 → .89</div>
+          <div><span style="color:#767b6c">Jun 28</span> promoted to <b style="color:#e8ebdd">global</b> · seen in 3 projects</div>
+          <div><span style="color:#767b6c">Jun 12</span> learned in <b style="color:#e8ebdd">payments-api</b> · .61</div>
+        </div>
+      </div>
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #767b6c;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Store</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#a3a894;line-height:2.05">
+          <div style="display:flex;justify-content:space-between"><span>live rules</span><b style="color:#e8ebdd">197</b></div>
+          <div style="display:flex;justify-content:space-between"><span>held (below .70)</span><b style="color:#e8ebdd">12</b></div>
+          <div style="display:flex;justify-content:space-between"><span>vetoed</span><b style="color:#e8ebdd">5</b></div>
+          <div style="display:flex;justify-content:space-between"><span>decayed out (30d)</span><b style="color:#e8ebdd">9</b></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#1e211a;border-top:1px solid #3c4034;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;font-weight:700;color:#2ee85c">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">store 214</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">queue 0</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">budget 6/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #3c4034;color:#2ee85c">✓ healthy</span>
+  </footer>
+</div>
+</section>
+
+<section id="2a" style="position:absolute;left:40px;top:2250px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#0da53c;color:#fff;padding:4px 10px;border-radius:4px;letter-spacing:1px">2a · KNOWLEDGE — rule store</div>
+<div data-screen-label="Knowledge" style="background:repeating-conic-gradient(#dcd9cf 0 25%,#d7d4c9 0 50%) 0 0/8px 8px;color:#26231c;font:13px/1.5 'Space Mono',monospace;border:1px solid #4a463c">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#f4f2ea;border-bottom:1px solid #4a463c;font-size:12px">
+    <span style="font-weight:700">▞ retro</span>
+    <span style="color:#7d7668">Overview</span><span style="border-bottom:2px solid #0da53c;padding-bottom:1px">Knowledge</span><span style="color:#7d7668">Activity</span><span style="color:#7d7668">Config</span>
+    <span style="margin-left:auto;color:#7d7668">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#0da53c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1.6fr 1fr;gap:12px;padding:12px">
+    <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Rule store — 214 nodes</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #a89f8d;font-size:11px">
+        <span style="border:1px solid #4a463c;background:#fff;padding:3px 10px;display:flex;gap:8px;align-items:center;flex:1;color:#7d7668">⌕ search rules…</span>
+        <span style="border:1px solid #4a463c;background:#e6e3d8;padding:3px 10px;cursor:pointer">scope: all ▾</span>
+        <span style="border:1px solid #4a463c;background:#e6e3d8;padding:3px 10px;cursor:pointer">type: all ▾</span>
+        <span style="border:1px solid #4a463c;background:#e6e3d8;padding:3px 10px;cursor:pointer">status: live ▾</span>
+        <span style="border:1px solid #4a463c;background:#fff;padding:3px 10px;cursor:pointer">sort: weight ▾</span>
+      </div>
+      <div style="font-size:12px;flex:1">
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:6px 14px;border-bottom:1px solid #4a463c;font-size:10px;color:#7d7668;letter-spacing:1px">
+          <span>RULE</span><span>SCOPE</span><span>CONFIDENCE</span><span style="text-align:right">TOKENS</span><span></span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #a89f8d;align-items:center;background:#e9f3e4;outline:1px solid #0da53c;outline-offset:-3px">
+          <span><b>no-force-push-main</b><div style="color:#5a5548;font-size:11px">Never force-push to main; use revert commits instead.</div></span>
+          <span style="color:#5a5548">global</span><span style="color:#7d7668;font-size:11px">■■■■■ .92</span><span style="text-align:right">31</span>
+          <span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #a89f8d;align-items:center">
+          <span><b>conventional-commits</b><div style="color:#5a5548;font-size:11px">Commit messages follow conventional commits (feat:, fix:, chore:).</div></span>
+          <span style="color:#5a5548">global</span><span style="color:#7d7668;font-size:11px">■■■■■ .95</span><span style="text-align:right">28</span>
+          <span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #a89f8d;align-items:center">
+          <span><b>use-uv-for-python-scripts</b><div style="color:#5a5548;font-size:11px">Always use uv instead of pip for Python package management.</div></span>
+          <span style="color:#5a5548">global</span><span style="color:#7d7668;font-size:11px">■■■■□ .80</span><span style="text-align:right">24</span>
+          <span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #a89f8d;align-items:center">
+          <span><b>prefer-thiserror</b><div style="color:#5a5548;font-size:11px">Use thiserror for error enums; anyhow only at binary boundaries.</div></span>
+          <span style="color:#5a5548">payments-api</span><span style="color:#7d7668;font-size:11px">■■■■□ .74</span><span style="text-align:right">36</span>
+          <span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #a89f8d;align-items:center">
+          <span><b>sqlx-offline-mode</b><div style="color:#5a5548;font-size:11px">Run cargo sqlx prepare before committing query changes.</div></span>
+          <span style="color:#5a5548">payments-api</span><span style="color:#7d7668;font-size:11px">■■■■□ .71</span><span style="text-align:right">29</span>
+          <span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #a89f8d;align-items:center">
+          <span><b>k8s-context-check</b><div style="color:#5a5548;font-size:11px">Verify kubectl context before any apply against prod.</div></span>
+          <span style="color:#5a5548">infra</span><span style="color:#7d7668;font-size:11px">■■■■□ .70</span><span style="text-align:right">22</span>
+          <span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;border-bottom:1px dotted #a89f8d;align-items:center;opacity:.55">
+          <span><b>tailwind-no-arbitrary</b><div style="color:#5a5548;font-size:11px">Avoid arbitrary values in Tailwind classes; extend the theme.</div></span>
+          <span style="color:#5a5548">web-dashboard</span><span style="color:#7d7668;font-size:11px">■■■□□ .68 held</span><span style="text-align:right">—</span>
+          <span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff;text-align:center">Veto</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 70px 60px;gap:0 12px;padding:9px 14px;align-items:center;opacity:.4">
+          <span><b style="text-decoration:line-through">always-rebase-feature</b><div style="color:#5a5548;font-size:11px">Vetoed Jul 8 — never returns.</div></span>
+          <span style="color:#5a5548">global</span><span style="color:#7d7668;font-size:11px">vetoed</span><span style="text-align:right">—</span>
+          <span style="font-size:10px;color:#7d7668;text-align:center">✗</span>
+        </div>
+      </div>
+      <div style="border-top:1px solid #4a463c;padding:8px 14px;font-size:11px;display:flex;justify-content:space-between;color:#7d7668"><span>showing 8 of 214 · 197 live · 12 held · 5 vetoed</span><span style="text-decoration:underline;cursor:pointer">next page →</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">no-force-push-main</span>
+        </div>
+        <div style="padding:12px 16px;font-size:12px">
+          <div style="border:1px solid #a89f8d;background:#fff;padding:8px 12px;font-size:12px;color:#26231c">Never force-push to main; use revert commits instead.</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 16px;margin-top:10px;font-size:11.5px;color:#5a5548;line-height:1.9">
+            <span style="color:#7d7668">status</span><b style="color:#0da53c">live · in ~/.claude/CLAUDE.md</b>
+            <span style="color:#7d7668">type</span><span>rule · git</span>
+            <span style="color:#7d7668">confidence</span><span>■■■■■ .92</span>
+            <span style="color:#7d7668">evidence</span><span>seen 7× across 3 projects</span>
+            <span style="color:#7d7668">first seen</span><span>Jun 12 · payments-api</span>
+            <span style="color:#7d7668">last reinforced</span><span>Jul 15 · infra</span>
+            <span style="color:#7d7668">cost</span><span>31 tokens</span>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <span style="border:1px solid #4a463c;padding:3px 12px;font-size:11px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span>
+            <span style="border:1px solid #4a463c;padding:3px 12px;font-size:11px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Edit text</span>
+            <span style="border:1px solid #4a463c;padding:3px 12px;font-size:11px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Pin ↑</span>
+          </div>
+        </div>
+      </div>
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">History</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#5a5548;line-height:2">
+          <div><span style="color:#7d7668">Jul 15</span> reinforced in <b>infra</b> · .89 → .92</div>
+          <div><span style="color:#7d7668">Jul 09</span> reinforced in <b>web-dashboard</b> · .84 → .89</div>
+          <div><span style="color:#7d7668">Jun 28</span> promoted to <b>global</b> · seen in 3 projects</div>
+          <div><span style="color:#7d7668">Jun 12</span> learned in <b>payments-api</b> · .61</div>
+        </div>
+      </div>
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Store</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#5a5548;line-height:2.05">
+          <div style="display:flex;justify-content:space-between"><span>live rules</span><b>197</b></div>
+          <div style="display:flex;justify-content:space-between"><span>held (below .70)</span><b>12</b></div>
+          <div style="display:flex;justify-content:space-between"><span>vetoed</span><b>5</b></div>
+          <div style="display:flex;justify-content:space-between"><span>decayed out (30d)</span><b>9</b></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#f4f2ea;border-top:1px solid #4a463c;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;font-weight:700">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">store 214</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">queue 0</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">budget 6/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #4a463c;color:#0da53c">✓ healthy</span>
+  </footer>
+</div>
+</section>
+
+<section id="2b" style="position:absolute;left:1560px;top:2250px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#0da53c;color:#fff;padding:4px 10px;border-radius:4px;letter-spacing:1px">2b · ACTIVITY — pipeline log</div>
+<div data-screen-label="Activity" style="background:repeating-conic-gradient(#dcd9cf 0 25%,#d7d4c9 0 50%) 0 0/8px 8px;color:#26231c;font:13px/1.5 'Space Mono',monospace;border:1px solid #4a463c">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#f4f2ea;border-bottom:1px solid #4a463c;font-size:12px">
+    <span style="font-weight:700">▞ retro</span>
+    <span style="color:#7d7668">Overview</span><span style="color:#7d7668">Knowledge</span><span style="border-bottom:2px solid #0da53c;padding-bottom:1px">Activity</span><span style="color:#7d7668">Config</span>
+    <span style="margin-left:auto;color:#7d7668">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#0da53c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1.6fr 1fr;gap:12px;padding:12px">
+    <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Pipeline log</span>
+        <span style="margin-left:auto;background:#f4f2ea;padding:0 6px;font-size:10px;color:#7d7668">this week · 23 runs</span>
+      </div>
+      <div style="padding:6px 0;font-size:12px;flex:1">
+        <div style="padding:4px 16px;font-size:10px;letter-spacing:2px;color:#7d7668;background:#eceadf;border-bottom:1px solid #a89f8d">TODAY — WED JUL 17</div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #a89f8d;align-items:baseline">
+          <span style="color:#7d7668;width:44px">07:42</span>
+          <span style="flex:1"><b>run ok</b> · payments-api session <span style="color:#5a5548">observe → analyze → project</span><div style="color:#5a5548;font-size:11px">2 candidates · 1 promoted (<b>no-force-push-main</b> reinforced) · 1 duplicate dropped</div></span>
+          <span style="color:#0da53c">✓</span>
+        </div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #a89f8d;align-items:baseline">
+          <span style="color:#7d7668;width:44px">07:41</span>
+          <span style="flex:1"><b>push</b> · wrote 3 files <span style="color:#5a5548">+214 tok, −126 tok (2 decayed out)</span><div style="color:#5a5548;font-size:11px">payments-api/CLAUDE.local.md · infra/CLAUDE.local.md · ~/.claude/CLAUDE.md</div></span>
+          <span style="color:#0da53c">✓</span>
+        </div>
+        <div style="padding:4px 16px;font-size:10px;letter-spacing:2px;color:#7d7668;background:#eceadf;border-bottom:1px solid #a89f8d">TUE JUL 16</div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #a89f8d;align-items:baseline">
+          <span style="color:#7d7668;width:44px">18:03</span>
+          <span style="flex:1"><b>run ok</b> · web-dashboard session<div style="color:#5a5548;font-size:11px">1 candidate · held below threshold (<b>tailwind-no-arbitrary</b> .68)</div></span>
+          <span style="color:#0da53c">✓</span>
+        </div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #a89f8d;align-items:baseline">
+          <span style="color:#7d7668;width:44px">11:16</span>
+          <span style="flex:1"><b>run failed</b> · analyze stage <span style="color:#a8402e">API rate limit</span><div style="color:#5a5548;font-size:11px">session re-queued · retried 14:00 ✓</div></span>
+          <span style="color:#a8402e">✗</span>
+        </div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #a89f8d;align-items:baseline">
+          <span style="color:#7d7668;width:44px">09:22</span>
+          <span style="flex:1"><b>veto</b> · you removed <b style="text-decoration:line-through">always-rebase-feature</b><div style="color:#5a5548;font-size:11px">removed from ~/.claude/CLAUDE.md · blacklisted permanently</div></span>
+          <span style="color:#26231c">✋</span>
+        </div>
+        <div style="padding:4px 16px;font-size:10px;letter-spacing:2px;color:#7d7668;background:#eceadf;border-bottom:1px solid #a89f8d">MON JUL 15</div>
+        <div style="display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted #a89f8d;align-items:baseline">
+          <span style="color:#7d7668;width:44px">16:40</span>
+          <span style="flex:1"><b>run ok</b> · infra session<div style="color:#5a5548;font-size:11px">3 candidates · 2 promoted (<b>no-force-push-main</b> ↑.92, <b>k8s-context-check</b> new)</div></span>
+          <span style="color:#0da53c">✓</span>
+        </div>
+        <div style="display:flex;gap:12px;padding:9px 16px;align-items:baseline">
+          <span style="color:#7d7668;width:44px">08:15</span>
+          <span style="flex:1"><b>maintenance</b> · decay sweep<div style="color:#5a5548;font-size:11px">2 rules aged out (unseen 30d) · store compacted 214 → 212 nodes</div></span>
+          <span style="color:#7d7668">♻</span>
+        </div>
+      </div>
+      <div style="border-top:1px solid #4a463c;padding:8px 14px;font-size:11px;display:flex;justify-content:space-between;color:#7d7668"><span>23 runs · 21 ok · 1 failed · 1 veto</span><span style="text-decoration:underline;cursor:pointer">older →</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">This week</span>
+        </div>
+        <div style="padding:12px 16px">
+          <div style="display:flex;gap:20px;align-items:baseline">
+            <span><span style="font-size:26px;font-weight:700;color:#0da53c">23</span> <span style="font-size:10px;color:#7d7668">runs</span></span>
+            <span><span style="font-size:26px;font-weight:700">17</span> <span style="font-size:10px;color:#7d7668">learned</span></span>
+            <span><span style="font-size:26px;font-weight:700">2</span> <span style="font-size:10px;color:#7d7668">decayed</span></span>
+            <span><span style="font-size:26px;font-weight:700">1</span> <span style="font-size:10px;color:#7d7668">vetoed</span></span>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px dotted #a89f8d;font-size:11px;color:#5a5548;line-height:1.9">
+            <div style="display:flex;justify-content:space-between"><span>net context growth</span><b>+341 tok</b></div>
+            <div style="display:flex;justify-content:space-between"><span>AI spend</span><b>$0.41 · 38 calls</b></div>
+          </div>
+        </div>
+      </div>
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Health checks</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#5a5548;line-height:2.05">
+          <div style="display:flex;justify-content:space-between"><span>hooks installed</span><b style="color:#0da53c">✓ SessionEnd · SessionStart</b></div>
+          <div style="display:flex;justify-content:space-between"><span>store integrity</span><b style="color:#0da53c">✓ 212 nodes</b></div>
+          <div style="display:flex;justify-content:space-between"><span>owned files in sync</span><b style="color:#0da53c">✓ 4/4</b></div>
+          <div style="display:flex;justify-content:space-between"><span>API key</span><b style="color:#0da53c">✓ valid</b></div>
+          <div style="display:flex;justify-content:space-between"><span>version</span><b>0.4.2 · <span style="color:#7d7668">0.4.3 available</span></b></div>
+        </div>
+      </div>
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Context growth — 4 wks</span>
+        </div>
+        <div style="padding:12px 16px">
+          <div style="display:flex;align-items:flex-end;gap:6px;height:64px">
+            <div style="flex:1;height:38%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#f4f2ea 3px 6px);border:1px solid #4a463c"></div>
+            <div style="flex:1;height:52%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#f4f2ea 3px 6px);border:1px solid #4a463c"></div>
+            <div style="flex:1;height:47%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#f4f2ea 3px 6px);border:1px solid #4a463c"></div>
+            <div style="flex:1;height:64%;background:#0da53c;border:1px solid #4a463c"></div>
+          </div>
+          <div style="display:flex;gap:6px;font-size:10px;color:#7d7668;margin-top:4px">
+            <span style="flex:1;text-align:center">w25</span><span style="flex:1;text-align:center">w26</span><span style="flex:1;text-align:center">w27</span><span style="flex:1;text-align:center;font-weight:700;color:#26231c">w28</span>
+          </div>
+          <div style="font-size:11px;color:#5a5548;margin-top:6px">7,503 tok owned · +4.8% this week</div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#f4f2ea;border-top:1px solid #4a463c;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;font-weight:700">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">store 212</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">queue 0</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">budget 6/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #4a463c;color:#0da53c">✓ healthy</span>
+  </footer>
+</div>
+</section>
+
+<section id="1a" style="position:absolute;left:40px;top:3340px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#0da53c;color:#fff;padding:4px 10px;border-radius:4px;letter-spacing:1px">1a · HOME — light</div>
+<div data-screen-label="Home light" style="background:repeating-conic-gradient(#dcd9cf 0 25%,#d7d4c9 0 50%) 0 0/8px 8px;color:#26231c;font:13px/1.5 'Space Mono',monospace;border:1px solid #4a463c">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#f4f2ea;border-bottom:1px solid #4a463c;font-size:12px">
+    <span style="font-weight:700">▞ retro</span>
+    <span style="border-bottom:2px solid #0da53c;padding-bottom:1px">Overview</span><span style="color:#7d7668">Knowledge</span><span style="color:#7d7668">Activity</span><span style="color:#7d7668">Config</span>
+    <span style="margin-left:auto;color:#7d7668">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#0da53c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;gap:12px;padding:12px">
+    <div style="grid-column:2;background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Context — session load</span>
+        <span style="margin-left:auto;background:#f4f2ea;padding:0 6px;font-size:10px;color:#7d7668">tokens at session start</span>
+      </div>
+      <div style="padding:16px 18px;display:grid;grid-template-columns:150px 1fr 68px;gap:11px 14px;align-items:center;font-size:12px">
+        <span style="font-weight:700">payments-api</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff;position:relative">
+          <div style="width:34%;background:#57503f"></div><div style="width:50%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:2.7%;background:#0da53c"></div><div style="width:2%;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">17,658</span>
+        <span style="font-weight:700">infra</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:8%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:1.2%;background:#0da53c"></div><div style="width:1.7%;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">8,888</span>
+        <span style="font-weight:700">web-dashboard</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:5.4%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">7,797</span>
+        <div style="grid-column:1/-1;display:flex;gap:18px;font-size:10px;color:#7d7668;margin-top:3px">
+          <span><span style="display:inline-block;width:9px;height:9px;background:#57503f;vertical-align:-1px"></span> global CLAUDE.md</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px);border:1px solid #a89f8d;vertical-align:-1px"></span> project CLAUDE.md</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:#0da53c;vertical-align:-1px"></span> retro-owned</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px);border:1px solid #0da53c;vertical-align:-1px"></span> MEMORY.md</span>
+          <span style="margin-left:auto">scale 0 – 20K</span>
+        </div>
+      </div>
+    </div>
+    <div style="grid-column:1;grid-row:1/3;background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Learned this week</span>
+        <span style="margin-left:auto;background:#f4f2ea;padding:0 6px;font-size:10px;color:#7d7668">5 new · 1 held</span>
+      </div>
+      <div style="padding:8px 16px 12px;font-size:12px;flex:1">
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>no-force-push-main</b> <span style="color:#7d7668;font-size:11px">global · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■■ .92</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Never force-push to main; use revert commits instead.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>use-uv-for-python-scripts</b> <span style="color:#7d7668;font-size:11px">global · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .80</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Always use uv instead of pip for Python package management.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>prefer-thiserror</b> <span style="color:#7d7668;font-size:11px">payments-api · pattern</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .74</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Use thiserror for error enums; anyhow only at binary boundaries.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>sqlx-offline-mode</b> <span style="color:#7d7668;font-size:11px">payments-api · preference</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .71</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Run cargo sqlx prepare before committing query changes.</div>
+        </div>
+        <div style="padding:8px 0;opacity:.55">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>tailwind-no-arbitrary</b> <span style="color:#7d7668;font-size:11px">web-dashboard · held</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■□□ .68</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Held below confidence threshold — promotes at .70 if seen again.</div>
+        </div>
+      </div>
+      <div style="border-top:1px solid #4a463c;padding:8px 16px;font-size:11px;color:#7d7668">vetoed rules never return · <span style="text-decoration:underline;cursor:pointer">view all 214 in Knowledge →</span></div>
+    </div>
+    <div style="grid-column:2;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Retro owns</span>
+        </div>
+        <div style="padding:12px 16px">
+          <div style="display:flex;gap:20px;align-items:baseline">
+            <span><span style="font-size:26px;font-weight:700;color:#0da53c">7,503</span> <span style="font-size:10px;color:#7d7668">tok</span></span>
+            <span><span style="font-size:26px;font-weight:700">85</span> <span style="font-size:10px;color:#7d7668">rules</span></span>
+            <span><span style="font-size:26px;font-weight:700">4</span> <span style="font-size:10px;color:#7d7668">files</span></span>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px dotted #a89f8d;font-size:11px;color:#5a5548;line-height:1.9">
+            <div style="display:flex;justify-content:space-between"><span>~/.claude/CLAUDE.md</span><span>69 · 6,733</span></div>
+            <div style="display:flex;justify-content:space-between"><span>payments-api/CLAUDE.local.md</span><span>9 · 478</span></div>
+            <div style="display:flex;justify-content:space-between"><span>infra/CLAUDE.local.md</span><span>5 · 214</span></div>
+            <div style="display:flex;justify-content:space-between"><span>payments-api/MEMORY.md</span><span>2 · 78</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Pipeline</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#5a5548;line-height:2.05">
+          <div style="display:flex;justify-content:space-between"><span>store</span><b>214 nodes</b></div>
+          <div style="display:flex;justify-content:space-between"><span>session queue</span><b>0</b></div>
+          <div style="display:flex;justify-content:space-between"><span>AI budget today</span><b>6/10</b></div>
+          <div style="display:flex;justify-content:space-between"><span>observe → analyze → project</span><b style="color:#0da53c">✓ 07:42</b></div>
+          <div style="display:flex;justify-content:space-between"><span>push</span><b style="color:#0da53c">2h ago ✓</b></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#f4f2ea;border-top:1px solid #4a463c;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;font-weight:700">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">store 214</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">queue 0</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">budget 6/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #4a463c;color:#0da53c">✓ healthy</span>
+  </footer>
+</div>
+</section>
+
+<section id="1b" style="position:absolute;left:1560px;top:3340px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#2ee85c;color:#0d0f0c;padding:4px 10px;border-radius:4px;letter-spacing:1px">1b · HOME — dark</div>
+<div data-screen-label="Home dark" style="background:repeating-conic-gradient(#15170f 0 25%,#181a12 0 50%) 0 0/8px 8px;color:#d6d8cc;font:13px/1.5 'Space Mono',monospace;border:1px solid #3c4034">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#1e211a;border-bottom:1px solid #3c4034;font-size:12px">
+    <span style="font-weight:700;color:#2ee85c">▞ retro</span>
+    <span style="border-bottom:2px solid #2ee85c;padding-bottom:1px">Overview</span><span style="color:#767b6c">Knowledge</span><span style="color:#767b6c">Activity</span><span style="color:#767b6c">Config</span>
+    <span style="margin-left:auto;color:#767b6c">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#2ee85c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;gap:12px;padding:12px">
+    <div style="grid-column:2;background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #767b6c;background:#1e211a"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Context — session load</span>
+        <span style="margin-left:auto;background:#1e211a;padding:0 6px;font-size:10px;color:#767b6c">tokens at session start</span>
+      </div>
+      <div style="padding:16px 18px;display:grid;grid-template-columns:150px 1fr 68px;gap:11px 14px;align-items:center;font-size:12px">
+        <span style="font-weight:700">payments-api</span>
+        <div style="height:15px;border:1px solid #3c4034;display:flex;background:#0b0d09">
+          <div style="width:34%;background:#4d5142"></div><div style="width:50%;background:repeating-linear-gradient(45deg,#767b6c 0 3px,#0b0d09 3px 6px)"></div><div style="width:2.7%;background:#2ee85c"></div><div style="width:2%;background:repeating-linear-gradient(0deg,#2ee85c 0 2px,#0b0d09 2px 4px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px;color:#e8ebdd">17,658</span>
+        <span style="font-weight:700">infra</span>
+        <div style="height:15px;border:1px solid #3c4034;display:flex;background:#0b0d09">
+          <div style="width:34%;background:#4d5142"></div><div style="width:8%;background:repeating-linear-gradient(45deg,#767b6c 0 3px,#0b0d09 3px 6px)"></div><div style="width:1.2%;background:#2ee85c"></div><div style="width:1.7%;background:repeating-linear-gradient(0deg,#2ee85c 0 2px,#0b0d09 2px 4px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px;color:#e8ebdd">8,888</span>
+        <span style="font-weight:700">web-dashboard</span>
+        <div style="height:15px;border:1px solid #3c4034;display:flex;background:#0b0d09">
+          <div style="width:34%;background:#4d5142"></div><div style="width:5.4%;background:repeating-linear-gradient(45deg,#767b6c 0 3px,#0b0d09 3px 6px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px;color:#e8ebdd">7,797</span>
+        <div style="grid-column:1/-1;display:flex;gap:18px;font-size:10px;color:#767b6c;margin-top:3px">
+          <span><span style="display:inline-block;width:9px;height:9px;background:#4d5142;vertical-align:-1px"></span> global CLAUDE.md</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:repeating-linear-gradient(45deg,#767b6c 0 3px,#0b0d09 3px 6px);border:1px solid #767b6c;vertical-align:-1px"></span> project CLAUDE.md</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:#2ee85c;vertical-align:-1px"></span> retro-owned</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:repeating-linear-gradient(0deg,#2ee85c 0 2px,#0b0d09 2px 4px);border:1px solid #2ee85c;vertical-align:-1px"></span> MEMORY.md</span>
+          <span style="margin-left:auto">scale 0 – 20K</span>
+        </div>
+      </div>
+    </div>
+    <div style="grid-column:1;grid-row:1/3;background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #767b6c;background:#1e211a"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Learned this week</span>
+        <span style="margin-left:auto;background:#1e211a;padding:0 6px;font-size:10px;color:#767b6c">5 new · 1 held</span>
+      </div>
+      <div style="padding:8px 16px 12px;font-size:12px;flex:1">
+        <div style="padding:8px 0;border-bottom:1px dotted #3c4034">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b style="color:#e8ebdd">no-force-push-main</b> <span style="color:#767b6c;font-size:11px">global · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#767b6c;font-size:11px">■■■■■ .92</span><span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c">Veto</span></span></div>
+          <div style="color:#a3a894;font-size:11.5px;margin-top:2px">Never force-push to main; use revert commits instead.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #3c4034">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b style="color:#e8ebdd">use-uv-for-python-scripts</b> <span style="color:#767b6c;font-size:11px">global · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#767b6c;font-size:11px">■■■■□ .80</span><span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c">Veto</span></span></div>
+          <div style="color:#a3a894;font-size:11.5px;margin-top:2px">Always use uv instead of pip for Python package management.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #3c4034">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b style="color:#e8ebdd">prefer-thiserror</b> <span style="color:#767b6c;font-size:11px">payments-api · pattern</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#767b6c;font-size:11px">■■■■□ .74</span><span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c">Veto</span></span></div>
+          <div style="color:#a3a894;font-size:11.5px;margin-top:2px">Use thiserror for error enums; anyhow only at binary boundaries.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #3c4034">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b style="color:#e8ebdd">sqlx-offline-mode</b> <span style="color:#767b6c;font-size:11px">payments-api · preference</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#767b6c;font-size:11px">■■■■□ .71</span><span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c">Veto</span></span></div>
+          <div style="color:#a3a894;font-size:11.5px;margin-top:2px">Run cargo sqlx prepare before committing query changes.</div>
+        </div>
+        <div style="padding:8px 0;opacity:.55">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b style="color:#e8ebdd">tailwind-no-arbitrary</b> <span style="color:#767b6c;font-size:11px">web-dashboard · held</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#767b6c;font-size:11px">■■■□□ .68</span><span style="border:1px solid #3c4034;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(0,0,0,.45);cursor:pointer;color:#767b6c">Veto</span></span></div>
+          <div style="color:#a3a894;font-size:11.5px;margin-top:2px">Held below confidence threshold — promotes at .70 if seen again.</div>
+        </div>
+      </div>
+      <div style="border-top:1px solid #3c4034;padding:8px 16px;font-size:11px;color:#767b6c">vetoed rules never return · <span style="text-decoration:underline;cursor:pointer">view all 214 in Knowledge →</span></div>
+    </div>
+    <div style="grid-column:2;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #767b6c;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Retro owns</span>
+        </div>
+        <div style="padding:12px 16px">
+          <div style="display:flex;gap:20px;align-items:baseline">
+            <span><span style="font-size:26px;font-weight:700;color:#2ee85c">7,503</span> <span style="font-size:10px;color:#767b6c">tok</span></span>
+            <span><span style="font-size:26px;font-weight:700;color:#e8ebdd">85</span> <span style="font-size:10px;color:#767b6c">rules</span></span>
+            <span><span style="font-size:26px;font-weight:700;color:#e8ebdd">4</span> <span style="font-size:10px;color:#767b6c">files</span></span>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px dotted #3c4034;font-size:11px;color:#a3a894;line-height:1.9">
+            <div style="display:flex;justify-content:space-between"><span>~/.claude/CLAUDE.md</span><span>69 · 6,733</span></div>
+            <div style="display:flex;justify-content:space-between"><span>payments-api/CLAUDE.local.md</span><span>9 · 478</span></div>
+            <div style="display:flex;justify-content:space-between"><span>infra/CLAUDE.local.md</span><span>5 · 214</span></div>
+            <div style="display:flex;justify-content:space-between"><span>payments-api/MEMORY.md</span><span>2 · 78</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="background:#1e211a;border:2px solid;border-color:#4d5142 #0b0d09 #0b0d09 #4d5142;outline:1px solid #3c4034">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #3c4034;background:repeating-linear-gradient(0deg,#1e211a 0 2px,#3c4034 2px 3px,#1e211a 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #767b6c;background:#1e211a"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#1e211a;padding:0 12px;font-weight:700;font-size:11px;color:#2ee85c">Pipeline</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#a3a894;line-height:2.05">
+          <div style="display:flex;justify-content:space-between"><span>store</span><b style="color:#e8ebdd">214 nodes</b></div>
+          <div style="display:flex;justify-content:space-between"><span>session queue</span><b style="color:#e8ebdd">0</b></div>
+          <div style="display:flex;justify-content:space-between"><span>AI budget today</span><b style="color:#e8ebdd">6/10</b></div>
+          <div style="display:flex;justify-content:space-between"><span>observe → analyze → project</span><b style="color:#2ee85c">✓ 07:42</b></div>
+          <div style="display:flex;justify-content:space-between"><span>push</span><b style="color:#2ee85c">2h ago ✓</b></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#1e211a;border-top:1px solid #3c4034;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;font-weight:700;color:#2ee85c">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">store 214</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">queue 0</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">budget 6/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #3c4034;color:#767b6c">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #3c4034;color:#2ee85c">✓ healthy</span>
+  </footer>
+</div>
+</section>
+
+
+<section id="1c" style="position:absolute;left:3080px;top:3340px;width:1440px">
+<div style="position:absolute;top:-34px;left:0;font:700 12px 'Space Mono',monospace;background:#4a463c;color:#f4f2ea;padding:4px 10px;border-radius:4px;letter-spacing:1px">1c · HOME — busy week (8 projects · 17 rules)</div>
+<div data-screen-label="Home overflow" style="background:repeating-conic-gradient(#dcd9cf 0 25%,#d7d4c9 0 50%) 0 0/8px 8px;color:#26231c;font:13px/1.5 'Space Mono',monospace;border:1px solid #4a463c">
+  <header style="display:flex;align-items:center;gap:22px;padding:7px 18px;background:#f4f2ea;border-bottom:1px solid #4a463c;font-size:12px">
+    <span style="font-weight:700">▞ retro</span>
+    <span style="border-bottom:2px solid #0da53c;padding-bottom:1px">Overview</span><span style="color:#7d7668">Knowledge</span><span style="color:#7d7668">Activity</span><span style="color:#7d7668">Config</span>
+    <span style="margin-left:auto;color:#7d7668">v0.4.2 · Wed Jul 17 · 07:42 · <span style="color:#0da53c">●</span> hooks ok</span>
+  </header>
+  <main style="display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;gap:12px;padding:12px">
+    <div style="grid-column:2;background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Context — session load</span>
+        <span style="margin-left:auto;background:#f4f2ea;padding:0 6px;font-size:10px;color:#7d7668">top 5 of 8 · by weight</span>
+      </div>
+      <div style="padding:16px 18px;display:grid;grid-template-columns:150px 1fr 68px;gap:11px 14px;align-items:center;font-size:12px">
+        <span style="font-weight:700">payments-api</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:50%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:2.7%;background:#0da53c"></div><div style="width:2%;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">17,658</span>
+        <span style="font-weight:700">monorepo</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:38%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:4.1%;background:#0da53c"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">15,204</span>
+        <span style="font-weight:700">infra</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:8%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:1.2%;background:#0da53c"></div><div style="width:1.7%;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">8,888</span>
+        <span style="font-weight:700">web-dashboard</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:5.4%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">7,797</span>
+        <span style="font-weight:700">ml-pipeline</span>
+        <div style="height:15px;border:1px solid #4a463c;display:flex;background:#fff">
+          <div style="width:34%;background:#57503f"></div><div style="width:4.2%;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px)"></div><div style="width:.8%;background:#0da53c"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px">7,591</span>
+        <span style="color:#7d7668">+ 3 more <span style="font-size:10px">▸</span></span>
+        <div style="height:15px;border:1px dashed #a89f8d;display:flex;background:transparent">
+          <div style="width:36%;background:repeating-linear-gradient(90deg,#c9c4b5 0 4px,transparent 4px 8px)"></div>
+        </div>
+        <span style="text-align:right;font-weight:700;font-size:14px;color:#7d7668">21,3K</span>
+        <div style="grid-column:1/-1;display:flex;gap:18px;font-size:10px;color:#7d7668;margin-top:3px">
+          <span><span style="display:inline-block;width:9px;height:9px;background:#57503f;vertical-align:-1px"></span> global CLAUDE.md</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:repeating-linear-gradient(45deg,#a89f8d 0 3px,#fff 3px 6px);border:1px solid #a89f8d;vertical-align:-1px"></span> project CLAUDE.md</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:#0da53c;vertical-align:-1px"></span> retro-owned</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:repeating-linear-gradient(0deg,#0da53c 0 2px,#fff 2px 4px);border:1px solid #0da53c;vertical-align:-1px"></span> MEMORY.md</span>
+          <span style="margin-left:auto">scale 0 – 20K</span>
+        </div>
+      </div>
+    </div>
+    <div style="grid-column:1;grid-row:1/3;background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+        <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Learned this week</span>
+        <span style="margin-left:auto;background:#f4f2ea;padding:0 6px;font-size:10px;color:#26231c;font-weight:700">17 new · 2 held</span>
+      </div>
+      <div style="padding:8px 16px 12px;font-size:12px;flex:1">
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>no-force-push-main</b> <span style="color:#7d7668;font-size:11px">global · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■■ .92</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Never force-push to main; use revert commits instead.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>use-uv-for-python-scripts</b> <span style="color:#7d7668;font-size:11px">global · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .80</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Always use uv instead of pip for Python package management.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>prefer-thiserror</b> <span style="color:#7d7668;font-size:11px">payments-api · pattern</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .74</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Use thiserror for error enums; anyhow only at binary boundaries.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>sqlx-offline-mode</b> <span style="color:#7d7668;font-size:11px">payments-api · preference</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .71</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Run cargo sqlx prepare before committing query changes.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>k8s-context-check</b> <span style="color:#7d7668;font-size:11px">infra · rule</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .70</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">Verify kubectl context before any apply against prod.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px dotted #a89f8d">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span><b>vitest-not-jest</b> <span style="color:#7d7668;font-size:11px">web-dashboard · preference</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:#7d7668;font-size:11px">■■■■□ .70</span><span style="border:1px solid #4a463c;padding:1px 8px;font-size:10px;box-shadow:2px 2px 0 rgba(20,19,15,.2);cursor:pointer;background:#fff">Veto</span></span></div>
+          <div style="color:#5a5548;font-size:11.5px;margin-top:2px">New tests use vitest; jest is legacy only.</div>
+        </div>
+      </div>
+      <div style="border-top:1px solid #4a463c;padding:8px 16px;font-size:11px;display:flex;justify-content:space-between"><span style="font-weight:700">+ 11 more this week · 2 held</span><span style="text-decoration:underline;cursor:pointer;color:#7d7668">view all in Knowledge →</span></div>
+    </div>
+    <div style="grid-column:2;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Retro owns</span>
+        </div>
+        <div style="padding:12px 16px">
+          <div style="display:flex;gap:20px;align-items:baseline">
+            <span><span style="font-size:26px;font-weight:700;color:#0da53c">11,940</span> <span style="font-size:10px;color:#7d7668">tok</span></span>
+            <span><span style="font-size:26px;font-weight:700">132</span> <span style="font-size:10px;color:#7d7668">rules</span></span>
+            <span><span style="font-size:26px;font-weight:700">9</span> <span style="font-size:10px;color:#7d7668">files</span></span>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px dotted #a89f8d;font-size:11px;color:#5a5548;line-height:1.9">
+            <div style="display:flex;justify-content:space-between"><span>~/.claude/CLAUDE.md</span><span>84 · 8,102</span></div>
+            <div style="display:flex;justify-content:space-between"><span>monorepo/CLAUDE.local.md</span><span>18 · 1,644</span></div>
+            <div style="display:flex;justify-content:space-between"><span>payments-api/CLAUDE.local.md</span><span>11 · 512</span></div>
+            <div style="display:flex;justify-content:space-between;color:#7d7668"><span>+ 6 more files</span><span>19 · 1,682</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="background:#f4f2ea;border:2px solid;border-color:#fff #8a867a #8a867a #fff;outline:1px solid #4a463c">
+        <div style="display:flex;align-items:center;height:24px;border-bottom:1px solid #4a463c;background:repeating-linear-gradient(0deg,#f4f2ea 0 2px,#b8b3a3 2px 3px,#f4f2ea 3px 5px);background-position:0 5px;padding:0 9px;position:relative">
+          <span style="width:11px;height:11px;border:1px solid #4a463c;background:#f4f2ea"></span>
+          <span style="position:absolute;left:50%;transform:translateX(-50%);background:#f4f2ea;padding:0 12px;font-weight:700;font-size:11px">Pipeline</span>
+        </div>
+        <div style="padding:10px 16px;font-size:11.5px;color:#5a5548;line-height:2.05">
+          <div style="display:flex;justify-content:space-between"><span>store</span><b>587 nodes</b></div>
+          <div style="display:flex;justify-content:space-between"><span>session queue</span><b style="color:#a8402e">7 waiting</b></div>
+          <div style="display:flex;justify-content:space-between"><span>AI budget today</span><b style="color:#a8402e">0/10 left</b></div>
+          <div style="display:flex;justify-content:space-between"><span>observe → analyze → project</span><b><span style="color:#a8402e">✗ analyze</span> 11:16</b></div>
+          <div style="display:flex;justify-content:space-between"><span>push</span><b style="color:#0da53c">2h ago ✓</b></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="display:flex;align-items:center;background:#f4f2ea;border-top:1px solid #4a463c;font-size:11px">
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;font-weight:700">▞ front panel</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">store 587</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#a8402e">queue 7</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#a8402e">budget 0/10</span>
+    <span style="padding:8px 18px;border-right:1px solid #4a463c;color:#7d7668">push 2h ago</span>
+    <span style="padding:8px 18px;margin-left:auto;border-left:1px solid #4a463c;color:#a8402e">⚠ budget exhausted · 7 queued</span>
+  </footer>
+</div>
+</section></x-dc>
+</body>
+</html>

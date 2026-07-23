@@ -1,0 +1,76 @@
+/* retro UI — "desktop" direction theme. Embed in the single-file dashboard. */
+/* Mockups use Space Mono (webfont); production falls back to system mono per repo constraints. */
+:root{
+  --font:"Space Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* light (default) */
+  --desk-a:#dcd9cf; --desk-b:#d7d4c9;        /* checkerboard desktop */
+  --panel:#f4f2ea;                            /* window/panel bg */
+  --line:#4a463c;                             /* hard 1px outlines */
+  --line-soft:#a89f8d;                        /* dotted dividers, input borders */
+  --bevel-hi:#fff; --bevel-lo:#8a867a;        /* 2px window bevel */
+  --ink:#26231c; --ink-soft:#5a5548; --ink-faint:#7d7668;
+  --accent:#0da53c;                           /* THE green: active tab, retro-owned, ok */
+  --accent-wash:#e9f3e4;                      /* selected-row bg */
+  --alert:#a8402e;
+  --chip:#e6e3d8;                             /* dropdown/segment bg */
+  --field:#fff;                               /* inputs, bar tracks, button bg */
+  --bar-global:#57503f;                       /* solid segment: global CLAUDE.md */
+  --shadow:rgba(20,19,15,.2);                 /* 2px 2px 0 button shadow */
+}
+[data-theme=dark]{
+  --desk-a:#15170f; --desk-b:#181a12;
+  --panel:#1e211a;
+  --line:#3c4034; --line-soft:#4a4f41;
+  --bevel-hi:#4d5142; --bevel-lo:#0b0d09;
+  --ink:#d6d8cc; --ink-soft:#a3a894; --ink-faint:#767b6c;
+  --accent:#2ee85c; --accent-wash:#232c1d;
+  --alert:#e85c48;
+  --chip:#262a20; --field:#0b0d09;
+  --bar-global:#4d5142;
+  --shadow:rgba(0,0,0,.45);
+}
+body{margin:0;font:13px/1.5 var(--font);color:var(--ink);
+  background:repeating-conic-gradient(var(--desk-a) 0 25%,var(--desk-b) 0 50%) 0 0/8px 8px}
+/* ── window chrome ── */
+.window{background:var(--panel);border:2px solid;outline:1px solid var(--line);
+  border-color:var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi)}
+.titlebar{display:flex;align-items:center;height:24px;position:relative;padding:0 9px;
+  border-bottom:1px solid var(--line);
+  background:repeating-linear-gradient(0deg,var(--panel) 0 2px,color-mix(in oklab,var(--line) 60%,var(--panel)) 2px 3px,var(--panel) 3px 5px);
+  background-position:0 5px}
+.titlebar .box{width:11px;height:11px;border:1px solid var(--line);background:var(--panel)}
+.titlebar .title{position:absolute;left:50%;transform:translateX(-50%);
+  background:var(--panel);padding:0 12px;font-weight:700;font-size:11px}
+.titlebar .meta{margin-left:auto;background:var(--panel);padding:0 6px;font-size:10px;color:var(--ink-faint)}
+/* dark titlebars tint the title with the accent */
+[data-theme=dark] .titlebar .title{color:var(--accent)}
+/* ── controls ── */
+.btn{border:1px solid var(--line);background:var(--field);padding:1px 8px;font-size:10px;
+  box-shadow:2px 2px 0 var(--shadow);cursor:pointer;font-family:inherit}
+.btn:active{box-shadow:none;transform:translate(2px,2px)}
+.btn-danger{background:var(--alert);color:var(--panel);font-weight:700}
+.chip{border:1px solid var(--line);background:var(--chip);padding:3px 10px;font-size:11px;cursor:pointer}
+/* ── nav (top bar = the only nav) ── */
+.menubar{display:flex;align-items:center;gap:22px;padding:7px 18px;background:var(--panel);
+  border-bottom:1px solid var(--line);font-size:12px}
+.menubar .tab{color:var(--ink-faint);cursor:pointer}
+.menubar .tab.active{color:var(--ink);border-bottom:2px solid var(--accent);padding-bottom:1px}
+/* ── front panel (bottom bar = pure status, never nav) ── */
+.front-panel{display:flex;align-items:center;background:var(--panel);border-top:1px solid var(--line);font-size:11px}
+.front-panel>span{padding:8px 18px;border-right:1px solid var(--line);color:var(--ink-faint)}
+.front-panel .health{margin-left:auto;border-right:0;border-left:1px solid var(--line);color:var(--accent)}
+.front-panel .health.alert,.front-panel .alerted{color:var(--alert)}
+/* ── data states ── */
+.row-selected{background:var(--accent-wash);outline:1px solid var(--accent);outline-offset:-3px}
+.row-held{opacity:.55}
+.row-vetoed{opacity:.4}
+.row-vetoed b{text-decoration:line-through}
+/* token bar segments (context viz) */
+.bar{height:15px;border:1px solid var(--line);display:flex;background:var(--field)}
+.seg-global{background:var(--bar-global)}
+.seg-project{background:repeating-linear-gradient(45deg,var(--line-soft) 0 3px,var(--field) 3px 6px)}
+.seg-retro{background:var(--accent)}
+.seg-memory{background:repeating-linear-gradient(0deg,var(--accent) 0 2px,var(--field) 2px 4px)}
+/* modal */
+.overlay{position:absolute;inset:0;background:rgba(38,35,28,.5);display:flex;align-items:center;justify-content:center}
+.dialog{width:460px;box-shadow:8px 8px 0 var(--shadow)}
