@@ -63,8 +63,11 @@ mod tests {
     /// class immune to declaration order.
     #[test]
     fn hidden_utility_rule_wins_the_cascade() {
+        // Whitespace-tolerant: assert the semantic property (`.hidden` carries
+        // display:none !important), not exact CSS formatting.
+        let compact: String = INDEX_HTML.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(
-            INDEX_HTML.contains(".hidden { display:none !important; }"),
+            compact.contains(".hidden{display:none!important"),
             ".hidden must use !important — equal-specificity rules declared later \
              (e.g. .modal's display:flex) would otherwise override it"
         );
