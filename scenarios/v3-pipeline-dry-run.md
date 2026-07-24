@@ -68,7 +68,9 @@ $RETRO reindex
 6. Start the dashboard in the background: `nohup $RETRO ui --no-open > "$RETRO_HOME/ui.log" 2>&1 & echo $! > "$RETRO_HOME/ui.pid"`, wait ~1s
 7. Run `curl -s http://127.0.0.1:7787/api/ping`
 8. Run `curl -s "http://127.0.0.1:7787/api/nodes?scope=global"`
-9. Kill ONLY the server you started: `kill $(cat "$RETRO_HOME/ui.pid")`
+9. Run `curl -s http://127.0.0.1:7787/api/config` (the redesigned Config tab reads/writes this)
+10. Run `curl -s http://127.0.0.1:7787/ | grep -o 'class="menubar"\|>Overview<\|>Knowledge<\|>Activity<\|>Config<' | sort -u` (the served page carries the four-tab desktop chrome)
+11. Kill ONLY the server you started: `kill $(cat "$RETRO_HOME/ui.pid")`
 
 ## Expected
 
@@ -88,7 +90,11 @@ $RETRO reindex
 - Step 7: `{"ok":true}`
 - Step 8: JSON containing the seeded node — id `scenario-seeded-rule` and/or
   its body "Prefer rebasing feature branches before merging"
-- Step 9: kill succeeds (the server was still running and is now stopped)
+- Step 9: JSON with `confidence_threshold`, `max_ai_calls_per_day`, `model`,
+  and a `models` array (the config the Config tab edits)
+- Step 10: the four tab labels (Overview / Knowledge / Activity / Config) and
+  `class="menubar"` — the served page is the desktop-redesign chrome
+- Step 11: kill succeeds (the server was still running and is now stopped)
 
 ## Not Expected
 

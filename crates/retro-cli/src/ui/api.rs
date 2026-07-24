@@ -16,6 +16,10 @@ use super::{html_response, index_html, json_response};
 /// streaming an unbounded body at a localhost-only server.
 const MAX_BODY_BYTES: u64 = 64 * 1024;
 
+/// `ai.model` values the pipeline accepts — must match what
+/// `ClaudeCliBackend` passes to the `claude` CLI's `--model` flag.
+const ALLOWED_MODELS: [&str; 3] = ["sonnet", "haiku", "opus"];
+
 pub fn route(
     store_root: &Path,
     config: &Config,
@@ -49,6 +53,17 @@ pub fn route(
         }
         (Method::Get, "/api/doctor") => {
             let (body, status) = api_doctor(store_root, config);
+            request.respond(json_response(&body, status))?
+        }
+        (Method::Get, "/api/config") => {
+            let (body, status) = api_config_get(config);
+            request.respond(json_response(&body, status))?
+        }
+        (Method::Post, "/api/config") => {
+            let (body, status) = match read_json_body(&mut request) {
+                Ok(json_body) => api_config_post(store_root, &json_body),
+                Err(err_response) => err_response,
+            };
             request.respond(json_response(&body, status))?
         }
         (Method::Post, "/api/node/invalidate") => {
@@ -427,6 +442,10 @@ fn api_nodes(store_root: &Path, url: &str) -> (serde_json::Value, u16) {
                         "id": r.id, "scope": r.scope, "type": r.node_type,
                         "confidence": r.confidence, "active": r.active,
                         "updated": r.updated,
+                        // token estimate from the FULL body (the `body` field
+                        // is truncated for transport) so the rule table's
+                        // TOKENS column is honest, not capped at the preview.
+                        "tokens_est": r.body.len() / 4,
                         "body": retro_core::util::truncate_str(&r.body, 200),
                         "sources": r.sources,
                     }))
@@ -488,6 +507,23 @@ fn api_xray(store_root: &Path, config: &Config) -> (serde_json::Value, u16) {
     let skills_count = std::fs::read_dir(claude_dir.join("skills"))
         .map(|d| d.count())
         .unwrap_or(0);
+
+    // Store-wide live/held/vetoed breakdown, independent of scope: vetoed is
+    // any invalidated node; among the rest, confidence vs. the projection
+    // gate splits live (projected) from held (below threshold, not yet
+    // projected). Mirrors the same threshold `after_write` uses to reproject.
+    let threshold = config.knowledge.confidence_threshold;
+    let (mut live, mut held, mut vetoed) = (0usize, 0usize, 0usize);
+    for (_, n) in &loaded.nodes {
+        if !n.is_active() {
+            vetoed += 1;
+        } else if n.confidence < threshold {
+            held += 1;
+        } else {
+            live += 1;
+        }
+    }
+
     (
         json!({
             "global_claude_md": file_info(&claude_dir.join("CLAUDE.md")),
@@ -496,6 +532,8 @@ fn api_xray(store_root: &Path, config: &Config) -> (serde_json::Value, u16) {
             "skills_count": skills_count,
             "projects": projects_json,
             "store_warnings": loaded.warnings,
+            "total_nodes": loaded.nodes.len(),
+            "store": json!({"live": live, "held": held, "vetoed": vetoed}),
         }),
         200,
     )
@@ -555,6 +593,7 @@ fn api_health(store_root: &Path, config: &Config) -> (serde_json::Value, u16) {
             "stages": health.stages,
             "queue_len": queue_len,
             "budget_remaining": budget_remaining,
+            "budget_max": config.runner.max_ai_calls_per_day,
             "notifications_pending": state.notifications.len(),
         }),
         200,
@@ -606,6 +645,148 @@ fn api_doctor(store_root: &Path, config: &Config) -> (serde_json::Value, u16) {
         Ok(v) => (v, 200),
         Err(e) => (json!({"error": e.to_string()}), 500),
     }
+}
+
+/// `GET /api/config` — the whitelisted subset of config fields the pipeline
+/// actually reads (not the whole `Config` struct), plus the allowed `model`
+/// values so the Config tab can render a picker rather than a free-text field.
+fn api_config_get(config: &Config) -> (serde_json::Value, u16) {
+    (
+        json!({
+            "confidence_threshold": config.knowledge.confidence_threshold,
+            "max_ai_calls_per_day": config.runner.max_ai_calls_per_day,
+            "model": config.ai.model,
+            "models": ALLOWED_MODELS,
+        }),
+        200,
+    )
+}
+
+/// `POST /api/config` — body is a partial patch over the same whitelist
+/// `api_config_get` exposes. Present-but-invalid values 400 (validated
+/// up front, before touching the lock or config file, mirroring the other
+/// write handlers' untrusted-input discipline); absent keys are left
+/// untouched; unknown keys are silently ignored; an empty patch is a 200
+/// no-op. Returns the post-save `api_config_get` body.
+fn api_config_post(store_root: &Path, body: &serde_json::Value) -> (serde_json::Value, u16) {
+    let confidence_threshold = match body.get("confidence_threshold") {
+        None => None,
+        Some(v) => match v.as_f64() {
+            Some(f) if (0.0..=1.0).contains(&f) => Some(f),
+            _ => {
+                return (
+                    json!({"error": "confidence_threshold must be a number in [0.0, 1.0]"}),
+                    400,
+                );
+            }
+        },
+    };
+    let max_ai_calls_per_day = match body.get("max_ai_calls_per_day") {
+        None => None,
+        Some(v) => match v.as_u64() {
+            Some(n) if n <= 1000 => Some(n as u32),
+            _ => {
+                return (
+                    json!({"error": "max_ai_calls_per_day must be an integer in [0, 1000]"}),
+                    400,
+                );
+            }
+        },
+    };
+    let model = match body.get("model") {
+        None => None,
+        Some(v) => match v.as_str() {
+            Some(s) if ALLOWED_MODELS.contains(&s) => Some(s.to_string()),
+            _ => {
+                return (
+                    json!({"error": format!("model must be one of {ALLOWED_MODELS:?}")}),
+                    400,
+                );
+            }
+        },
+    };
+
+    // Nothing to change → don't take the lock or rewrite config.toml.
+    // Config::save reformats the whole file (dropping comments/legacy keys),
+    // so a no-op patch must stay a true no-op.
+    if confidence_threshold.is_none() && max_ai_calls_per_day.is_none() && model.is_none() {
+        return match Config::load(&store_root.join("config.toml")) {
+            Ok(c) => api_config_get(&c),
+            Err(e) => (json!({"error": e.to_string()}), 500),
+        };
+    }
+
+    let _lock = match acquire_write_lock(store_root) {
+        Ok(l) => l,
+        Err(resp) => return resp,
+    };
+    // Reload from disk rather than trusting a startup-time snapshot — same
+    // reasoning as api_project_exclude: saving a stale in-memory config
+    // would silently revert any concurrent edits to config.toml.
+    let config_path = store_root.join("config.toml");
+    let mut config = match Config::load(&config_path) {
+        Ok(c) => c,
+        Err(e) => return (json!({"error": e.to_string()}), 500),
+    };
+    // The threshold is the projection gate — a change alters what every
+    // managed file contains, so note it and reproject below.
+    let threshold_changed = confidence_threshold
+        .map(|t| (t - config.knowledge.confidence_threshold).abs() > f64::EPSILON)
+        .unwrap_or(false);
+    if let Some(t) = confidence_threshold {
+        config.knowledge.confidence_threshold = t;
+    }
+    if let Some(n) = max_ai_calls_per_day {
+        config.runner.max_ai_calls_per_day = n;
+    }
+    if let Some(m) = model {
+        config.ai.model = m;
+    }
+    if let Err(e) = config.save(&config_path) {
+        return (json!({"error": e.to_string()}), 500);
+    }
+    // config.toml is git-tracked in the store; commit it as its own labeled
+    // mutation so the next commit_all (another handler, or the runner's
+    // opening sweep) can't fold it into an unrelated, pushed commit.
+    if let Err(e) = retro_core::store::git::commit_all(store_root, "user: config update (dashboard)") {
+        return (json!({"error": e.to_string()}), 500);
+    }
+    // Reproject every managed file so a threshold change is reflected
+    // immediately, not only after the next runner pass. (Budget/model
+    // changes affect future runs only — no reprojection needed.)
+    if threshold_changed {
+        if let Err(e) = reproject_all(store_root, &config) {
+            return (
+                json!({"error": format!("config saved, but reprojection failed: {e}")}),
+                500,
+            );
+        }
+    }
+    api_config_get(&config)
+}
+
+/// Reproject the global managed block and every registered project's
+/// `CLAUDE.local.md` at the current threshold. Used after a threshold change
+/// (nodes are unchanged, so no index rebuild). Mirrors the runner's and
+/// migrate's projection step.
+fn reproject_all(
+    store_root: &Path,
+    config: &Config,
+) -> Result<(), retro_core::errors::CoreError> {
+    use retro_core::store::{Store, projects::PathMap};
+    let store = Store::open(store_root);
+    let threshold = config.knowledge.confidence_threshold;
+    retro_core::projection::local_md::project_global_md(
+        &store,
+        &config.claude_dir().join("CLAUDE.md"),
+        threshold,
+        Some(&store_root.join("backups")),
+    )?;
+    let map = PathMap::load(store_root)?;
+    for (slug, p) in &map.paths {
+        retro_core::projection::local_md::project_local_md(&store, slug, Path::new(p), threshold)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -730,6 +911,40 @@ mod tests {
         assert_eq!(projects[0]["active_nodes"], 1);
         assert!(projects[0]["claude_md"]["present"].as_bool().unwrap());
         assert!(projects[0]["memory_md"]["present"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn xray_reports_total_and_store_breakdown() {
+        let store_tmp = TempDir::new().unwrap();
+        let claude_tmp = TempDir::new().unwrap();
+        let store = Store::open(store_tmp.path());
+        store.ensure_layout().unwrap();
+
+        let mut live = node("live-rule", Scope::Global, NodeType::Rule, "a live rule");
+        live.confidence = 0.9;
+        store.write_node(&live).unwrap();
+
+        let mut held = node("held-rule", Scope::Global, NodeType::Rule, "a held rule");
+        held.confidence = 0.3;
+        store.write_node(&held).unwrap();
+
+        let mut vetoed = node(
+            "vetoed-rule",
+            Scope::Global,
+            NodeType::Rule,
+            "a vetoed rule",
+        );
+        vetoed.invalidated_by = Some("user".to_string());
+        store.write_node(&vetoed).unwrap();
+
+        let mut config = Config::default();
+        config.paths.claude_dir = claude_tmp.path().display().to_string();
+        config.knowledge.confidence_threshold = 0.7;
+
+        let (body, status) = api_xray(store_tmp.path(), &config);
+        assert_eq!(status, 200, "{body:?}");
+        assert_eq!(body["total_nodes"], 3);
+        assert_eq!(body["store"], json!({"live": 1, "held": 1, "vetoed": 1}));
     }
 
     #[test]
@@ -1052,5 +1267,126 @@ mod tests {
         let (body, status) = parse_json_body(&mut cursor).unwrap_err();
         assert_eq!(status, 400);
         assert!(body["error"].as_str().unwrap().contains("too large"));
+    }
+
+    #[test]
+    fn config_get_returns_whitelisted_fields() {
+        // Pure function over `&Config` — no filesystem/store touched, so
+        // unlike the other config tests this needs no TempDir.
+        let mut config = Config::default();
+        config.knowledge.confidence_threshold = 0.7;
+        config.runner.max_ai_calls_per_day = 10;
+        config.ai.model = "sonnet".to_string();
+        let (body, status) = api_config_get(&config);
+        assert_eq!(status, 200);
+        assert_eq!(body["confidence_threshold"], 0.7);
+        assert_eq!(body["max_ai_calls_per_day"], 10);
+        assert_eq!(body["model"], "sonnet");
+        assert!(
+            body["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m == "sonnet")
+        );
+    }
+
+    #[test]
+    fn config_post_persists_whitelisted_fields_and_preserves_the_rest() {
+        let tmp = TempDir::new().unwrap();
+        let claude = TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("config.toml");
+        let mut base = Config::default();
+        base.ui.port = 9191; // a non-whitelisted field that MUST survive
+        // MUST isolate claude_dir: a threshold change reprojects, and the
+        // default "~/.claude" would target the developer's REAL global
+        // CLAUDE.md during `cargo test` (this exact leak wiped a user's file
+        // on 2026-07-23 before the empty-wipe guard caught it).
+        base.paths.claude_dir = claude.path().display().to_string();
+        base.save(&cfg_path).unwrap();
+        retro_core::store::git::ensure_repo(tmp.path()).unwrap();
+
+        // a non-whitelisted key in the body is silently ignored, not applied
+        let (body, status) = api_config_post(
+            tmp.path(),
+            &json!({"confidence_threshold": 0.85, "max_ai_calls_per_day": 20, "model": "haiku", "port": 1}),
+        );
+        assert_eq!(status, 200, "{body:?}");
+        let reloaded = Config::load(&cfg_path).unwrap();
+        assert!((reloaded.knowledge.confidence_threshold - 0.85).abs() < 1e-9);
+        assert_eq!(reloaded.runner.max_ai_calls_per_day, 20);
+        assert_eq!(reloaded.ai.model, "haiku");
+        assert_eq!(reloaded.ui.port, 9191, "non-whitelisted field preserved");
+        // config.toml is committed (its own labeled mutation), tree clean
+        assert!(!retro_core::store::git::has_changes(tmp.path()).unwrap());
+    }
+
+    #[test]
+    fn config_post_validates_ranges_and_model() {
+        let tmp = TempDir::new().unwrap();
+        Config::default().save(&tmp.path().join("config.toml")).unwrap();
+        // reject cases 400 during up-front validation, before the lock/repo,
+        // so no git repo is needed here
+        for bad in [
+            json!({"confidence_threshold": 1.5}),
+            json!({"confidence_threshold": -0.1}),
+            json!({"confidence_threshold": "0.7"}), // wrong type
+            json!({"max_ai_calls_per_day": 100000}),
+            json!({"max_ai_calls_per_day": 3.5}), // float
+            json!({"max_ai_calls_per_day": -1}),  // negative
+            json!({"model": "gpt-4"}),
+        ] {
+            assert_eq!(api_config_post(tmp.path(), &bad).1, 400, "{bad:?}");
+        }
+        // empty patch is a no-op success and does NOT rewrite/commit anything
+        assert_eq!(api_config_post(tmp.path(), &json!({})).1, 200);
+    }
+
+    #[test]
+    fn config_post_rejects_multi_field_patch_without_partial_write() {
+        let tmp = TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("config.toml");
+        Config::default().save(&cfg_path).unwrap();
+        retro_core::store::git::ensure_repo(tmp.path()).unwrap();
+        let before = Config::load(&cfg_path).unwrap().knowledge.confidence_threshold;
+        // first field valid, second invalid → whole patch rejected, nothing saved
+        let (_, status) = api_config_post(
+            tmp.path(),
+            &json!({"confidence_threshold": 0.9, "model": "gpt-4"}),
+        );
+        assert_eq!(status, 400);
+        let after = Config::load(&cfg_path).unwrap().knowledge.confidence_threshold;
+        assert!((before - after).abs() < 1e-9, "no partial write");
+    }
+
+    #[test]
+    fn config_post_threshold_change_commits_and_reprojects() {
+        let tmp = TempDir::new().unwrap();
+        let claude = TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("config.toml");
+        let mut base = Config::default();
+        base.paths.claude_dir = claude.path().display().to_string();
+        base.knowledge.confidence_threshold = 0.9; // starts high
+        base.save(&cfg_path).unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        // a node at 0.80 — below the 0.9 start, at/above a 0.7 target
+        store
+            .write_node(&node("mid", Scope::Global, NodeType::Rule, "a promotable rule"))
+            .unwrap();
+        retro_core::store::git::ensure_repo(tmp.path()).unwrap();
+        index::build(&store).unwrap();
+
+        // lower the threshold so the 0.80 node now projects
+        let (_, status) = api_config_post(tmp.path(), &json!({"confidence_threshold": 0.7}));
+        assert_eq!(status, 200);
+        let projected = std::fs::read_to_string(claude.path().join("CLAUDE.md")).unwrap();
+        assert!(projected.contains("a promotable rule"), "reprojected at new threshold");
+        // config change is its own labeled commit
+        let log = std::process::Command::new("git")
+            .args(["-C", tmp.path().to_str().unwrap(), "log", "--format=%s", "-1"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "user: config update (dashboard)");
     }
 }

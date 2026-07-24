@@ -17,10 +17,16 @@ pub fn serve(store_root: PathBuf, config: Config) -> Result<()> {
         tiny_http::Server::http(&addr).map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}"))?;
     println!("retro dashboard: http://{addr}  (Ctrl+C to stop)");
 
+    let config_path = store_root.join("config.toml");
     for request in server.incoming_requests() {
         let url = request.url().to_string();
         let method = request.method().clone();
-        let response = api::route(&store_root, &config, &method, &url, request);
+        // Reload config per request so a POST /api/config write is reflected
+        // immediately everywhere (GET /api/config, plus the threshold-derived
+        // xray store split and health budget) — not stale until restart. The
+        // startup snapshot is the fallback if a read momentarily fails.
+        let cfg = Config::load(&config_path).unwrap_or_else(|_| config.clone());
+        let response = api::route(&store_root, &cfg, &method, &url, request);
         if let Err(e) = response {
             eprintln!("ui: request error: {e}");
         }
@@ -63,8 +69,11 @@ mod tests {
     /// class immune to declaration order.
     #[test]
     fn hidden_utility_rule_wins_the_cascade() {
+        // Whitespace-tolerant: assert the semantic property (`.hidden` carries
+        // display:none !important), not exact CSS formatting.
+        let compact: String = INDEX_HTML.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(
-            INDEX_HTML.contains(".hidden { display:none !important; }"),
+            compact.contains(".hidden{display:none!important"),
             ".hidden must use !important — equal-specificity rules declared later \
              (e.g. .modal's display:flex) would otherwise override it"
         );

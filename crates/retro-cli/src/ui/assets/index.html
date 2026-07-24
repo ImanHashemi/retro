@@ -1,204 +1,978 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>retro</title>
+<script>
+/* Apply the persisted theme before first paint to avoid a flash of the wrong
+   palette. The main script (end of body) defines setTheme() and wires the live
+   prefers-color-scheme listener; this only sets the initial data-theme. */
+(function () {
+  try {
+    var mode = localStorage.getItem('retro-theme') || 'auto';
+    var dark = mode === 'dark' ||
+      (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } catch (e) { /* localStorage/matchMedia unavailable — fall through to light */ }
+})();
+</script>
 <style>
-  :root { --bg:#111; --fg:#ddd; --dim:#888; --accent:#7aa2f7; --warn:#e0af68; --err:#f7768e; --ok:#9ece6a; --card:#1a1a1f; }
-  * { box-sizing: border-box; }
-  body { margin:0; font:14px/1.5 -apple-system, "SF Mono", Menlo, monospace; background:var(--bg); color:var(--fg); }
-  header { display:flex; gap:1rem; align-items:baseline; padding:0.8rem 1.2rem; border-bottom:1px solid #2a2a30; }
-  header h1 { font-size:1rem; margin:0; color:var(--accent); }
-  nav button { background:none; border:none; color:var(--dim); font:inherit; cursor:pointer; padding:0.2rem 0.6rem; }
-  nav button.active { color:var(--fg); border-bottom:2px solid var(--accent); }
-  main { padding:1rem 1.2rem; max-width:1000px; margin:0 auto; }
-  .card { background:var(--card); border-radius:8px; padding:0.8rem 1rem; margin:0.6rem 0; }
-  .row { display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; align-items:center; }
-  .dim { color:var(--dim); } .ok { color:var(--ok); } .warn { color:var(--warn); } .err { color:var(--err); }
-  .badge { font-size:0.75rem; padding:0.05rem 0.45rem; border-radius:8px; background:#26262e; }
-  .retro-owned { color:var(--accent); }
-  input, select { background:#0d0d10; color:var(--fg); border:1px solid #2a2a30; border-radius:6px; padding:0.3rem 0.5rem; font:inherit; }
-  textarea { width:100%; min-height:8rem; background:#0d0d10; color:var(--fg); border:1px solid #2a2a30; border-radius:6px; padding:0.5rem; font:inherit; }
-  button.action { background:#26262e; color:var(--fg); border:1px solid #3a3a44; border-radius:6px; padding:0.25rem 0.7rem; cursor:pointer; font:inherit; }
-  button.action:hover { border-color:var(--accent); }
-  button.danger:hover { border-color:var(--err); color:var(--err); }
-  table { width:100%; border-collapse:collapse; }
-  td, th { text-align:left; padding:0.3rem 0.5rem; border-bottom:1px solid #22222a; vertical-align:top; }
-  pre { white-space:pre-wrap; word-break:break-word; }
-  .clickable { cursor:pointer; }
-  .clickable:hover { color:var(--accent); }
-  /* !important: .modal below sets display:flex at equal specificity and is
-     declared later — without it the modal backdrop permanently covers the page */
-  .hidden { display:none !important; }
-  .modal { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; padding:1rem; z-index:10; }
-  .modal-card { background:var(--card); color:var(--fg); border-radius:8px; padding:1rem 1.2rem; max-width:640px; width:100%; max-height:80vh; overflow:auto; }
+/* ==== retro-theme.css — embedded verbatim (system-mono fallback in --font) ==== */
+/* retro UI — "desktop" direction theme. Embed in the single-file dashboard. */
+/* Mockups use Space Mono (webfont); production falls back to system mono per repo constraints. */
+:root{
+  --font:"Space Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* light (default) */
+  --desk-a:#dcd9cf; --desk-b:#d7d4c9;        /* checkerboard desktop */
+  --panel:#f4f2ea;                            /* window/panel bg */
+  --line:#4a463c;                             /* hard 1px outlines */
+  --line-soft:#a89f8d;                        /* dotted dividers, input borders */
+  --bevel-hi:#fff; --bevel-lo:#8a867a;        /* 2px window bevel */
+  --ink:#26231c; --ink-soft:#5a5548; --ink-faint:#7d7668;
+  --accent:#0da53c;                           /* THE green: active tab, retro-owned, ok */
+  --accent-wash:#e9f3e4;                      /* selected-row bg */
+  --alert:#a8402e;
+  --chip:#e6e3d8;                             /* dropdown/segment bg */
+  --field:#fff;                               /* inputs, bar tracks, button bg */
+  --bar-global:#57503f;                       /* solid segment: global CLAUDE.md */
+  --shadow:rgba(20,19,15,.2);                 /* 2px 2px 0 button shadow */
+}
+[data-theme=dark]{
+  --desk-a:#15170f; --desk-b:#181a12;
+  --panel:#1e211a;
+  --line:#3c4034; --line-soft:#4a4f41;
+  --bevel-hi:#4d5142; --bevel-lo:#0b0d09;
+  --ink:#d6d8cc; --ink-soft:#a3a894; --ink-faint:#767b6c;
+  --accent:#2ee85c; --accent-wash:#232c1d;
+  --alert:#e85c48;
+  --chip:#262a20; --field:#0b0d09;
+  --bar-global:#4d5142;
+  --shadow:rgba(0,0,0,.45);
+}
+body{margin:0;font:13px/1.5 var(--font);color:var(--ink);
+  background:repeating-conic-gradient(var(--desk-a) 0 25%,var(--desk-b) 0 50%) 0 0/8px 8px}
+/* ── window chrome ── */
+.window{background:var(--panel);border:2px solid;outline:1px solid var(--line);
+  border-color:var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi)}
+.titlebar{display:flex;align-items:center;height:24px;position:relative;padding:0 9px;
+  border-bottom:1px solid var(--line);
+  background:repeating-linear-gradient(0deg,var(--panel) 0 2px,color-mix(in oklab,var(--line) 60%,var(--panel)) 2px 3px,var(--panel) 3px 5px);
+  background-position:0 5px}
+.titlebar .box{width:11px;height:11px;border:1px solid var(--line);background:var(--panel)}
+.titlebar .title{position:absolute;left:50%;transform:translateX(-50%);
+  background:var(--panel);padding:0 12px;font-weight:700;font-size:11px}
+.titlebar .meta{margin-left:auto;background:var(--panel);padding:0 6px;font-size:10px;color:var(--ink-faint)}
+/* dark titlebars tint the title with the accent */
+[data-theme=dark] .titlebar .title{color:var(--accent)}
+/* ── controls ── */
+.btn{border:1px solid var(--line);background:var(--field);padding:1px 8px;font-size:10px;
+  box-shadow:2px 2px 0 var(--shadow);cursor:pointer;font-family:inherit}
+.btn:active{box-shadow:none;transform:translate(2px,2px)}
+.btn-danger{background:var(--alert);color:var(--panel);font-weight:700}
+.chip{border:1px solid var(--line);background:var(--chip);padding:3px 10px;font-size:11px;cursor:pointer}
+/* ── nav (top bar = the only nav) ── */
+.menubar{display:flex;align-items:center;gap:22px;padding:7px 18px;background:var(--panel);
+  border-bottom:1px solid var(--line);font-size:12px}
+.menubar .tab{color:var(--ink-faint);cursor:pointer}
+.menubar .tab.active{color:var(--ink);border-bottom:2px solid var(--accent);padding-bottom:1px}
+/* ── front panel (bottom bar = pure status, never nav) ── */
+.front-panel{display:flex;align-items:center;background:var(--panel);border-top:1px solid var(--line);font-size:11px}
+.front-panel>span{padding:8px 18px;border-right:1px solid var(--line);color:var(--ink-faint)}
+.front-panel .health{margin-left:auto;border-right:0;border-left:1px solid var(--line);color:var(--accent)}
+.front-panel .health.alert,.front-panel .alerted{color:var(--alert)}
+/* ── data states ── */
+.row-selected{background:var(--accent-wash);outline:1px solid var(--accent);outline-offset:-3px}
+.row-held{opacity:.55}
+.row-vetoed{opacity:.4}
+.row-vetoed b{text-decoration:line-through}
+/* token bar segments (context viz) */
+.bar{height:15px;border:1px solid var(--line);display:flex;background:var(--field)}
+.seg-global{background:var(--bar-global)}
+.seg-project{background:repeating-linear-gradient(45deg,var(--line-soft) 0 3px,var(--field) 3px 6px)}
+.seg-retro{background:var(--accent)}
+.seg-memory{background:repeating-linear-gradient(0deg,var(--accent) 0 2px,var(--field) 2px 4px)}
+/* modal */
+.overlay{position:absolute;inset:0;background:rgba(38,35,28,.5);display:flex;align-items:center;justify-content:center}
+.dialog{width:460px;box-shadow:8px 8px 0 var(--shadow)}
+
+/* ==== app chrome additions — layout + the few bits the theme recipe leaves
+   to the host page (brand cell, menu meta, view padding). No inline styles. ==== */
+html{height:100%}
+body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
+/* the page is the ONE scroll surface (vertical only) — never scroll
+   horizontally, and no tab scrolls internally, so every tab behaves the
+   same way regardless of length */
+#main{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:12px}
+/* brand is bold, and accent-tinted in dark (matches frames 1a/1b) */
+.menubar .brand{font-weight:700}
+[data-theme=dark] .menubar .brand{color:var(--accent)}
+/* right-aligned, faint menu meta (version · date · clock · hooks) */
+.menubar .meta{margin-left:auto;color:var(--ink-faint)}
+.front-panel .brand{font-weight:700;color:var(--ink)}
+[data-theme=dark] .front-panel .brand{color:var(--accent)}
+/* placeholder body for the stubbed tabs (Tasks 3–6 replace these) */
+.stub{padding:16px 18px;color:var(--ink-faint)}
+/* generic state tint helpers (hooks dot, error text) */
+.ok{color:var(--accent)}
+.bad{color:var(--alert)}
+.dim{color:var(--ink-faint)}
+.link{text-decoration:underline;cursor:pointer}
+/* ── overview layout ── */
+.ov-grid{display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;gap:12px}
+.ov-learned{grid-column:1;grid-row:1/3;display:flex;flex-direction:column}
+.ov-context{grid-column:2;grid-row:1}
+.ov-bottom{grid-column:2;grid-row:2;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* learned-this-week */
+.learn-list{padding:8px 16px 12px;font-size:12px;flex:1}
+.learn{padding:8px 0;border-bottom:1px dotted var(--line-soft)}
+.learn:last-child{border-bottom:0}
+.learn-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.learn-meta{color:var(--ink-faint);font-size:11px}
+.learn-desc{color:var(--ink-soft);font-size:11.5px;margin-top:2px}
+.learn-foot{border-top:1px solid var(--line);padding:8px 16px;font-size:11px;color:var(--ink-faint);display:flex;justify-content:space-between;gap:12px}
+.conf{color:var(--ink-faint);font-size:11px;white-space:nowrap}
+/* context bars */
+.ctx-body{padding:16px 18px;display:grid;grid-template-columns:150px 1fr 68px;gap:11px 14px;align-items:center;font-size:12px}
+.ctx-name{font-weight:700}
+.ctx-total{text-align:right;font-weight:700;font-size:14px}
+.ctx-legend{grid-column:1/-1;display:flex;gap:18px;font-size:10px;color:var(--ink-faint);margin-top:3px;flex-wrap:wrap}
+.swatch{display:inline-block;width:9px;height:9px;vertical-align:-1px}
+.bar-agg{height:15px;border:1px dashed var(--line-soft);display:flex;background:transparent}
+/* stat numerals + file list */
+.pad{padding:12px 16px}
+.stats{display:flex;gap:20px;align-items:baseline}
+.stat-n{font-size:26px;font-weight:700}
+.stat-lbl{font-size:10px;color:var(--ink-faint)}
+.kv{display:flex;justify-content:space-between;gap:12px}
+/* retro-owns file list: fixed columns so paths truncate (never wrap) and the
+   rules/tok numbers stay aligned; a faint header says what the two numbers are */
+.own-grid{margin-top:10px;padding-top:8px;border-top:1px dotted var(--line-soft);
+  font-size:11px;color:var(--ink-soft);display:grid;grid-template-columns:1fr auto auto;
+  gap:3px 14px;align-items:baseline}
+.own-grid .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.own-grid .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.own-grid .hd{font-size:10px;letter-spacing:1px;color:var(--ink-faint)}
+/* pipeline: 2-col grid, values never wrap; stage chain is a caption above */
+.pipe{padding:10px 16px;font-size:11.5px;color:var(--ink-soft)}
+.pipe-cap{font-size:10px;letter-spacing:1px;color:var(--ink-faint);margin-bottom:7px}
+.pipe-grid{display:grid;grid-template-columns:1fr auto;gap:7px 12px;align-items:baseline}
+.pipe-grid span{white-space:nowrap}
+.pipe-grid b{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+/* the titlebar corner mark is decorative (old-Mac close box) — dim it so it
+   doesn't read as a clickable checkbox (checkpoint feedback) */
+.titlebar .box{border-color:var(--line-soft);opacity:.45}
+/* ── knowledge + activity + config: two-column layouts ── */
+.kn-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:12px;align-items:start}
+/* min-width:0 lets grid tracks shrink below their content's intrinsic width —
+   without it a long unbreakable rule id forces the column (and the whole page)
+   wider than the viewport, pushing the right column off-screen */
+.kn-grid>*,.cfg-grid>*,.ov-grid>*,.ov-bottom>*{min-width:0}
+.col-left{display:flex;flex-direction:column;min-width:0}
+.col-right{display:flex;flex-direction:column;gap:12px;min-width:0}
+/* filter bar */
+.filters{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line-soft);font-size:11px}
+.search{border:1px solid var(--line);background:var(--field);padding:2px 10px;flex:1;display:flex;gap:8px;align-items:center;color:var(--ink-faint)}
+.search input{border:0;background:transparent;color:var(--ink);flex:1;font:inherit;outline:none;padding:2px 0}
+.sel{border:1px solid var(--line);background:var(--chip);color:var(--ink);padding:3px 8px;font:inherit;font-size:11px;cursor:pointer}
+/* rule table */
+.rt-head,.rt-row{display:grid;grid-template-columns:1fr 110px 92px 64px 56px;gap:0 12px;align-items:center}
+.rt-head{padding:6px 14px;border-bottom:1px solid var(--line);font-size:10px;color:var(--ink-faint);letter-spacing:1px}
+.rt-row{padding:9px 14px;border-bottom:1px dotted var(--line-soft);cursor:pointer;font-size:12px}
+.rt-row:last-child{border-bottom:0}
+.rt-head>span,.rt-row>span{min-width:0}
+.rt-row b{overflow-wrap:anywhere}
+.rt-desc{color:var(--ink-soft);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt-num{text-align:right;font-variant-numeric:tabular-nums}
+.rt-veto{text-align:center}
+/* rule detail */
+.detail-box{border:1px solid var(--line-soft);background:var(--field);padding:8px 12px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+.detail-grid{display:grid;grid-template-columns:auto 1fr;gap:2px 16px;margin-top:10px;font-size:11.5px;color:var(--ink-soft);line-height:1.9}
+.detail-grid .k{color:var(--ink-faint)}
+.detail-actions{display:flex;gap:8px;margin-top:12px}
+/* veto modal dialog */
+.dialog .box{opacity:.45}
+/* ── activity log ── */
+.log-day{padding:4px 16px;font-size:10px;letter-spacing:2px;color:var(--ink-faint);
+  background:color-mix(in oklab,var(--panel) 90%,var(--line));border-bottom:1px solid var(--line-soft)}
+.log-row{display:flex;gap:12px;padding:9px 16px;border-bottom:1px dotted var(--line-soft);align-items:baseline;font-size:12px}
+.log-row:last-child{border-bottom:0}
+.log-time{color:var(--ink-faint);width:60px;flex:none;font-variant-numeric:tabular-nums}
+.log-main{flex:1;min-width:0}
+.log-sub{color:var(--ink-soft);font-size:11px}
+.log-glyph{flex:none}
+/* health checks (detail may wrap — unlike the nowrap pipe rows) */
+.chk{display:flex;justify-content:space-between;gap:12px;padding:2px 0;font-size:11.5px;align-items:baseline}
+.chk .cv{text-align:right}
+/* ── config ── */
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+.cfg-body{padding:14px 18px;display:grid;gap:14px}
+.cfg-row{display:flex;justify-content:space-between;align-items:center;gap:16px;font-size:12px}
+.cfg-hint{color:var(--ink-faint);font-size:11px}
+.seg{display:flex;font-size:11px}
+.seg span{border:1px solid var(--line);background:var(--field);padding:3px 12px;cursor:pointer;color:var(--ink-faint)}
+.seg span+span{border-left:0}
+.seg span.on{background:var(--chip);color:var(--ink);font-weight:700}
+.stepper{display:flex;align-items:center;gap:6px}
+.stepper .btn{padding:2px 9px;font-size:12px}
+input[type=range]{accent-color:var(--accent);width:120px}
+.proj-head,.proj-row{display:grid;grid-template-columns:1fr 200px 90px 90px;gap:0 12px;align-items:center}
+.proj-head{padding:6px 16px;border-bottom:1px solid var(--line);font-size:10px;color:var(--ink-faint);letter-spacing:1px}
+.proj-row{padding:9px 16px;border-bottom:1px dotted var(--line-soft);font-size:12px}
+.proj-row:last-child{border-bottom:0}
+/* Carried-over discipline: a later task's modal sets display:flex at equal
+   specificity and is declared later — without !important the backdrop would
+   permanently cover the page. Keep the !important. */
+.hidden{display:none !important}
 </style>
 </head>
 <body>
-<header>
-  <h1>retro</h1>
-  <nav id="tabs">
-    <button data-tab="xray" class="active">X-ray</button>
-    <button data-tab="knowledge">Knowledge</button>
-    <button data-tab="health">Health</button>
-    <button data-tab="history">History</button>
-  </nav>
-</header>
+<div class="menubar">
+  <span class="brand">▞ retro</span>
+  <span class="tab active" data-tab="overview">Overview</span>
+  <span class="tab" data-tab="knowledge">Knowledge</span>
+  <span class="tab" data-tab="activity">Activity</span>
+  <span class="tab" data-tab="config">Config</span>
+  <span class="meta" id="menuMeta"></span>
+</div>
 <main id="main"></main>
-<div id="modal" class="modal hidden" onclick="if (event.target === this) closeModal()">
-  <div class="modal-card" id="modalBody"></div>
+<div class="front-panel">
+  <span class="brand">▞ front panel</span>
+  <span id="fpStore">store —</span>
+  <span id="fpQueue">queue —</span>
+  <span id="fpBudget">budget —</span>
+  <span id="fpPush">push —</span>
+  <span class="health" id="fpHealth">…</span>
+</div>
+<!-- Veto/exclude confirm modal. Lives OUTSIDE #main so it survives the
+     wholesale innerHTML swaps in render(). -->
+<div id="modal" class="overlay hidden" onclick="if(event.target===this)closeModal()">
+  <div class="dialog window" id="modalBody"></div>
 </div>
 <script>
-const $ = (s, el=document) => el.querySelector(s);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const get = async p => { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).error || r.status); return r.json(); };
-const post = async (p, body) => { const r = await fetch(p, {method:"POST", body: JSON.stringify(body)}); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
-const fileCell = f => f.present ? `${(f.bytes/1024).toFixed(1)} KB <span class="dim">(~${f.tokens_est} tok)</span>` : `<span class="dim">—</span>`;
+// Version shown in the menu meta. The release task (bump-to-3.1.0) keeps this
+// in sync with the crate version — retro has no endpoint that reports it, so a
+// hardcoded const is the honest, single non-live bit in the chrome.
+const VERSION = "3.1.0";
 
-// Cache of registered project slugs, used to populate the Knowledge tab's
-// scope filter (node scope is matched exactly server-side, so "project"
-// scopes need a concrete slug: "project/<slug>"). Reset after excludeProject
-// succeeds so a removed project drops out of the list.
-let projectSlugsCache = null;
-async function getProjectSlugs() {
-  if (projectSlugsCache !== null) return projectSlugsCache;
-  try {
-    const x = await get("/api/xray");
-    projectSlugsCache = x.projects.map(p => p.slug);
-    return projectSlugsCache;
-  } catch (e) {
-    return []; // transient failure — don't cache, retry on next render
-  }
+/* ── helpers (preserved from the 3.0.0 dashboard) ───────────────────── */
+const $ = (s, el = document) => el.querySelector(s);
+// Escapes & < > " ' — EVERY server-supplied string routed through innerHTML
+// must pass through this.
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const get = async p => { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).error || r.status); return r.json(); };
+const post = async (p, body) => { const r = await fetch(p, { method: "POST", body: JSON.stringify(body) }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
+
+/* ── formatting ─────────────────────────────────────────────────────── */
+// Thousands separators (17658 -> "17,658"). Non-finite -> "—".
+const fmtNum = n => Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "—";
+// Compact abbreviation for aggregate totals (21342 -> "21.3K").
+const kAbbr = n => !Number.isFinite(n) ? "—" : n < 1000 ? String(Math.round(n)) : (n / 1000).toFixed(1) + "K";
+// 5-block confidence glyph as TEXT (not a widget): 0.80 -> "■■■■□ .80".
+function glyph(conf) {
+  const c = Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : 0;
+  const filled = Math.round(c * 5);
+  const frac = c.toFixed(2).replace(/^0/, ""); // "0.80" -> ".80"
+  return "■".repeat(filled) + "□".repeat(5 - filled) + " " + frac;
+}
+// tokens_est of an xray file object, 0 when absent.
+const tok = f => (f && f.present && Number.isFinite(f.tokens_est)) ? f.tokens_est : 0;
+// git --date=iso is "YYYY-MM-DD HH:MM:SS +ZZZZ"; the space before the offset
+// makes Date.parse() return NaN, so parse the first 19 chars as local time.
+function parseGitDate(s) { const t = Date.parse(String(s).slice(0, 19).replace(" ", "T")); return isNaN(t) ? null : t; }
+// friendlier labels for retro's doctor check names (UI-only; the CLI keeps the
+// raw names). Falls back to the raw name for anything unmapped.
+const CHECK_LABELS = {
+  "v3-enabled": "v3 enabled", "store-present": "store initialized", "store-repo": "store git repo",
+  "index": "search index", "hooks": "session hooks", "queue": "session queue", "stages": "pipeline stages",
+  "projection": "projected files", "v2-runner": "legacy v2 runner", "backup": "backup remote", "claude-cli": "claude CLI",
+};
+const checkLabel = name => CHECK_LABELS[name] || name;
+// A window with a centered-title bar (the desktop chrome recipe).
+function win(title, meta, bodyHtml, extraClass) {
+  const m = meta ? `<span class="meta">${esc(meta)}</span>` : "";
+  return `<div class="window${extraClass ? " " + extraClass : ""}">
+    <div class="titlebar"><span class="box"></span><span class="title">${esc(title)}</span>${m}</div>
+    ${bodyHtml}
+  </div>`;
 }
 
+/* ── theme ──────────────────────────────────────────────────────────── */
+const prefersDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+function themeMode() { try { return localStorage.getItem('retro-theme') || 'auto'; } catch (e) { return 'auto'; } }
+function resolveTheme(mode) {
+  if (mode === 'dark') return 'dark';
+  if (mode === 'light') return 'light';
+  return prefersDark && prefersDark.matches ? 'dark' : 'light'; // auto
+}
+function applyTheme() { document.documentElement.setAttribute('data-theme', resolveTheme(themeMode())); }
+// Persist + apply. The Config tab (Task 6) wires its segmented control to this.
+function setTheme(mode) { try { localStorage.setItem('retro-theme', mode); } catch (e) { } applyTheme(); }
+// Live-follow the OS setting while in auto mode.
+if (prefersDark) prefersDark.addEventListener('change', () => { if (themeMode() === 'auto') applyTheme(); });
+applyTheme(); // idempotent with the pre-paint apply in <head>
+
+/* ── tab shell + router ─────────────────────────────────────────────── */
+// Each view returns the HTML for #main. Stubs this task; Tasks 3–6 fill in the
+// real bodies (they may become async — render() already awaits the result).
+function stub(name) {
+  return `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">${esc(name)}</span></div>
+    <div class="stub">${esc(name)} — coming in a later task.</div>
+  </div>`;
+}
 const views = {
-  async xray() {
-    const x = await get("/api/xray");
-    let html = `<div class="card"><div class="row">
-      <div><b>Global CLAUDE.md</b> ${fileCell(x.global_claude_md)}
-        <span class="badge retro-owned">${x.global_active_nodes} retro rules</span></div>
-      <div><b>Skills</b> ${x.skills_count}</div></div></div>`;
-    if (x.store_warnings.length)
-      html += `<div class="card warn">⚠ ${x.store_warnings.map(esc).join("<br>")}</div>`;
-    html += x.projects.map(p => `<div class="card">
-      <div class="row"><b>${esc(p.slug)}</b><span class="dim">${esc(p.path)}</span></div>
-      <table><tr>
-        <td>CLAUDE.md ${fileCell(p.claude_md)}</td>
-        <td>CLAUDE.local.md ${fileCell(p.claude_local_md)} <span class="badge retro-owned">retro</span></td>
-        <td>MEMORY.md ${fileCell(p.memory_md)}</td>
-        <td><span class="badge retro-owned">${p.active_nodes} nodes</span></td>
-        <td><button class="action danger" onclick="excludeProject('${esc(p.slug)}')">exclude</button></td>
-      </tr></table></div>`).join("");
-    return html;
-  },
-  async knowledge() {
-    const q = $("#kq")?.value ?? "";
-    const scope = $("#kscope")?.value ?? "";
-    const type = $("#ktype")?.value ?? "";
-    const active = $("#kactive")?.value ?? "";
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (scope) params.set("scope", scope);
-    if (type) params.set("type", type);
-    if (active) params.set("active", active);
-    const [nodes, slugs] = await Promise.all([get("/api/nodes?" + params), getProjectSlugs()]);
-    const scopeOpts = [["", "all scopes"], ["global", "global"], ...slugs.map(s => [`project/${s}`, s])]
-      .map(([v, label]) => `<option value="${esc(v)}" ${scope === v ? "selected" : ""}>${esc(label)}</option>`).join("");
-    const typeOpts = ["", "rule", "preference", "pattern", "memory"]
-      .map(t => `<option value="${esc(t)}" ${type === t ? "selected" : ""}>${t ? esc(t) : "all types"}</option>`).join("");
-    const activeOpts = [["", "all"], ["true", "active only"]]
-      .map(([v, label]) => `<option value="${esc(v)}" ${active === v ? "selected" : ""}>${esc(label)}</option>`).join("");
-    return `<div class="card row">
-        <input id="kq" placeholder="search…" value="${esc(q)}" onchange="render()">
-        <select id="kscope" onchange="render()">${scopeOpts}</select>
-        <select id="ktype" onchange="render()">${typeOpts}</select>
-        <select id="kactive" onchange="render()">${activeOpts}</select>
-      </div>` +
-      (nodes.map(n => `<div class="card" ${n.active ? "" : 'style="opacity:.5"'}>
-        <div class="row"><b class="clickable" onclick="viewNode('${esc(n.scope)}','${esc(n.id)}')">${esc(n.id)}</b>
-          <span><span class="badge">${esc(n.scope)}</span> <span class="badge">${esc(n.type)}</span>
-          <span class="badge">${n.confidence.toFixed(2)}</span>
-          ${n.active ? `<button class="action danger" onclick="invalidate('${esc(n.scope)}','${esc(n.id)}')">invalidate</button>` : `<span class="dim">invalidated</span>`}</span></div>
-        <pre class="dim">${esc(n.body)}</pre>
-        <span class="dim">sources: ${n.sources.map(esc).join(", ") || "—"} · updated ${esc(n.updated)}</span>
-      </div>`).join("") || `<div class="card dim">no nodes</div>`);
-  },
-  async health() {
-    const h = await get("/api/health"), d = await get("/api/doctor");
-    return `<div class="card"><b>Doctor</b><table>` +
-      d.checks.map(c => `<tr><td class="${c.ok?"ok":"err"}">${c.ok?"✓":"✗"}</td><td>${esc(c.name)}</td><td class="dim">${esc(c.detail)}</td></tr>`).join("") +
-      `</table></div><div class="card"><b>Stages</b><table>` +
-      Object.entries(h.stages).map(([n,s]) => `<tr><td class="${s.ok?"ok":"err"}">${s.ok?"✓":"✗"}</td><td>${esc(n)}</td><td class="dim">${esc(s.detail)}</td><td class="dim">${esc(s.at)}</td></tr>`).join("") +
-      `</table></div><div class="card dim">queue: ${h.queue_len} · budget left today: ${h.budget_remaining} · pending notifications: ${h.notifications_pending}</div>`;
-  },
-  async history() {
-    const commits = await get("/api/history?limit=50");
-    return `<div class="card"><table>` +
-      commits.map(c => `<tr><td class="dim">${esc(c.hash)}</td><td>${esc(c.subject)}</td><td class="dim">${esc(c.date)}</td></tr>`).join("") +
-      `</table></div>`;
-  },
+  overview: () => stub("Overview"),
+  knowledge: () => stub("Knowledge"),
+  activity: () => stub("Activity"),
+  config: () => stub("Config"),
 };
 
-let tab = "xray";
+/* ── Overview tab (frames 1a/1b/1c) — every value from a real endpoint ── */
+let overviewExpanded = false; // Context: show all projects vs top 5 + aggregate
+function toggleOverviewExpand() { overviewExpanded = !overviewExpanded; render(); }
+
+/* ── modal (veto confirm, frame 4c; also project exclude in Config) ── */
+function openModal(html) { $("#modalBody").innerHTML = html; $("#modal").classList.remove("hidden"); }
+function closeModal() { $("#modal").classList.add("hidden"); $("#modalBody").innerHTML = ""; }
+
+// Which managed file a scope projects to (for the veto consequence copy).
+function scopeFile(scope, path) {
+  if (path) return path;
+  if (scope === "global") return "~/.claude/CLAUDE.md";
+  return scope.replace(/^project\//, "") + "/CLAUDE.local.md";
+}
+
+// Veto = retro's real permanent-invalidate. Honest copy: the rule is marked
+// invalid and won't be re-projected — NOT a content "blacklist" (retro has
+// none); it stays recoverable via the store's git history.
+async function vetoRule(scope, id) {
+  let path = "";
+  try { const n = await get(`/api/node?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`); path = n.path || ""; } catch (e) { }
+  openModal(`
+    <div class="titlebar"><span class="box"></span><span class="title">Veto rule?</span></div>
+    <div style="padding:14px 18px;font-size:12px">
+      <div class="detail-box" style="white-space:normal"><b>${esc(id)}</b> <span class="dim">${esc(scope)}</span></div>
+      <div style="margin-top:10px;color:var(--ink-soft);font-size:11.5px">Removed from <b>${esc(scopeFile(scope, path))}</b> and marked invalid — retro won't re-project it. Recoverable via the store's git history.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <span class="btn" onclick="closeModal()">Cancel</span>
+        <span class="btn btn-danger" onclick="confirmVeto('${esc(scope)}','${esc(id)}')">Veto — mark invalid</span>
+      </div>
+    </div>`);
+}
+async function confirmVeto(scope, id) {
+  try { await post("/api/node/invalidate", { scope, id }); closeModal(); knInvalidate(); render(); refreshStatus(); }
+  catch (e) { alert(e.message); }
+}
+// Edit a rule's text via the real update endpoint (inline prompt for now).
+async function editRule(scope, id) {
+  try {
+    const n = await get(`/api/node?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`);
+    const next = prompt("Edit rule text:", n.body);
+    if (next === null) return;
+    if (!next.trim() || next === n.body) return;
+    await post("/api/node/update", { scope, id, body: next });
+    knInvalidate(); render(); refreshStatus();
+  } catch (e) { alert(e.message); }
+}
+// Config: persist a whitelisted setting (threshold/budget/model) then re-render.
+async function cfgSet(key, value) {
+  try { await post("/api/config", { [key]: value }); knInvalidate(); render(); refreshStatus(); }
+  catch (e) { alert(e.message); }
+}
+// Debounced variant for the threshold slider: a threshold change reprojects
+// every managed file, so coalesce a drag (and quick back-and-forth) into a
+// single apply after the user settles — no per-release commit spam, and no
+// accidental mid-drag rewrite of the global CLAUDE.md.
+let cfgTimer;
+function cfgSetDebounced(key, value) {
+  clearTimeout(cfgTimer);
+  cfgTimer = setTimeout(() => cfgSet(key, value), 500);
+}
+// Exclude a project — real destructive action (deletes its retro-owned
+// knowledge; git-recoverable). Same modal shape as veto.
+function excludeProject(slug) {
+  openModal(`
+    <div class="titlebar"><span class="box"></span><span class="title">Stop watching project?</span></div>
+    <div style="padding:14px 18px;font-size:12px">
+      <div class="detail-box" style="white-space:normal"><b>${esc(slug)}</b></div>
+      <div style="margin-top:10px;color:var(--ink-soft);font-size:11.5px">retro stops watching <b>${esc(slug)}</b> and deletes its retro-owned knowledge (its CLAUDE.local.md managed content). Recoverable via the store's git history.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <span class="btn" onclick="closeModal()">Cancel</span>
+        <span class="btn btn-danger" onclick="confirmExclude('${esc(slug)}')">Exclude — delete knowledge</span>
+      </div>
+    </div>`);
+}
+async function confirmExclude(slug) {
+  try { await post("/api/project/exclude", { slug }); closeModal(); knInvalidate(); render(); refreshStatus(); }
+  catch (e) { alert(e.message); }
+}
+
+const SCALE = 20000; // shared context-bar scale: 0–20K tokens
+
+views.overview = async () => {
+  const [xray, nodes, health, cfg] = await Promise.all([
+    get("/api/xray"), get("/api/nodes?active=true"), get("/api/health"), get("/api/config"),
+  ]);
+  const threshold = Number.isFinite(cfg && cfg.confidence_threshold) ? cfg.confidence_threshold : 0.7;
+
+  // — Learned this week — active nodes updated within 7 days, held = below threshold —
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  const recent = (nodes || [])
+    .filter(n => { const t = Date.parse(n.updated); return !isNaN(t) && t >= weekAgo; })
+    .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  const held = recent.filter(n => n.confidence < threshold).length;
+  const fresh = recent.length - held;
+  const shown = recent.slice(0, 6);
+  const learnRows = shown.map(n => {
+    const isHeld = n.confidence < threshold;
+    const meta = isHeld ? `${n.scope} · held` : `${n.scope} · ${n.type}`;
+    return `<div class="learn"${isHeld ? ' style="opacity:.55"' : ''}>
+      <div class="learn-head">
+        <span><b>${esc(n.id)}</b> <span class="learn-meta">${esc(meta)}</span></span>
+        <span style="display:flex;gap:8px;align-items:center">
+          <span class="conf">${esc(glyph(n.confidence))}</span>
+          <span class="btn" onclick="vetoRule('${esc(n.scope)}','${esc(n.id)}')">Veto</span>
+        </span>
+      </div>
+      <div class="learn-desc">${esc(n.body)}</div>
+    </div>`;
+  }).join("") || `<div class="learn learn-desc">Nothing learned in the last 7 days.</div>`;
+  const more = Math.max(0, recent.length - shown.length);
+  const learnFoot = `<div class="learn-foot">
+    <span>${more ? `+ ${more} more this week · ${held} held` : "vetoed rules never return"}</span>
+    <span class="link" onclick="goTab('knowledge')">view all in Knowledge →</span></div>`;
+  const learned = `<div class="window ov-learned">
+    <div class="titlebar"><span class="box"></span><span class="title">Learned this week</span><span class="meta">${fresh} new · ${held} held</span></div>
+    <div class="learn-list">${learnRows}</div>${learnFoot}</div>`;
+
+  // — Context session load — per-project stacked bar of the 4 token sources —
+  const g = tok(xray.global_claude_md);
+  const projs = (xray.projects || []).map(p => {
+    const proj = tok(p.claude_md), retro = tok(p.claude_local_md), mem = tok(p.memory_md);
+    return { slug: p.slug, g, proj, retro, mem, total: g + proj + retro + mem };
+  }).sort((a, b) => b.total - a.total);
+  const seg = (w, cls, extra) => w > 0 ? `<div class="${cls}" style="width:${Math.min(w / SCALE * 100, 100)}%${extra || ""}"></div>` : "";
+  const barRow = p => `<span class="ctx-name">${esc(p.slug)}</span>
+    <div class="bar">${seg(p.g, "seg-global")}${seg(p.proj, "seg-project")}${seg(p.retro, "seg-retro")}${seg(p.mem, "seg-memory")}</div>
+    <span class="ctx-total">${fmtNum(p.total)}</span>`;
+  const TOP = 5;
+  const showAll = overviewExpanded || projs.length <= TOP;
+  let ctxRows = (showAll ? projs : projs.slice(0, TOP)).map(barRow).join("");
+  if (!showAll) {
+    const rest = projs.slice(TOP), restSum = rest.reduce((s, p) => s + p.total, 0);
+    ctxRows += `<span class="ctx-name link dim" onclick="toggleOverviewExpand()">+ ${rest.length} more ▸</span>
+      <div class="bar-agg"><div style="width:${Math.min(restSum / SCALE * 100, 100)}%;background:repeating-linear-gradient(90deg,var(--line-soft) 0 4px,transparent 4px 8px)"></div></div>
+      <span class="ctx-total dim">${kAbbr(restSum)}</span>`;
+  } else if (projs.length > TOP) {
+    ctxRows += `<span class="link dim" onclick="toggleOverviewExpand()">show less ▴</span><div></div><span></span>`;
+  }
+  const legend = `<div class="ctx-legend">
+    <span><span class="swatch seg-global"></span> global CLAUDE.md</span>
+    <span><span class="swatch seg-project" style="border:1px solid var(--line-soft)"></span> project CLAUDE.md</span>
+    <span><span class="swatch seg-retro"></span> retro-owned</span>
+    <span><span class="swatch seg-memory" style="border:1px solid var(--accent)"></span> MEMORY.md</span>
+    <span style="margin-left:auto">scale 0 – 20K</span></div>`;
+  const ctxMeta = overviewExpanded && projs.length > TOP ? `all ${projs.length} · expanded`
+    : projs.length > TOP ? `top ${TOP} of ${projs.length} · by weight` : "tokens at session start";
+  const context = `<div class="window ov-context">
+    <div class="titlebar"><span class="box"></span><span class="title">Context — session load</span><span class="meta">${esc(ctxMeta)}</span></div>
+    <div class="ctx-body">${ctxRows || '<span class="dim" style="grid-column:1/-1">no projects tracked yet</span>'}${legend}</div></div>`;
+
+  // — Retro owns — global managed block + each CLAUDE.local.md (NOT MEMORY.md) —
+  const owned = [];
+  if (xray.global_claude_md && xray.global_claude_md.present)
+    owned.push({ label: "~/.claude/CLAUDE.md", nodes: xray.global_active_nodes || 0, toks: g });
+  (xray.projects || []).forEach(p => {
+    if (p.claude_local_md && p.claude_local_md.present)
+      owned.push({ label: `${p.slug}/CLAUDE.local.md`, nodes: p.active_nodes || 0, toks: tok(p.claude_local_md) });
+  });
+  const ownTokens = owned.reduce((s, f) => s + f.toks, 0);
+  const ownRules = (xray.global_active_nodes || 0) + (xray.projects || []).reduce((s, p) => s + (p.active_nodes || 0), 0);
+  const ownRow = (label, nodes, toks, dim) => {
+    const c = dim ? " dim" : "";
+    return `<span class="lbl${c}" title="${esc(label)}">${esc(label)}</span><span class="num${c}">${nodes}</span><span class="num${c}">${fmtNum(toks)}</span>`;
+  };
+  const top3 = owned.slice(0, 3).map(f => ownRow(f.label, f.nodes, f.toks, false)).join("");
+  const restF = owned.slice(3);
+  const restRow = restF.length
+    ? ownRow(`+ ${restF.length} more files`, restF.reduce((s, f) => s + f.nodes, 0), restF.reduce((s, f) => s + f.toks, 0), true) : "";
+  const fileGrid = owned.length
+    ? `<div class="own-grid"><span class="hd">file</span><span class="hd num">rules</span><span class="hd num">tok</span>${top3}${restRow}</div>`
+    : `<div class="own-grid dim"><span class="lbl">nothing projected yet</span><span></span><span></span></div>`;
+  const owns = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Retro owns</span></div>
+    <div class="pad">
+      <div class="stats">
+        <span><span class="stat-n ok">${fmtNum(ownTokens)}</span> <span class="stat-lbl">tok</span></span>
+        <span><span class="stat-n">${fmtNum(ownRules)}</span> <span class="stat-lbl">rules</span></span>
+        <span><span class="stat-n">${owned.length}</span> <span class="stat-lbl">files</span></span>
+      </div>
+      ${fileGrid}
+    </div></div>`;
+
+  // — Pipeline — store/queue/budget + last observe→analyze→project + push —
+  const st = health.stages || {};
+  const hhmm = at => { const t = Date.parse(at); if (isNaN(t)) return ""; const d = new Date(t); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  const chain = ["observe", "analyze", "project"];
+  const failed = chain.find(k => st[k] && !st[k].ok);
+  const lastAt = chain.map(k => st[k] && st[k].at).filter(Boolean).sort().pop();
+  const runCell = failed ? `<b><span class="bad">✗ ${esc(failed)}</span> ${esc(hhmm(st[failed].at))}</b>`
+    : lastAt ? `<b class="ok">✓ ${esc(hhmm(lastAt))}</b>` : `<b class="dim">—</b>`;
+  const push = st.push;
+  const pushCell = push ? `<b class="${push.ok ? "ok" : "bad"}">${esc(relTime(push.at))} ${push.ok ? "✓" : "✗"}</b>` : `<b class="dim">—</b>`;
+  const budR = health.budget_remaining, budM = health.budget_max, queueN = health.queue_len || 0;
+  const pipe = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Pipeline</span></div>
+    <div class="pipe">
+      <div class="pipe-cap">observe → analyze → project · SessionEnd / SessionStart hooks</div>
+      <div class="pipe-grid">
+        <span>store</span><b>${fmtNum(xray.total_nodes)} nodes</b>
+        <span>session queue</span><b class="${queueN > 0 ? "bad" : ""}">${queueN}</b>
+        <span>AI budget today</span><b class="${budR === 0 ? "bad" : ""}">${fmtNum(budR)}/${fmtNum(budM)}</b>
+        <span>last run</span>${runCell}
+        <span>push</span>${pushCell}
+      </div>
+    </div></div>`;
+
+  return `<div class="ov-grid">${learned}${context}<div class="ov-bottom">${owns}${pipe}</div></div>`;
+};
+
+/* ── Knowledge tab (frames 2a/3b) ── */
+let kn = { q: "", scope: "", type: "", status: "all", sort: "weight", selId: null, selScope: null };
+// Cache the fetched node set keyed by scope|type so search/status/sort are pure
+// client-side ops — search is live (no per-keystroke server round-trip). Writes
+// and scope/type changes invalidate the cache so counts refresh.
+let knCache = null; // { key, xray, cfg, nodes }
+function knInvalidate() { knCache = null; }
+function knSet(k, v) { kn[k] = v; if (k === "scope" || k === "type") knInvalidate(); render(); }
+function knSelect(scope, id) { kn.selScope = scope; kn.selId = id; render(); }
+
+views.knowledge = async () => {
+  const key = kn.scope + "|" + kn.type;
+  if (!knCache || knCache.key !== key) {
+    const params = new URLSearchParams();
+    if (kn.scope) params.set("scope", kn.scope);
+    if (kn.type) params.set("type", kn.type);
+    try {
+      const [xray, cfg, nodes] = await Promise.all([get("/api/xray"), get("/api/config"), get("/api/nodes?" + params)]);
+      knCache = { key, xray, cfg, nodes: nodes || [] };
+    } catch (e) {
+      return `<div class="kn-grid"><div class="window col-left">
+        <div class="titlebar"><span class="box"></span><span class="title">Rule store</span></div>
+        <div class="stub bad">${esc(e.message)}</div></div><div class="col-right"></div></div>`;
+    }
+  }
+  const { xray, cfg, nodes } = knCache;
+  const thr = Number.isFinite(cfg.confidence_threshold) ? cfg.confidence_threshold : 0.7;
+  const statusOf = n => !n.active ? "vetoed" : (n.confidence < thr ? "held" : "live");
+  // live search: case-insensitive substring over id + body, client-side.
+  const q = kn.q.trim().toLowerCase();
+  let list = nodes.map(n => ({ ...n, st: statusOf(n) }));
+  if (q) list = list.filter(n => (n.id + " " + (n.body || "")).toLowerCase().includes(q));
+  if (kn.status !== "all") list = list.filter(n => n.st === kn.status);
+  const sorters = {
+    weight: (a, b) => b.confidence - a.confidence,
+    recent: (a, b) => String(b.updated).localeCompare(String(a.updated)),
+    tokens: (a, b) => (b.tokens_est || 0) - (a.tokens_est || 0),
+  };
+  list.sort(sorters[kn.sort] || sorters.weight);
+
+  // filter controls (native selects styled as flat chips)
+  const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
+  const projSlugs = (xray.projects || []).map(p => p.slug);
+  const scopeSel = `<select class="sel" onchange="knSet('scope',this.value)">${opt("", "scope: all", kn.scope)}${opt("global", "scope: global", kn.scope)}${projSlugs.map(s => opt("project/" + s, "scope: " + s, kn.scope)).join("")}</select>`;
+  const typeSel = `<select class="sel" onchange="knSet('type',this.value)">${["", "rule", "preference", "pattern", "memory"].map(t => opt(t, "type: " + (t || "all"), kn.type)).join("")}</select>`;
+  const statusSel = `<select class="sel" onchange="knSet('status',this.value)">${["all", "live", "held", "vetoed"].map(s => opt(s, "status: " + s, kn.status)).join("")}</select>`;
+  const sortSel = `<select class="sel" onchange="knSet('sort',this.value)">${["weight", "recent", "tokens"].map(s => opt(s, "sort: " + s, kn.sort)).join("")}</select>`;
+
+  const rows = list.map(n => {
+    const stCls = n.st === "vetoed" ? " row-vetoed" : n.st === "held" ? " row-held" : "";
+    const selCls = (n.id === kn.selId && n.scope === kn.selScope) ? " row-selected" : "";
+    const conf = n.st === "vetoed" ? "vetoed" : glyph(n.confidence) + (n.st === "held" ? " held" : "");
+    const toks = n.st === "vetoed" ? "—" : fmtNum(n.tokens_est);
+    const veto = n.active
+      ? `<span class="btn" onclick="event.stopPropagation();vetoRule('${esc(n.scope)}','${esc(n.id)}')">Veto</span>`
+      : `<span class="dim">✗</span>`;
+    return `<div class="rt-row${stCls}${selCls}" onclick="knSelect('${esc(n.scope)}','${esc(n.id)}')">
+      <span><b>${esc(n.id)}</b><div class="rt-desc">${esc(n.body)}</div></span>
+      <span class="dim">${esc(n.scope)}</span>
+      <span class="conf">${esc(conf)}</span>
+      <span class="rt-num">${esc(toks)}</span>
+      <span class="rt-veto">${veto}</span>
+    </div>`;
+  }).join("") || `<div class="stub dim">${q || kn.status !== "all" ? "no rules match." : "no rules yet."}</div>`;
+
+  const store = xray.store || { live: 0, held: 0, vetoed: 0 };
+  const shownNote = list.length === (xray.total_nodes || 0) ? `${list.length}` : `${list.length} of ${fmtNum(xray.total_nodes)}`;
+  const footL = `showing ${shownNote} · ${store.live} live · ${store.held} held · ${store.vetoed} vetoed`;
+
+  const left = `<div class="window col-left">
+    <div class="titlebar"><span class="box"></span><span class="title">Rule store — ${fmtNum(xray.total_nodes)} nodes</span></div>
+    <div class="filters">
+      <span class="search">⌕ <input id="knq" placeholder="search rules…" value="${esc(kn.q)}" oninput="kn.q=this.value;render()"></span>
+      ${scopeSel}${typeSel}${statusSel}${sortSel}
+    </div>
+    <div class="rt-head"><span>RULE</span><span>SCOPE</span><span>CONFIDENCE</span><span class="rt-num">TOKENS</span><span></span></div>
+    <div class="rt-body">${rows}</div>
+    <div class="kn-foot"><span>${footL}</span><span></span></div>
+  </div>`;
+
+  return `<div class="kn-grid">${left}<div class="col-right">${await knDetail(thr)}${knStore(store)}</div></div>`;
+};
+
+// Rule detail — real fields only (no fabricated history timeline / "seen N×
+// across M projects" / Pin). Evidence = source-session count from `sources`.
+async function knDetail(thr) {
+  const head = t => `<div class="titlebar"><span class="box"></span><span class="title">${esc(t)}</span></div>`;
+  if (!kn.selId) return `<div class="window">${head("Rule detail")}<div class="stub dim">select a rule to inspect it.</div></div>`;
+  let n;
+  try { n = await get(`/api/node?scope=${encodeURIComponent(kn.selScope)}&id=${encodeURIComponent(kn.selId)}`); }
+  catch (e) { return `<div class="window">${head("Rule detail")}<div class="stub bad">${esc(e.message)}</div></div>`; }
+  const st = n.invalidated_by ? "vetoed" : (n.confidence < thr ? "held" : "live");
+  const statusLine = st === "vetoed" ? `<b class="bad">vetoed — won't be re-projected</b>`
+    : st === "held" ? `<b class="dim">held · below threshold, not projected</b>`
+      : `<b class="ok">live · in ${esc(n.path || "managed file")}</b>`;
+  const srcs = (n.sources || []).length;
+  const cost = Math.round((n.body || "").length / 4);
+  const actions = st === "vetoed" ? "" : `<div class="detail-actions">
+    <span class="btn" onclick="vetoRule('${esc(n.scope)}','${esc(n.id)}')">Veto</span>
+    <span class="btn" onclick="editRule('${esc(n.scope)}','${esc(n.id)}')">Edit text</span></div>`;
+  return `<div class="window">${head(n.id)}
+    <div class="pad">
+      <div class="detail-box">${esc(n.body)}</div>
+      <div class="detail-grid">
+        <span class="k">status</span><span>${statusLine}</span>
+        <span class="k">type</span><span>${esc(n.type)}</span>
+        <span class="k">confidence</span><span>${esc(glyph(n.confidence))}</span>
+        <span class="k">evidence</span><span>${srcs} source session${srcs === 1 ? "" : "s"}</span>
+        <span class="k">first seen</span><span>${esc(n.created)}</span>
+        <span class="k">last updated</span><span>${esc(n.updated)}</span>
+        <span class="k">cost</span><span>${fmtNum(cost)} tokens</span>
+      </div>
+      ${actions}
+    </div></div>`;
+}
+
+function knStore(store) {
+  return `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Store</span></div>
+    <div class="pipe"><div class="pipe-grid">
+      <span>live rules</span><b>${fmtNum(store.live)}</b>
+      <span>held (below threshold)</span><b>${fmtNum(store.held)}</b>
+      <span>vetoed</span><b>${fmtNum(store.vetoed)}</b>
+    </div></div></div>`;
+}
+
+/* ── Activity tab (frames 2b/4b) — real pipeline log from the store git
+   history + this-week counts + doctor health. No fabricated token deltas,
+   decay sweeps, dollar spend, or 4-week growth chart (none are tracked). ── */
+// Classify a store commit subject into {glyph, glyph-class, main HTML}.
+function classifyCommit(subject) {
+  const S = esc(subject);
+  let m;
+  if ((m = /^retro: learn (\d+) node\(s\), update (\d+)/.exec(subject)))
+    return { g: "✓", gc: "ok", main: `<b>run ok</b> <span class="dim">observe → analyze → project</span><div class="log-sub">${m[1]} learned · ${m[2]} updated</div>` };
+  if (/^retro: maintenance/.test(subject))
+    return { g: "♻", gc: "dim", main: `<b>maintenance</b><div class="log-sub">store housekeeping</div>` };
+  if ((m = /^user: invalidate (\S+)/.exec(subject)))
+    return { g: "✋", gc: "", main: `<b>veto</b> · <b style="text-decoration:line-through">${esc(m[1])}</b><div class="log-sub">marked invalid · won't be re-projected</div>` };
+  if ((m = /^user: edit (\S+)/.exec(subject)))
+    return { g: "✎", gc: "dim", main: `<b>edit</b> · ${esc(m[1])}<div class="log-sub">rule text changed</div>` };
+  if (/^user: config update/.test(subject))
+    return { g: "⚙", gc: "dim", main: `<b>config</b><div class="log-sub">settings changed via dashboard</div>` };
+  if (/^retro: exclude/.test(subject))
+    return { g: "⊘", gc: "dim", main: `<b>exclude</b><div class="log-sub">${S}</div>` };
+  if (/^retro: (migrate|import)/.test(subject))
+    return { g: "⇪", gc: "dim", main: `<b>${S}</b>` };
+  if (/^retro: initialize/.test(subject))
+    return { g: "◆", gc: "dim", main: `<b>init</b><div class="log-sub">store initialized</div>` };
+  return { g: "·", gc: "dim", main: `<b>${S}</b>` };
+}
+function commitDayKey(date) { const m = /^(\d{4}-\d{2}-\d{2})/.exec(date); return m ? m[1] : ""; }
+function commitTime(date) { const m = /\d{4}-\d{2}-\d{2}[ T](\d{2}:\d{2})/.exec(date); return m ? m[1] : ""; }
+function dayLabel(prefix) {
+  const d = new Date(prefix + "T12:00:00");
+  if (isNaN(d)) return esc(prefix);
+  const now = new Date();
+  const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return (isToday ? "TODAY — " : "") + `${DAYS[d.getDay()].toUpperCase()} ${MONTHS[d.getMonth()].toUpperCase()} ${d.getDate()}`;
+}
+
+views.activity = async () => {
+  const [health, doctor, commits] = await Promise.all([
+    get("/api/health").catch(() => ({})),
+    get("/api/doctor").catch(() => ({ checks: [] })),
+    get("/api/history?limit=50").catch(() => []),
+  ]);
+
+  // — pipeline log, day-grouped (history is newest-first) —
+  let logHtml = "", lastDay = null;
+  for (const c of (commits || [])) {
+    const day = commitDayKey(c.date);
+    if (day !== lastDay) { logHtml += `<div class="log-day">${esc(dayLabel(day))}</div>`; lastDay = day; }
+    const k = classifyCommit(c.subject);
+    logHtml += `<div class="log-row">
+      <span class="log-time">${esc(commitTime(c.date))}</span>
+      <span class="log-main">${k.main}</span>
+      <span class="log-glyph ${k.gc}">${k.g}</span>
+    </div>`;
+  }
+  if (!logHtml) logHtml = `<div class="stub dim">no store history yet.</div>`;
+
+  // — this-week counts (real; omits decay/growth/dollar — none tracked) —
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  const within = c => { const t = parseGitDate(c.date); return t !== null && t >= weekAgo; };
+  const wk = (commits || []).filter(within);
+  const runs = wk.filter(c => /^retro: /.test(c.subject)).length;
+  const learned = wk.reduce((s, c) => { const m = /^retro: learn (\d+) node/.exec(c.subject); return s + (m ? +m[1] : 0); }, 0);
+  const vetoed = wk.filter(c => /^user: invalidate/.test(c.subject)).length;
+  const callsUsed = (Number.isFinite(health.budget_max) && Number.isFinite(health.budget_remaining))
+    ? `${health.budget_max - health.budget_remaining}/${health.budget_max}` : "—";
+
+  const week = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">This week</span></div>
+    <div class="pad">
+      <div class="stats">
+        <span><span class="stat-n ok">${runs}</span> <span class="stat-lbl">runs</span></span>
+        <span><span class="stat-n">${learned}</span> <span class="stat-lbl">learned</span></span>
+        <span><span class="stat-n">${vetoed}</span> <span class="stat-lbl">vetoed</span></span>
+      </div>
+      <div class="filelist"><div class="kv"><span>AI calls today</span><b>${esc(callsUsed)}</b></div></div>
+    </div></div>`;
+
+  // — health checks from doctor (+ real version; no update-check) —
+  const checks = (doctor.checks || []).map(c =>
+    `<div class="chk"><span>${esc(checkLabel(c.name))}</span><b class="cv ${c.ok ? "ok" : "bad"}">${c.ok ? "✓" : "✗"} ${esc(c.detail)}</b></div>`).join("");
+  const healthWin = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Health checks</span></div>
+    <div class="pad" style="padding-top:8px">${checks || '<div class="chk dim">no checks</div>'}
+      <div class="chk"><span>version</span><b class="cv">${esc(VERSION)}</b></div>
+    </div></div>`;
+
+  const left = `<div class="window col-left">
+    <div class="titlebar"><span class="box"></span><span class="title">Pipeline log</span><span class="meta">${(commits || []).length} events</span></div>
+    <div class="rt-body">${logHtml}</div>
+    <div class="kn-foot"><span>${runs} runs · ${vetoed} veto this week</span><span></span></div>
+  </div>`;
+  return `<div class="kn-grid">${left}<div class="col-right">${week}${healthWin}</div></div>`;
+};
+
+/* ── Config tab (frames 3a/4a) — working knobs (threshold/budget/model/theme)
+   over real config; honest omissions (no decay/token-cap/API-key/skin
+   dropdown — none are backed). Projects table = real files + exclude. ── */
+views.config = async () => {
+  const [cfg, doctor, xray] = await Promise.all([
+    get("/api/config"),
+    get("/api/doctor").catch(() => ({ checks: [] })),
+    get("/api/xray").catch(() => ({ projects: [] })),
+  ]);
+  const thr = Number.isFinite(cfg.confidence_threshold) ? cfg.confidence_threshold : 0.7;
+  const budget = Number.isFinite(cfg.max_ai_calls_per_day) ? cfg.max_ai_calls_per_day : 10;
+  const model = cfg.model || "sonnet";
+  const models = cfg.models || ["sonnet", "haiku", "opus"];
+  const mode = themeMode();
+
+  const learning = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Learning</span></div>
+    <div class="cfg-body">
+      <div class="cfg-row">
+        <span>confidence threshold<div class="cfg-hint">rules project to files at or above this</div></span>
+        <span style="display:flex;align-items:center;gap:10px">
+          <input type="range" min="0" max="1" step="0.01" value="${thr}"
+            oninput="document.getElementById('thrVal').textContent=(+this.value).toFixed(2).replace(/^0/,'')"
+            onchange="cfgSetDebounced('confidence_threshold', Number(this.value))">
+          <b id="thrVal" style="width:34px;text-align:right">${thr.toFixed(2).replace(/^0/, "")}</b></span>
+      </div>
+      <div class="cfg-row">
+        <span>AI budget per day<div class="cfg-hint">analyze runs allowed daily</div></span>
+        <span class="stepper">
+          <span class="btn" onclick="cfgSet('max_ai_calls_per_day', ${Math.max(0, budget - 1)})">−</span>
+          <b style="width:28px;text-align:center">${budget}</b>
+          <span class="btn" onclick="cfgSet('max_ai_calls_per_day', ${Math.min(1000, budget + 1)})">+</span>
+        </span>
+      </div>
+    </div></div>`;
+
+  const appearance = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Appearance</span></div>
+    <div class="cfg-body">
+      <div class="cfg-row"><span>theme</span>
+        <span class="seg">
+          <span class="${mode === "light" ? "on" : ""}" onclick="setTheme('light');render()">light</span>
+          <span class="${mode === "dark" ? "on" : ""}" onclick="setTheme('dark');render()">dark</span>
+          <span class="${mode === "auto" ? "on" : ""}" onclick="setTheme('auto');render()">auto</span>
+        </span></div>
+      <div class="cfg-row"><span>skin<div class="cfg-hint">community themes in ~/.retro/skins/</div></span><span class="dim">planned</span></div>
+    </div></div>`;
+
+  const hc = (doctor.checks || []).find(c => c.name === "hooks");
+  const hooksVal = hc ? `<b class="${hc.ok ? "ok" : "bad"}">${hc.ok ? "✓ installed" : "✗ " + esc(hc.detail)}</b>` : `<b class="dim">unknown</b>`;
+  const modelSel = `<select class="sel" onchange="cfgSet('model',this.value)">${models.map(m => `<option value="${esc(m)}"${m === model ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>`;
+  const hooksApi = `<div class="window">
+    <div class="titlebar"><span class="box"></span><span class="title">Hooks &amp; analyze</span></div>
+    <div class="cfg-body">
+      <div class="cfg-row"><span>SessionEnd / SessionStart</span>${hooksVal}</div>
+      <div class="cfg-row"><span>model for analyze</span>${modelSel}</div>
+    </div></div>`;
+
+  const projRows = (xray.projects || []).map(p => {
+    const fileList = [
+      p.claude_local_md && p.claude_local_md.present ? "CLAUDE.local.md" : null,
+      p.memory_md && p.memory_md.present ? "MEMORY.md" : null,
+    ].filter(Boolean);
+    // A project is watched as soon as retro sees sessions there, but only gets
+    // an owned file once it has learned project-scoped rules above threshold.
+    // Zero owned files → watched, nothing written yet.
+    const files = fileList.length
+      ? `<span class="dim">${esc(fileList.join(" · "))}</span>`
+      : `<span class="dim">watching · no rules yet</span>`;
+    const toks = p.claude_local_md && p.claude_local_md.present ? p.claude_local_md.tokens_est : 0;
+    return `<div class="proj-row">
+      <span><b>${esc(p.slug)}</b><div class="cfg-hint">${esc(p.path)}</div></span>
+      ${files}
+      <span class="rt-num">${fmtNum(toks)}</span>
+      <span style="text-align:center"><span class="btn" onclick="excludeProject('${esc(p.slug)}')">Exclude</span></span>
+    </div>`;
+  }).join("") || `<div class="stub dim">no projects tracked yet.</div>`;
+  const projects = `<div class="window" style="grid-column:1/-1">
+    <div class="titlebar"><span class="box"></span><span class="title">Projects — ${(xray.projects || []).length} tracked</span></div>
+    <div class="proj-head"><span>PROJECT</span><span>RETRO-OWNED FILES</span><span class="rt-num">TOKENS</span><span></span></div>
+    ${projRows}</div>`;
+
+  return `<div class="cfg-grid">${learning}<div class="col-right">${appearance}${hooksApi}</div>${projects}</div>`;
+};
+
+let tab = "overview";
 let renderSeq = 0;
 async function render() {
-  // Sequence guard: rapid filter changes fire concurrent renders; only the
-  // most recently issued one may write the DOM (last-resolved ≠ last-issued).
+  // Sequence guard: rapid re-renders (filter changes in later tabs) fire
+  // concurrently; only the most recently issued one may write the DOM
+  // (last-resolved ≠ last-issued).
   const seq = ++renderSeq;
   let html;
   try { html = await views[tab](); }
-  catch (e) { html = `<div class="card err">${esc(e.message)}</div>`; }
+  catch (e) { html = `<div class="window"><div class="stub bad">${esc(e.message)}</div></div>`; }
   if (seq !== renderSeq) return;
   const focusedId = document.activeElement?.id;
   $("#main").innerHTML = html;
-  // Re-rendering replaces the filter bar wholesale — put focus (and the
-  // cursor) back where the user was typing.
+  // A wholesale innerHTML swap drops focus/cursor — put them back where the
+  // user was typing (search boxes etc. in later tabs).
   if (focusedId) {
     const el = $("#" + focusedId);
-    if (el) {
-      el.focus();
-      if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
-    }
+    if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); }
   }
 }
-async function viewNode(scope, id) {
-  try {
-    const params = new URLSearchParams({scope, id});
-    const n = await get("/api/node?" + params);
-    $("#modalBody").innerHTML = `
-      <div class="row"><b>${esc(n.id)}</b><button class="action" onclick="closeModal()">close</button></div>
-      <div class="dim">${esc(n.scope)} · ${esc(n.type)} · confidence ${n.confidence.toFixed(2)}</div>
-      <div class="dim">created ${esc(n.created)} · updated ${esc(n.updated)}</div>
-      ${n.invalidated_by ? `<div class="err">invalidated by: ${esc(n.invalidated_by)}</div>` : ""}
-      <pre>${esc(n.body)}</pre>
-      <div class="dim">sources: ${n.sources.map(esc).join(", ") || "—"}</div>
-      <div class="dim">path: ${esc(n.path)}</div>
-      ${!n.invalidated_by ? `<button class="action danger" onclick="invalidate('${esc(n.scope)}','${esc(n.id)}')">invalidate</button>` : ""}
-    `;
-    $("#modal").classList.remove("hidden");
-  } catch (e) { alert(e.message); }
+
+// Switch tab + repaint the active underline. Called by the menu and by
+// in-view "view all in X →" links.
+function goTab(name) {
+  if (!views[name]) return;
+  tab = name;
+  document.querySelectorAll(".menubar .tab").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  render();
 }
-function closeModal() {
-  $("#modal").classList.add("hidden");
-  $("#modalBody").innerHTML = "";
+// Top menu bar is the ONLY navigation. The meta cell carries no data-tab, so
+// clicking it does nothing (never nav — handoff rule).
+$(".menubar").addEventListener("click", e => { if (e.target.dataset.tab) goTab(e.target.dataset.tab); });
+
+/* ── status: menu meta + front panel (pure status, never nav) ───────── */
+let hooksState = { ok: true, label: "hooks ok" };
+
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function renderMenuMeta() {
+  const meta = $("#menuMeta");
+  if (!meta) return;
+  const d = new Date();
+  const date = `${DAYS[d.getDay()]} ${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  const clock = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const dot = `<span class="${hooksState.ok ? "ok" : "bad"}">●</span>`;
+  meta.innerHTML = `v${esc(VERSION)} · ${esc(date)} · ${esc(clock)} · ${dot} ${esc(hooksState.label)}`;
 }
-async function invalidate(scope, id) {
-  if (!confirm(`Invalidate ${id}? (recoverable via store git history)`)) return;
-  try { await post("/api/node/invalidate", {scope, id}); closeModal(); render(); } catch (e) { alert(e.message); }
+
+// RFC3339 timestamp -> "just now" / "Xm ago" / "Xh ago" / "Xd ago"; "—" if absent.
+function relTime(at) {
+  if (!at) return "—";
+  const t = Date.parse(at);
+  if (isNaN(t)) return "—";
+  const secs = Math.max(0, (Date.now() - t) / 1000);
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
-async function excludeProject(slug) {
-  if (!confirm(`Stop watching ${slug} and DELETE its knowledge? (recoverable via store git history)`)) return;
-  try { await post("/api/project/exclude", {slug}); projectSlugsCache = null; render(); } catch (e) { alert(e.message); }
+
+function setCell(sel, text, alerted) {
+  const el = $(sel);
+  if (!el) return;
+  el.textContent = text;            // textContent -> inherently XSS-safe
+  el.classList.toggle("alerted", !!alerted);
 }
-$("#tabs").addEventListener("click", e => {
-  if (e.target.dataset.tab) {
-    tab = e.target.dataset.tab;
-    document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b === e.target));
-    render();
+
+function updateFrontPanel(xray, health, doctor) {
+  const store = xray && Number.isFinite(xray.total_nodes) ? xray.total_nodes : "—";
+  const queueLen = health && Number.isFinite(health.queue_len) ? health.queue_len : null;
+  const budgetRem = health && Number.isFinite(health.budget_remaining) ? health.budget_remaining : null;
+  const budgetMax = health && Number.isFinite(health.budget_max) ? health.budget_max : null;
+  const pushAt = health && health.stages && health.stages.push ? health.stages.push.at : null;
+
+  setCell("#fpStore", `store ${store}`, false);
+  setCell("#fpQueue", `queue ${queueLen ?? "—"}`, queueLen != null && queueLen > 0);
+  setCell(
+    "#fpBudget",
+    (budgetRem != null && budgetMax != null) ? `budget ${budgetRem}/${budgetMax}` : "budget —",
+    budgetRem === 0
+  );
+  setCell("#fpPush", `push ${relTime(pushAt)}`, false);
+
+  // Health slot = the loudest state on screen. Genuine alerts only: a failed
+  // doctor check, a non-empty queue, or an exhausted budget (frame 1c).
+  const problems = [];
+  if (budgetRem === 0) problems.push("budget exhausted");
+  if (queueLen != null && queueLen > 0) problems.push(`${queueLen} queued`);
+  const failed = (doctor && Array.isArray(doctor.checks) ? doctor.checks : []).filter(c => !c.ok);
+  if (failed.length) problems.push(failed.length === 1 ? failed[0].name : `${failed.length} checks failing`);
+
+  const el = $("#fpHealth");
+  if (!el) return;
+  if (!health && !doctor) {          // couldn't verify — don't claim healthy
+    el.className = "health alert";
+    el.textContent = "⚠ unreachable";
+  } else if (problems.length) {
+    el.className = "health alert";
+    el.textContent = `⚠ ${problems.join(" · ")}`;
+  } else {
+    el.className = "health";
+    el.textContent = "✓ healthy";
   }
-});
+}
+
+// Refresh the menu meta + front panel from live data. Tolerates per-endpoint
+// failure (null). Exposed globally so Tasks 4–6 can call it after any write.
+async function refreshStatus() {
+  const [xray, health, doctor] = await Promise.all([
+    get("/api/xray").catch(() => null),
+    get("/api/health").catch(() => null),
+    get("/api/doctor").catch(() => null),
+  ]);
+  const hc = doctor && Array.isArray(doctor.checks)
+    ? doctor.checks.find(c => c.name === "hooks") : null;
+  hooksState = hc
+    ? { ok: !!hc.ok, label: hc.ok ? "hooks ok" : "hooks ?" }
+    : { ok: false, label: "hooks ?" };
+  renderMenuMeta();
+  updateFrontPanel(xray, health, doctor);
+}
+
+/* ── boot ───────────────────────────────────────────────────────────── */
+renderMenuMeta();                    // paint the clock immediately
 render();
+refreshStatus();
+setInterval(refreshStatus, 30000);   // menu meta + front panel, every 30s
+setInterval(renderMenuMeta, 60000);  // keep the clock ticking even if offline
 </script>
 </body>
 </html>

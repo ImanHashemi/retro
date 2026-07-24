@@ -111,6 +111,7 @@ retro uninstall --purge && cargo build --release && ./target/release/retro init
 
 - **One-way** — managed blocks are build output, regenerated from the store every run; edits belong in the store. Global rules → `~/.claude/CLAUDE.md` managed block; project rules → `<project>/CLAUDE.local.md`.
 - **CLAUDE.md protection** — only write within `<!-- retro:managed:start/end -->` delimiters, never touch user content. Files backed up to `~/.retro/backups/` before modification.
+- **Empty-wipe guard (3.0.1)** — projection refuses to overwrite a *populated* managed block with an empty one when `load_all()` returned zero nodes (a read glitch — a concurrent store git op, a partial read). A *genuine* empty (every rule vetoed / below threshold) still loads its nodes, so the block clears as before; only zero-node-over-populated is refused (the runner records it to `health` and continues). Prevents the 2026-07-23 data-loss class where a transient empty read wiped the global CLAUDE.md. **Corollary for tests:** any test that reprojects MUST set `[paths] claude_dir` to a temp dir — `Config::default()` points at the real `~/.claude`, and an un-isolated reproject wipes the developer's real file.
 - **Single-line bullets** — projected rules are one bullet each.
 - **CLAUDE.local.md is machine-local** — ignored via the project's common git dir `info/exclude`, never committed.
 
@@ -122,9 +123,11 @@ retro uninstall --purge && cargo build --release && ./target/release/retro init
 
 ### Dashboard (retro ui)
 
-- **tiny_http, sync, localhost-only** — binds `127.0.0.1:{ui.port}` (default 7777), single embedded HTML page.
-- **Four tabs** — X-ray (what retro believes about a project), Knowledge (browse/search/invalidate/edit), Health (stage records + doctor), History (store git log).
-- **Write actions** — go through the store: file edit → commit → reindex → reproject, guarded by `run.lock` and boundary slug validation on all client-supplied ids.
+- **tiny_http, sync, localhost-only** — binds `127.0.0.1:{ui.port}` (default 7777), single embedded HTML page, no webfonts/CDN/images (all CSS/JS inline; theme is `retro-theme.css` embedded verbatim). Config is reloaded per request so a write is reflected immediately everywhere.
+- **Four tabs (3.1.0 "desktop" redesign)** — Overview (context X-ray: learned-this-week, per-project session-load token bars, retro-owns, pipeline), Knowledge (rule table + live client-side search/filter, detail, veto/edit), Activity (pipeline log from the store git history + this-week counts + doctor health), Config (threshold/budget/model/theme, persisted via `POST /api/config`, + projects/exclude). Light + dark, beveled-window chrome, front panel = pure status.
+- **Backend additions for the UI** — `GET`/`POST /api/config` (whitelist: `knowledge.confidence_threshold`, `runner.max_ai_calls_per_day`, `ai.model`; validated, run.lock, commits + reprojects on threshold change); `xray` gained `total_nodes` + `store{live,held,vetoed}`; `health` gained `budget_max`; `nodes` gained per-node `tokens_est`.
+- **Honest data (non-negotiable)** — the UI shows ONLY what the backend tracks. Features with no backend (decay, confidence-history, weekly growth, AI-dollar cost, skins, token caps, project pause/resume, API-key management, update-check) are omitted or shown as "planned" — never faked. Mockup sample data must never leak in as real values.
+- **Write actions** — go through the store: file edit → commit → reindex → reproject, guarded by `run.lock` and boundary slug validation on all client-supplied ids. The threshold slider debounces (a change reprojects every file).
 
 ### Runtime Model
 
@@ -230,8 +233,10 @@ Spec: `docs/superpowers/specs/2026-07-06-retro-v3-personal-redesign-design.md`.
 - **Plan 2: DONE** — Pipeline. Hook-based capture (`retro observe`/`retro brief`), automatic project registration, hardened markdown-store analysis sink (`analysis/v3.rs`), one-way projection, budget-gated `runner_v3`, `retro init [--from <remote>]`.
 - **Plan 3: DONE** — Surfaces. `retro ui` local dashboard, `retro doctor`, v3 `retro status`, `retro lint`, queue-age nudge, store self-exclusion guard, subagent-transcript skip.
 - **Plan 4: DONE** — Lifecycle. `retro migrate` (idempotent v2 import, safety-import, environment cleanup), `retro uninstall [--purge]`, notification cap, full v1/v2 code deletion (two crates remain), v3 scenario suite, 3.0.0.
+- **3.0.1** — projection empty-wipe guard (hotfix; see Projection above).
+- **3.1.0: DONE** — dashboard "desktop" redesign: four tabs (Overview/Knowledge/Activity/Config), light+dark, `GET`/`POST /api/config`, honest omission of un-backed features, debounced threshold slider. Design handoff kept in `docs/design/retro-desktop/`.
 
-Test coverage: 189 tests across the workspace.
+Test coverage: 197 tests across the workspace.
 
 ## Testing
 

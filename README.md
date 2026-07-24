@@ -66,12 +66,14 @@ SessionStart hook → retro brief  ───────┤  (catch-up scan for 
 
 ## Dashboard
 
-`retro ui` starts a localhost-only web server (default `http://127.0.0.1:7777`) with four tabs:
+`retro ui` starts a localhost-only web server (default `http://127.0.0.1:7777`) — a small "desktop" of beveled windows, in light or dark. Four tabs:
 
-- **X-ray** — what retro currently believes about the project you're in.
-- **Knowledge** — browse and search every stored node, invalidate ones that no longer apply.
-- **Health** — recent stage-by-stage run results (analyze, project, push, ...).
-- **History** — the store's git commit log.
+- **Overview** — what's in your context right now: rules learned this week (confidence glyph + one-click Veto), a per-project token breakdown of what each session loads (global `CLAUDE.md` / project `CLAUDE.md` / retro-owned / `MEMORY.md`), what retro owns, and the pipeline's live state.
+- **Knowledge** — the full rule store: live search plus scope/type/status filters, a rule table with per-rule token cost, and a detail pane (evidence, first seen, last updated) with Veto and Edit.
+- **Activity** — the pipeline log reconstructed from the store's git history (runs, vetoes, maintenance), this-week counts, and health checks.
+- **Config** — the settings that actually change behavior — confidence threshold, daily AI budget, analyze model, theme — persisted through `POST /api/config`; plus the tracked-projects table with a per-project Exclude.
+
+Every number is read live from the store, and write actions (veto, edit, exclude, config) go through the same store path the CLI uses — all git-recoverable. The UI shows only what the backend actually tracks; it never invents data.
 
 ## Commands
 
