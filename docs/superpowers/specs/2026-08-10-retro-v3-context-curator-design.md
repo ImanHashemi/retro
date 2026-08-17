@@ -1,6 +1,6 @@
 # Retro v3 — Context Curator (keep projected context lean)
 
-- **Date:** 2026-08-10
+- **Date:** 2026-08-10 (code references revised 2026-08-17 against `main` at 3.1.0)
 - **Status:** Design — awaiting adversarial review before planning
 - **Scope:** v3 store + pipeline (`retro run`, `lint`, `doctor`, `ui`)
 
@@ -102,9 +102,9 @@ set the same run.
 
 ## Static core (deterministic, no AI)
 
-Both reuse the existing similarity primitive
-(`analysis::merge::normalized_similarity` — normalized character-level
-Levenshtein) and are recoverable via the store's git history.
+Both reuse the existing similarity primitive (`util::normalized_similarity` in
+`retro-core/src/util.rs` — normalized character-level Levenshtein, already the
+primitive behind `lint`) and are recoverable via the store's git history.
 
 ### Merge near-duplicates — `merge_duplicates`, default `auto`
 
@@ -174,11 +174,19 @@ Levenshtein) and are recoverable via the store's git history.
 - Surfaces as a review item:
   *"These N patterns form a process about `<topic>`. Extract into on-demand
   skill `<name>` and pull them out of the rules file?"*
-- **On approval — one agentic AI call.** Reuse the existing agentic skill
-  generator (`projection::skill::generate_skill_agentic`: superpowers
+- **On approval — one agentic AI call.** The generator has to be **built, not
+  reused**: v2's `projection::skill::generate_skill_agentic` (superpowers
   writing-skills instructions injected, snapshot-diff to find the created
-  `SKILL.md`), adapted to feed it the cluster's node bodies. Write to the global
-  skills directory. Then **archive the source nodes** with
+  `SKILL.md`) was deleted along with the rest of the v2 core in Plan 4
+  (`a563a0d`), so only the transport survives —
+  `AnalysisBackend::execute_agentic()` in `analysis/claude_cli.rs` (unlimited
+  turns, full tool access, no `--json-schema`, optional `cwd`). Re-implement the
+  generator against it, feeding it the cluster's node bodies, and write to the
+  global skills directory. The deleted implementation is a usable reference for
+  the prompt shape and the snapshot-diff trick:
+  `git show a563a0d^:crates/retro-core/src/projection/skill.rs`. **Sizing note:**
+  this makes skill extraction the largest single piece of work in the design, not
+  a thin adapter over existing code. Then **archive the source nodes** with
   `archived_reason = "extracted:skill:<name>"` — they stop projecting (rules
   file shrinks) and, being inactive, are not shown to the analyzer again.
   Commit → reindex → reproject.
