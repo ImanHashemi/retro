@@ -102,6 +102,8 @@ mod tests {
             created: date,
             updated: date,
             invalidated_by: None,
+            archived: None,
+            archived_reason: None,
             body: body.to_string(),
         }
     }

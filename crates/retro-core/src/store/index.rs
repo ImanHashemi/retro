@@ -265,6 +265,8 @@ mod tests {
             created: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
             updated: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
             invalidated_by: inv.map(String::from),
+            archived: None,
+            archived_reason: None,
             body: body.to_string(),
         };
         store
@@ -481,6 +483,8 @@ mod tests {
                 created: NaiveDate::from_ymd_opt(2026, 7, 2).unwrap(),
                 updated: NaiveDate::from_ymd_opt(2026, 7, 2).unwrap(),
                 invalidated_by: None,
+                archived: None,
+                archived_reason: None,
                 body: "fresh".to_string(),
             })
             .unwrap();

@@ -806,6 +806,8 @@ mod tests {
             created: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
             updated: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
             invalidated_by: None,
+            archived: None,
+            archived_reason: None,
             body: body.to_string(),
         }
     }

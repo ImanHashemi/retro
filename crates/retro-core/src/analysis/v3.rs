@@ -207,6 +207,8 @@ pub fn analyze_sessions(
                     created: today,
                     updated: today,
                     invalidated_by: None,
+                    archived: None,
+                    archived_reason: None,
                     body,
                 };
                 store.write_node(&node)?;
@@ -430,6 +432,8 @@ mod tests {
             created: today,
             updated: today,
             invalidated_by: None,
+            archived: None,
+            archived_reason: None,
             body: format!("rule body {id}"),
         };
         store.write_node(&mk("keeper", 0.5)).unwrap();
@@ -475,6 +479,8 @@ mod tests {
             created: today,
             updated: today,
             invalidated_by: None,
+            archived: None,
+            archived_reason: None,
             body: format!("body {id}"),
         };
         store.write_node(&mk("new-way")).unwrap();
@@ -522,6 +528,8 @@ mod tests {
                 created: today,
                 updated: today,
                 invalidated_by: None,
+                archived: None,
+                archived_reason: None,
                 body: "a very distinctive existing rule body".to_string(),
             })
             .unwrap();
@@ -573,6 +581,8 @@ mod tests {
                 created: today,
                 updated: today,
                 invalidated_by: None,
+                archived: None,
+                archived_reason: None,
                 body: "solo body".to_string(),
             })
             .unwrap();
@@ -620,6 +630,8 @@ mod tests {
                 created: today,
                 updated: today,
                 invalidated_by: None,
+                archived: None,
+                archived_reason: None,
                 body: "victim body".to_string(),
             })
             .unwrap();
@@ -686,6 +698,8 @@ mod tests {
             created: today,
             updated: today,
             invalidated_by: None,
+            archived: None,
+            archived_reason: None,
             body: format!("body {id}"),
         };
         // 55 filler nodes at 0.5 — the prompt builder caps at 50, so without

@@ -26,6 +26,8 @@ mod tests {
             created: today,
             updated: today,
             invalidated_by: None,
+            archived: None,
+            archived_reason: None,
             body: body.to_string(),
         }
     }

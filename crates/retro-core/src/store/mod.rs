@@ -114,7 +114,7 @@ impl Store {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(io)?;
         }
-        std::fs::write(&path, node.to_markdown()).map_err(io)?;
+        std::fs::write(&path, node.to_markdown()?).map_err(io)?;
         Ok(path)
     }
 
@@ -243,6 +243,8 @@ mod tests {
             created: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
             updated: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
             invalidated_by: None,
+            archived: None,
+            archived_reason: None,
             body: "Test rule body.".to_string(),
         }
     }
@@ -382,7 +384,7 @@ mod tests {
         let n = node("misplaced", Scope::Project("other-proj".to_string()));
         std::fs::write(
             tmp.path().join("knowledge/global/misplaced.md"),
-            n.to_markdown(),
+            n.to_markdown().unwrap(),
         )
         .unwrap();
         let result = store.load_all().unwrap();
