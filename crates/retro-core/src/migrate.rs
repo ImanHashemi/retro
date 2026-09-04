@@ -167,6 +167,8 @@ pub fn migrate_knowledge(
                 created: date_of(&v2.created_at),
                 updated: date_of(&v2.updated_at),
                 invalidated_by: None,
+                archived: None,
+                archived_reason: None,
                 body: v2.content.clone(),
             };
             store.write_node(&node)?;
@@ -232,6 +234,8 @@ pub fn safety_import(
                 created: today,
                 updated: today,
                 invalidated_by: None,
+                archived: None,
+                archived_reason: None,
                 body: rule,
             })?;
         }

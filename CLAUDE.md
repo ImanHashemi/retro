@@ -88,14 +88,17 @@ retro uninstall --purge && cargo build --release && ./target/release/retro init
 
 ### Knowledge Store
 
-- **Files as truth** — one markdown file per node under `~/.retro/knowledge/`, strict frontmatter (`id, scope, type, confidence, sources, created, updated, invalidated_by`) between `---` delimiters, then the body. Unknown frontmatter keys are a parse error (catches typos); parsing normalizes on rewrite (CRLF→LF, confidence written back at two decimals).
+- **Files as truth** — one markdown file per node under `~/.retro/knowledge/`, strict frontmatter (`id, scope, type, confidence, sources, created, updated, invalidated_by`, plus `archived`/`archived_reason` when set) between `---` delimiters, then the body. Unknown frontmatter keys are a parse error (catches typos); parsing normalizes on rewrite (CRLF→LF, confidence written back at two decimals).
 - **Node types** — `rule`, `preference`, `pattern`, `memory` (v2's six types collapse: `directive`→`rule`, `skill`→`pattern`, handled at migration). Memory nodes are context-only — stored and browsable, never projected.
 - **Scopes** — `global` (`knowledge/global/`) vs `project/<slug>` (`knowledge/projects/<slug>/`). Slugs and node ids must pass `is_valid_slug` (lowercase ASCII alphanumerics + dashes, starting alphanumeric) — validated on every LLM-supplied id before path construction.
 - **Invalidation, not deletion** — nodes get `invalidated_by` set; git history preserves everything.
+- **Archival, distinct from invalidation** — the curator sets `archived` (date) + `archived_reason` (`stale` | `extracted:skill:<name>`); `is_active()` is `invalidated_by.is_none() && archived.is_none()`. Both keys are emitted **only on nodes that are actually archived** — an older binary treats an unknown frontmatter key as a hard parse error and `load_all` skips that node, while the 3.0.1 empty-wipe guard only fires at *zero* nodes, so writing them unconditionally would let an older binary project a silently shrunken managed block. `to_markdown` is fallible: it rejects a multi-line `archived_reason` (frontmatter injection via a model-derived name), an empty one, the literal `"null"` (both would parse back as unset), and a reason set without a date.
+- **Store-format marker** — `~/.retro/meta.toml` (`store_format`, committed with the store) lets a future binary refuse a store written by a newer one. It does nothing for released 3.1.x binaries; for that window emit-only-when-set is the protection. `check_compatible` exists but is not yet wired into any command.
 - **Git layer** — every mutation is a commit in `~/.retro` (`store::git`); the commit log is the audit trail. Best-effort push to an optional private remote; unpushed between-run commits are pushed on the next run.
 - **Disposable index** — `index.db` (SQLite + FTS5) is rebuilt from files by `retro reindex` / `index::build`; files always win. User search input is sanitized so raw FTS5 operators can't error.
 - **Machine-local state** — `queue/`, `state/`, `health.json`, `run.lock`, `backups/`, `index.db` are gitignored via `IGNORED_ENTRIES` (store/mod.rs), the single source of truth for both the store `.gitignore` and `.git/info/exclude`.
 - **Confidence model** — analysis assigns 0.4–0.85 (explicit directives high, single observations low); `knowledge.confidence_threshold` (default 0.7) gates projection.
+- **Curator policy config** — `[curator]` in `config.toml`: `merge_duplicates` / `archive_stale` (default `auto`), `skills` (default `review`), each `auto` | `review` | `off` (`CuratorPolicy`); plus `merge_similarity` (0.8), `max_auto_merges_per_run` and `max_auto_archives_per_run` (3 each). `merge_similarity` also drives `lint`'s length pre-filter, derived as `1.0 - merge_similarity` — never hardcode it, or lowering the threshold is silently capped.
 
 ### Pipeline (runner_v3)
 
@@ -236,7 +239,13 @@ Spec: `docs/superpowers/specs/2026-07-06-retro-v3-personal-redesign-design.md`.
 - **3.0.1** — projection empty-wipe guard (hotfix; see Projection above).
 - **3.1.0: DONE** — dashboard "desktop" redesign: four tabs (Overview/Knowledge/Activity/Config), light+dark, `GET`/`POST /api/config`, honest omission of un-backed features, debounced threshold slider. Design handoff kept in `docs/design/retro-desktop/`.
 
-Test coverage: 197 tests across the workspace.
+### Context Curator (in progress)
+
+Spec: `docs/superpowers/specs/2026-08-10-retro-v3-context-curator-design.md`.
+
+- **Plan 1 of 4: DONE** — Data model & config foundation. `Node` gained `archived`/`archived_reason` (emitted only when actually archived); `is_active()` excludes archived nodes; a `[curator]` config section (per-op policies, `merge_similarity`, auto-run caps); a `~/.retro/meta.toml` store-format marker (written, not yet enforced by any command). No curator behavior — merging, archiving, or skill extraction — is implemented yet; Plans 2–4 build that on top of this foundation.
+
+Test coverage: 230 tests across the workspace.
 
 ## Testing
 

@@ -18,6 +18,8 @@ pub struct Config {
     pub knowledge: KnowledgeConfig,
     #[serde(default = "default_ui")]
     pub ui: UiConfig,
+    #[serde(default = "default_curator")]
+    pub curator: CuratorConfig,
 }
 
 impl Default for Config {
@@ -30,6 +32,7 @@ impl Default for Config {
             runner: default_runner(),
             knowledge: default_knowledge(),
             ui: default_ui(),
+            curator: default_curator(),
         }
     }
 }
@@ -89,6 +92,36 @@ pub struct UiConfig {
 
 fn default_ui_port() -> u16 {
     7777
+}
+
+/// What the curator is allowed to do with one class of finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CuratorPolicy {
+    /// Apply silently, under the per-run cap.
+    Auto,
+    /// Queue for the user to decide.
+    Review,
+    /// Skip detection entirely.
+    Off,
+}
+
+/// Context-curator behaviour. Each op is independently settable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CuratorConfig {
+    #[serde(default = "default_merge_duplicates")]
+    pub merge_duplicates: CuratorPolicy,
+    #[serde(default = "default_archive_stale")]
+    pub archive_stale: CuratorPolicy,
+    #[serde(default = "default_skills_policy")]
+    pub skills: CuratorPolicy,
+    /// Near-duplicate similarity threshold; also drives the length pre-filter.
+    #[serde(default = "default_merge_similarity")]
+    pub merge_similarity: f64,
+    #[serde(default = "default_max_auto_per_run")]
+    pub max_auto_merges_per_run: u32,
+    #[serde(default = "default_max_auto_per_run")]
+    pub max_auto_archives_per_run: u32,
 }
 
 fn default_analysis() -> AnalysisConfig {
@@ -167,6 +200,33 @@ fn default_ui() -> UiConfig {
     }
 }
 
+fn default_merge_duplicates() -> CuratorPolicy {
+    CuratorPolicy::Auto
+}
+fn default_archive_stale() -> CuratorPolicy {
+    CuratorPolicy::Auto
+}
+fn default_skills_policy() -> CuratorPolicy {
+    CuratorPolicy::Review
+}
+fn default_merge_similarity() -> f64 {
+    0.8
+}
+fn default_max_auto_per_run() -> u32 {
+    3
+}
+
+fn default_curator() -> CuratorConfig {
+    CuratorConfig {
+        merge_duplicates: default_merge_duplicates(),
+        archive_stale: default_archive_stale(),
+        skills: default_skills_policy(),
+        merge_similarity: default_merge_similarity(),
+        max_auto_merges_per_run: default_max_auto_per_run(),
+        max_auto_archives_per_run: default_max_auto_per_run(),
+    }
+}
+
 impl Config {
     /// Load config from the given path, or return defaults if file doesn't exist.
     pub fn load(path: &Path) -> Result<Self, CoreError> {
@@ -175,11 +235,29 @@ impl Config {
                 .map_err(|e| CoreError::Io(format!("reading config: {e}")))?;
             let config: Config =
                 toml::from_str(&contents).map_err(|e| CoreError::Config(e.to_string()))?;
+            config.validate()?;
 
             Ok(config)
         } else {
             Ok(Config::default())
         }
+    }
+
+    /// Validate fields that TOML deserialization alone can't constrain.
+    ///
+    /// Scope: only `curator.merge_similarity`, introduced by this branch.
+    /// `knowledge.confidence_threshold` has the same unvalidated-range
+    /// weakness but predates this branch and is deliberately left alone —
+    /// fixing it here would be an unreviewed behaviour change to a value
+    /// this branch never touched.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        let s = self.curator.merge_similarity;
+        if !s.is_finite() || s <= 0.0 || s > 1.0 {
+            return Err(CoreError::Config(format!(
+                "curator.merge_similarity must be finite and in (0.0, 1.0], got {s}"
+            )));
+        }
+        Ok(())
     }
 
     /// Write config to the given path.
@@ -316,5 +394,115 @@ enabled = true
         assert_eq!(parsed.ui.port, 7777);
         let parsed: Config = toml::from_str("[ui]\nport = 9000\n").unwrap();
         assert_eq!(parsed.ui.port, 9000);
+    }
+
+    #[test]
+    fn curator_defaults_match_the_spec() {
+        let c = Config::default();
+        assert_eq!(c.curator.merge_duplicates, CuratorPolicy::Auto);
+        assert_eq!(c.curator.archive_stale, CuratorPolicy::Auto);
+        assert_eq!(c.curator.skills, CuratorPolicy::Review);
+        assert_eq!(c.curator.merge_similarity, 0.8);
+        assert_eq!(c.curator.max_auto_merges_per_run, 3);
+        assert_eq!(c.curator.max_auto_archives_per_run, 3);
+    }
+
+    #[test]
+    fn curator_section_parses_lowercase_policies() {
+        let toml_src = r#"
+[curator]
+merge_duplicates = "review"
+archive_stale = "off"
+skills = "auto"
+merge_similarity = 0.75
+max_auto_merges_per_run = 5
+"#;
+        let c: Config = toml::from_str(toml_src).unwrap();
+        assert_eq!(c.curator.merge_duplicates, CuratorPolicy::Review);
+        assert_eq!(c.curator.archive_stale, CuratorPolicy::Off);
+        assert_eq!(c.curator.skills, CuratorPolicy::Auto);
+        assert_eq!(c.curator.merge_similarity, 0.75);
+        assert_eq!(c.curator.max_auto_merges_per_run, 5);
+        // omitted key falls back to its default
+        assert_eq!(c.curator.max_auto_archives_per_run, 3);
+    }
+
+    #[test]
+    fn config_without_curator_section_still_loads() {
+        let c: Config = toml::from_str("[runner]\nmax_ai_calls_per_day = 20\n").unwrap();
+        assert_eq!(c.runner.max_ai_calls_per_day, 20);
+        assert_eq!(c.curator.merge_duplicates, CuratorPolicy::Auto);
+    }
+
+    #[test]
+    fn curator_config_roundtrips_through_save_and_load() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let config = Config::default();
+        config.save(&path).unwrap();
+
+        // The lowercase-serialized policy strings must appear verbatim in
+        // the saved file — pins `#[serde(rename_all = "lowercase")]`.
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("merge_duplicates = \"auto\""));
+        assert!(raw.contains("archive_stale = \"auto\""));
+        assert!(raw.contains("skills = \"review\""));
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.curator.merge_duplicates, CuratorPolicy::Auto);
+        assert_eq!(loaded.curator.archive_stale, CuratorPolicy::Auto);
+        assert_eq!(loaded.curator.skills, CuratorPolicy::Review);
+        assert_eq!(loaded.curator.merge_similarity, 0.8);
+        assert_eq!(loaded.curator.max_auto_merges_per_run, 3);
+        assert_eq!(loaded.curator.max_auto_archives_per_run, 3);
+    }
+
+    #[test]
+    fn merge_similarity_out_of_range_is_rejected() {
+        for bad in ["nan", "-0.5", "1.5", "0.0"] {
+            let mut config = Config::default();
+            config.curator.merge_similarity = bad.parse().unwrap();
+            assert!(
+                config.validate().is_err(),
+                "should reject merge_similarity = {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_similarity_in_range_is_accepted() {
+        for good in [0.8, 1.0] {
+            let mut config = Config::default();
+            config.curator.merge_similarity = good;
+            assert!(
+                config.validate().is_ok(),
+                "should accept merge_similarity = {good}"
+            );
+        }
+    }
+
+    #[test]
+    fn load_rejects_a_config_file_with_invalid_merge_similarity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[curator]\nmerge_similarity = 1.5\n").unwrap();
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("merge_similarity"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn invalid_curator_policy_string_is_a_parse_error() {
+        let toml_src = r#"
+[curator]
+merge_duplicates = "sometimes"
+"#;
+        let result = toml::from_str::<Config>(toml_src);
+        assert!(
+            result.is_err(),
+            "an unrecognised policy string must fail to parse, not silently default"
+        );
     }
 }

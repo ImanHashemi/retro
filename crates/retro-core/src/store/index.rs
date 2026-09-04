@@ -265,6 +265,8 @@ mod tests {
             created: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
             updated: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
             invalidated_by: inv.map(String::from),
+            archived: None,
+            archived_reason: None,
             body: body.to_string(),
         };
         store
@@ -351,6 +353,51 @@ mod tests {
             patterns[0].sources,
             vec!["session:src-p-pattern".to_string()]
         );
+    }
+
+    #[test]
+    fn archived_node_indexed_inactive_and_excluded_by_active_only() {
+        let (_tmp, store) = seeded_store();
+        store
+            .write_node(&Node {
+                id: "archived-rule".to_string(),
+                scope: Scope::Global,
+                node_type: NodeType::Rule,
+                confidence: 0.8,
+                sources: vec![],
+                created: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+                updated: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+                invalidated_by: None,
+                archived: Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap()),
+                archived_reason: Some("stale".to_string()),
+                body: "an archived rule".to_string(),
+            })
+            .unwrap();
+
+        let stats = build(&store).unwrap();
+        assert_eq!(stats.nodes, 4);
+        let conn = open(store.root()).unwrap();
+
+        // indexed with active = 0, same as the pre-existing invalidated node
+        let all = query(&conn, &NodeFilter::default()).unwrap();
+        assert_eq!(all.len(), 4);
+        let archived_row = all
+            .iter()
+            .find(|r| r.id == "archived-rule")
+            .expect("archived node is still indexed");
+        assert!(!archived_row.active, "archived node must be active = 0");
+
+        // active_only excludes it alongside the invalidated node
+        let active_only = query(
+            &conn,
+            &NodeFilter {
+                active_only: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(active_only.len(), 2);
+        assert!(!active_only.iter().any(|r| r.id == "archived-rule"));
     }
 
     #[test]
@@ -481,6 +528,8 @@ mod tests {
                 created: NaiveDate::from_ymd_opt(2026, 7, 2).unwrap(),
                 updated: NaiveDate::from_ymd_opt(2026, 7, 2).unwrap(),
                 invalidated_by: None,
+                archived: None,
+                archived_reason: None,
                 body: "fresh".to_string(),
             })
             .unwrap();

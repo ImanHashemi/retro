@@ -121,7 +121,17 @@ global_promotion_threshold = 0.85
 
 [ui]
 port = 7777                     # retro ui bind port (127.0.0.1 only)
+
+[curator]
+merge_duplicates = "auto"       # auto | review | off — policy for a future merge step
+archive_stale = "auto"          # auto | review | off — policy for a future archive step
+skills = "review"               # auto | review | off — policy for a future skill-extraction step
+merge_similarity = 0.8          # near-duplicate threshold; used today by `retro lint`
+max_auto_merges_per_run = 3     # per-run cap for a future auto-merge step
+max_auto_archives_per_run = 3   # per-run cap for a future auto-archive step
 ```
+
+The `[curator]` section is schema for an upcoming context-curator feature (merging near-duplicate rules, archiving stale ones, extracting skills) that has not shipped yet. Today only `merge_similarity` has any effect — it tunes the near-duplicate threshold `retro lint` reports on. The three policy keys and the two per-run caps are inert until the curator itself ships.
 
 ## Migrating from 2.x
 

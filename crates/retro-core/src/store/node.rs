@@ -95,20 +95,77 @@ pub struct Node {
     pub created: NaiveDate,
     pub updated: NaiveDate,
     pub invalidated_by: Option<String>,
+    /// Set only when the curator archives this node. Emitted to frontmatter
+    /// ONLY when `Some` — see `to_markdown` for why that is load-bearing.
+    pub archived: Option<NaiveDate>,
+    /// Why it was archived: `"stale"` or `"extracted:skill:<name>"`.
+    /// Must be single-line and only present when `archived` is set.
+    pub archived_reason: Option<String>,
     pub body: String,
 }
 
 impl Node {
     pub fn is_active(&self) -> bool {
-        self.invalidated_by.is_none()
+        self.invalidated_by.is_none() && self.archived.is_none()
     }
 
-    pub fn to_markdown(&self) -> String {
+    /// Serialize to markdown.
+    ///
+    /// Fails if `archived_reason` is multi-line, empty, the literal `"null"`,
+    /// padded with leading/trailing whitespace, or set without `archived`.
+    /// The frontmatter serialiser is line-oriented and unescaped, so a stray
+    /// `\n` in a model-derived reason would inject frontmatter keys and make
+    /// the node unparseable — which `load_all` handles by silently skipping it.
+    /// `from_markdown` trims every value it parses, so an empty/"null"/padded
+    /// reason would otherwise round-trip to something other than what was
+    /// written — rejected here rather than silently dropped or mutated on read.
+    pub fn to_markdown(&self) -> Result<String, CoreError> {
         // NOTE: source IDs must not contain commas (comma-joined list format).
         let sources = self.sources.join(", ");
         let invalidated = self.invalidated_by.as_deref().unwrap_or("null");
-        format!(
-            "---\nid: {}\nscope: {}\ntype: {}\nconfidence: {:.2}\nsources: [{}]\ncreated: {}\nupdated: {}\ninvalidated_by: {}\n---\n{}\n",
+
+        // `archived` / `archived_reason` are emitted ONLY when set. An older
+        // binary reading the same git-synced store treats an unknown key as a
+        // hard parse error and skips the node, so every untouched node must
+        // stay byte-identical to the pre-curator format.
+        let mut archived_keys = String::new();
+        if let Some(date) = self.archived {
+            archived_keys.push_str(&format!("archived: {date}\n"));
+        }
+        if let Some(reason) = &self.archived_reason {
+            if self.archived.is_none() {
+                return Err(CoreError::Parse(format!(
+                    "archived_reason set without archived: {reason:?}"
+                )));
+            }
+            if reason.contains('\n') || reason.contains('\r') {
+                return Err(CoreError::Parse(format!(
+                    "archived_reason must be single-line: {reason:?}"
+                )));
+            }
+            // `from_markdown` trims every frontmatter value before matching
+            // on it, so a padded value reaches the same arm as its trimmed
+            // form — check the trimmed value, and additionally reject
+            // padding itself so the round-trip stays exact.
+            let trimmed = reason.trim();
+            if trimmed.is_empty() || trimmed == "null" {
+                // Both parse back as None on the "null" | "" => None arm —
+                // accepting them here would be Ok on write and a silent
+                // data drop on read.
+                return Err(CoreError::Parse(format!(
+                    "archived_reason must not be empty or \"null\": {reason:?}"
+                )));
+            }
+            if trimmed != reason {
+                return Err(CoreError::Parse(format!(
+                    "archived_reason must not be padded (parsing trims): {reason:?}"
+                )));
+            }
+            archived_keys.push_str(&format!("archived_reason: {reason}\n"));
+        }
+
+        Ok(format!(
+            "---\nid: {}\nscope: {}\ntype: {}\nconfidence: {:.2}\nsources: [{}]\ncreated: {}\nupdated: {}\ninvalidated_by: {}\n{}---\n{}\n",
             self.id,
             self.scope,
             self.node_type.as_str(),
@@ -117,8 +174,9 @@ impl Node {
             self.created,
             self.updated,
             invalidated,
+            archived_keys,
             self.body.trim_end_matches('\n'),
-        )
+        ))
     }
 
     /// Parse a node from markdown with strict frontmatter.
@@ -142,6 +200,8 @@ impl Node {
         let mut created: Option<NaiveDate> = None;
         let mut updated: Option<NaiveDate> = None;
         let mut invalidated_by: Option<String> = None;
+        let mut archived: Option<NaiveDate> = None;
+        let mut archived_reason: Option<String> = None;
         let mut seen_keys: Vec<String> = Vec::new();
 
         for line in front.lines() {
@@ -196,6 +256,18 @@ impl Node {
                         other => Some(other.to_string()),
                     }
                 }
+                "archived" => {
+                    archived = match value {
+                        "null" | "" => None,
+                        other => Some(parse_date(other)?),
+                    }
+                }
+                "archived_reason" => {
+                    archived_reason = match value {
+                        "null" | "" => None,
+                        other => Some(other.to_string()),
+                    }
+                }
                 other => {
                     return Err(CoreError::Parse(format!(
                         "unknown frontmatter key: {other:?}"
@@ -211,6 +283,15 @@ impl Node {
                 "invalid id (must be lowercase kebab-case): {id:?}"
             )));
         }
+        if archived_reason.is_some() && archived.is_none() {
+            // Mirrors the write-side check in `to_markdown` — without it, a
+            // hand-edited or older-format file could parse successfully into
+            // a state that can never be rewritten (every rewrite path would
+            // then hard-error), which isn't actually a store invariant.
+            return Err(CoreError::Parse(
+                "archived_reason set without archived".to_string(),
+            ));
+        }
         Ok(Node {
             id,
             scope: scope.ok_or_else(|| missing("scope"))?,
@@ -220,6 +301,8 @@ impl Node {
             created: created.ok_or_else(|| missing("created"))?,
             updated: updated.ok_or_else(|| missing("updated"))?,
             invalidated_by,
+            archived,
+            archived_reason,
             body: body.trim_end_matches('\n').to_string(),
         })
     }
@@ -247,6 +330,8 @@ mod tests {
             created: NaiveDate::from_ymd_opt(2026, 5, 19).unwrap(),
             updated: NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(),
             invalidated_by: None,
+            archived: None,
+            archived_reason: None,
             body: "A/B comparisons must always use paired observations.\n\n**Why:** Unpaired comparisons mix traffic distributions.".to_string(),
         }
     }
@@ -292,8 +377,17 @@ mod tests {
     }
 
     #[test]
+    fn is_active_reflects_archived() {
+        let mut n = sample_node();
+        assert!(n.is_active());
+        n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+        n.archived_reason = Some("stale".to_string());
+        assert!(!n.is_active());
+    }
+
+    #[test]
     fn to_markdown_emits_fixed_frontmatter_order() {
-        let md = sample_node().to_markdown();
+        let md = sample_node().to_markdown().unwrap();
         let expected = "\
 ---
 id: ab-paired-observations
@@ -317,7 +411,7 @@ A/B comparisons must always use paired observations.
         let mut n = sample_node();
         n.sources = vec![];
         n.invalidated_by = Some("other-node".to_string());
-        let md = n.to_markdown();
+        let md = n.to_markdown().unwrap();
         assert!(md.contains("sources: []\n"));
         assert!(md.contains("invalidated_by: other-node\n"));
     }
@@ -326,13 +420,13 @@ A/B comparisons must always use paired observations.
     fn to_markdown_empty_body_single_trailing_newline() {
         let mut n = sample_node();
         n.body = String::new();
-        assert!(n.to_markdown().ends_with("---\n\n"));
+        assert!(n.to_markdown().unwrap().ends_with("---\n\n"));
     }
 
     #[test]
     fn from_markdown_roundtrip() {
         let n = sample_node();
-        let parsed = Node::from_markdown(&n.to_markdown()).unwrap();
+        let parsed = Node::from_markdown(&n.to_markdown().unwrap()).unwrap();
         assert_eq!(parsed, n);
     }
 
@@ -341,7 +435,7 @@ A/B comparisons must always use paired observations.
         let mut n = sample_node();
         n.sources = vec![];
         n.invalidated_by = Some("other".to_string());
-        let parsed = Node::from_markdown(&n.to_markdown()).unwrap();
+        let parsed = Node::from_markdown(&n.to_markdown().unwrap()).unwrap();
         assert_eq!(parsed, n);
     }
 
@@ -349,7 +443,7 @@ A/B comparisons must always use paired observations.
     fn from_markdown_body_may_contain_dashes() {
         let mut n = sample_node();
         n.body = "line one\n---\nline after a dash rule".to_string();
-        let parsed = Node::from_markdown(&n.to_markdown()).unwrap();
+        let parsed = Node::from_markdown(&n.to_markdown().unwrap()).unwrap();
         assert_eq!(parsed.body, n.body);
     }
 
@@ -362,14 +456,17 @@ A/B comparisons must always use paired observations.
 
     #[test]
     fn from_markdown_unknown_key_errors() {
-        let md = sample_node().to_markdown().replace("updated:", "updatedd:");
+        let md = sample_node()
+            .to_markdown()
+            .unwrap()
+            .replace("updated:", "updatedd:");
         let err = Node::from_markdown(&md).unwrap_err();
         assert!(err.to_string().contains("updatedd"), "got: {err}");
     }
 
     #[test]
     fn from_markdown_bad_values_error() {
-        let base = sample_node().to_markdown();
+        let base = sample_node().to_markdown().unwrap();
         for (needle, replacement) in [
             ("confidence: 0.90", "confidence: high"),
             ("created: 2026-05-19", "created: yesterday"),
@@ -392,7 +489,7 @@ A/B comparisons must always use paired observations.
 
     #[test]
     fn from_markdown_accepts_crlf_line_endings() {
-        let crlf = sample_node().to_markdown().replace('\n', "\r\n");
+        let crlf = sample_node().to_markdown().unwrap().replace('\n', "\r\n");
         let parsed = Node::from_markdown(&crlf).unwrap();
         assert_eq!(parsed.id, "ab-paired-observations");
     }
@@ -401,6 +498,7 @@ A/B comparisons must always use paired observations.
     fn from_markdown_duplicate_key_errors() {
         let md = sample_node()
             .to_markdown()
+            .unwrap()
             .replace("type: rule\n", "type: rule\ntype: pattern\n");
         let err = Node::from_markdown(&md).unwrap_err();
         assert!(err.to_string().contains("duplicate"), "got: {err}");
@@ -408,7 +506,7 @@ A/B comparisons must always use paired observations.
 
     #[test]
     fn from_markdown_rejects_unsafe_id_and_scope() {
-        let base = sample_node().to_markdown();
+        let base = sample_node().to_markdown().unwrap();
         for (needle, replacement) in [
             ("id: ab-paired-observations", "id: ../escape"),
             ("id: ab-paired-observations", "id: UPPER_case"),
@@ -428,8 +526,140 @@ A/B comparisons must always use paired observations.
         for bad in ["1.5", "-0.1", "NaN", "inf"] {
             let md = sample_node()
                 .to_markdown()
+                .unwrap()
                 .replace("confidence: 0.90", &format!("confidence: {bad}"));
             assert!(Node::from_markdown(&md).is_err(), "should fail: {bad}");
         }
+    }
+
+    #[test]
+    fn archived_keys_are_absent_when_not_archived() {
+        let md = sample_node().to_markdown().unwrap();
+        // Scope to the frontmatter only: the body is free text and could
+        // legitimately contain the word "archived" without that meaning
+        // anything about frontmatter emission.
+        let frontmatter = md
+            .split_once("\n---\n")
+            .expect("markdown must have a frontmatter close delimiter")
+            .0;
+        assert!(
+            !frontmatter.contains("archived"),
+            "unarchived nodes must stay byte-compatible with older binaries: {frontmatter}"
+        );
+    }
+
+    #[test]
+    fn archived_keys_roundtrip_when_set() {
+        let mut n = sample_node();
+        n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+        n.archived_reason = Some("stale".to_string());
+        let md = n.to_markdown().unwrap();
+        assert!(md.contains("archived: 2026-09-03\n"));
+        assert!(md.contains("archived_reason: stale\n"));
+        let parsed = Node::from_markdown(&md).unwrap();
+        assert_eq!(parsed, n);
+    }
+
+    #[test]
+    fn archived_reason_keeps_colons_in_value() {
+        // `extracted:skill:<name>` must survive the `split_once(':')` parser.
+        let mut n = sample_node();
+        n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+        n.archived_reason = Some("extracted:skill:release-ritual".to_string());
+        let parsed = Node::from_markdown(&n.to_markdown().unwrap()).unwrap();
+        assert_eq!(
+            parsed.archived_reason.as_deref(),
+            Some("extracted:skill:release-ritual")
+        );
+    }
+
+    #[test]
+    fn archived_reason_with_newline_is_rejected() {
+        let mut n = sample_node();
+        n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+        n.archived_reason = Some("stale\nid: injected".to_string());
+        assert!(n.to_markdown().is_err());
+        n.archived_reason = Some("stale\rid: injected".to_string());
+        assert!(n.to_markdown().is_err());
+    }
+
+    #[test]
+    fn archived_reason_without_archived_is_rejected() {
+        // Would make an older binary hard-error on a node that is still
+        // active — the exact cross-version hazard emit-only-when-set avoids.
+        let mut n = sample_node();
+        n.archived_reason = Some("stale".to_string());
+        assert!(n.to_markdown().is_err());
+    }
+
+    #[test]
+    fn archived_reason_empty_is_rejected() {
+        // An empty reason serializes as `archived_reason: \n`, which the
+        // "null" | "" => None parser arm reads back as None — silent data
+        // loss on a value that claimed to round-trip.
+        let mut n = sample_node();
+        n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+        n.archived_reason = Some(String::new());
+        assert!(n.to_markdown().is_err());
+    }
+
+    #[test]
+    fn archived_reason_null_literal_is_rejected() {
+        // The literal string "null" hits the same parser arm as an absent
+        // value, so it would silently come back as None.
+        let mut n = sample_node();
+        n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+        n.archived_reason = Some("null".to_string());
+        assert!(n.to_markdown().is_err());
+    }
+
+    #[test]
+    fn archived_reason_padded_values_are_rejected() {
+        // `from_markdown` trims every frontmatter value, so a padded reason
+        // would either land on the same "empty"/"null" arm as its trimmed
+        // form (silent data drop) or round-trip to a different value than
+        // what was written (silent mutation). Both are rejected on write.
+        for bad in [" ", " null ", "stale ", " stale", "\tstale"] {
+            let mut n = sample_node();
+            n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+            n.archived_reason = Some(bad.to_string());
+            assert!(n.to_markdown().is_err(), "should reject: {bad:?}");
+        }
+    }
+
+    #[test]
+    fn from_markdown_rejects_archived_reason_without_archived() {
+        // Enforced on write by `to_markdown`; must also be enforced on read
+        // so the combination can never be parsed into an unrewritable Node.
+        let md = "\
+---
+id: ab-paired-observations
+scope: project/my-api-service
+type: rule
+confidence: 0.90
+sources: []
+created: 2026-05-19
+updated: 2026-06-02
+invalidated_by: null
+archived_reason: stale
+---
+body
+";
+        let err = Node::from_markdown(md).unwrap_err();
+        assert!(err.to_string().contains("archived_reason"), "got: {err}");
+    }
+
+    #[test]
+    fn archived_without_reason_is_allowed_and_roundtrips() {
+        // A date with no reason is the legitimate other half of the
+        // allowed/rejected boundary: pinned here so it isn't only
+        // implicitly covered.
+        let mut n = sample_node();
+        n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+        let md = n.to_markdown().unwrap();
+        assert!(md.contains("archived: 2026-09-03\n"));
+        assert!(!md.contains("archived_reason"));
+        let parsed = Node::from_markdown(&md).unwrap();
+        assert_eq!(parsed, n);
     }
 }
