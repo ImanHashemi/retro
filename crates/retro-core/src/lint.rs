@@ -211,18 +211,41 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let store = Store::open(tmp.path());
         store.ensure_layout().unwrap();
-        // Same shape as `old-weak` in `stale_low_confidence_candidates_are_flagged`
-        // (sub-threshold confidence, stale age) — it WOULD be flagged if not
-        // archived, so this proves exclusion rather than just an empty store.
-        let mut n = node("old-weak", Scope::Global, 0.5, 60, "some tentative pattern");
-        n.archived = Some(Utc::now().date_naive());
-        n.archived_reason = Some("stale".to_string());
-        store.write_node(&n).unwrap();
+        // Both nodes have the same stale/sub-threshold shape as `old-weak` in
+        // `stale_low_confidence_candidates_are_flagged` (it WOULD be flagged
+        // if not archived). Keeping a non-archived control node alongside the
+        // archived one proves selective exclusion within this test itself —
+        // nodes_scanned == 1 (not 0) rules out "the store just wasn't read".
+        let mut archived = node("old-weak", Scope::Global, 0.5, 60, "some tentative pattern");
+        archived.archived = Some(Utc::now().date_naive());
+        archived.archived_reason = Some("stale".to_string());
+        store.write_node(&archived).unwrap();
+        let control = node(
+            "still-weak",
+            Scope::Global,
+            0.5,
+            60,
+            "another tentative pattern",
+        );
+        store.write_node(&control).unwrap();
 
         let report = run_lint(&store, &Config::default()).unwrap();
-        assert_eq!(report.nodes_scanned, 0, "archived node must not be scanned");
+        assert_eq!(
+            report.nodes_scanned, 1,
+            "only the non-archived control node is scanned"
+        );
+        let stale: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|f| f.kind == "stale-candidate")
+            .collect();
+        assert_eq!(stale.len(), 1, "{:?}", report.findings);
+        assert_eq!(stale[0].node_ids, vec!["still-weak".to_string()]);
         assert!(
-            report.findings.is_empty(),
+            !report
+                .findings
+                .iter()
+                .any(|f| f.node_ids.contains(&"old-weak".to_string())),
             "archived node must not be reported: {:?}",
             report.findings
         );

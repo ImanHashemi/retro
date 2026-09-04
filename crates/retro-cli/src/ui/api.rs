@@ -509,9 +509,12 @@ fn api_xray(store_root: &Path, config: &Config) -> (serde_json::Value, u16) {
         .unwrap_or(0);
 
     // Store-wide live/held/vetoed breakdown, independent of scope: vetoed is
-    // any invalidated node; among the rest, confidence vs. the projection
-    // gate splits live (projected) from held (below threshold, not yet
-    // projected). Mirrors the same threshold `after_write` uses to reproject.
+    // any inactive node — invalidated (user veto) or archived (curator) both
+    // land here today; splitting archived into its own bucket is deferred to
+    // the surfaces work that gives the curator a dashboard presence. Among
+    // the rest, confidence vs. the projection gate splits live (projected)
+    // from held (below threshold, not yet projected). Mirrors the same
+    // threshold `after_write` uses to reproject.
     let threshold = config.knowledge.confidence_threshold;
     let (mut live, mut held, mut vetoed) = (0usize, 0usize, 0usize);
     for (_, n) in &loaded.nodes {
