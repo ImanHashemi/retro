@@ -106,7 +106,7 @@ pub struct Node {
 
 impl Node {
     pub fn is_active(&self) -> bool {
-        self.invalidated_by.is_none()
+        self.invalidated_by.is_none() && self.archived.is_none()
     }
 
     /// Serialize to markdown.
@@ -350,6 +350,15 @@ mod tests {
         let mut n = sample_node();
         assert!(n.is_active());
         n.invalidated_by = Some("newer-rule".to_string());
+        assert!(!n.is_active());
+    }
+
+    #[test]
+    fn is_active_reflects_archived() {
+        let mut n = sample_node();
+        assert!(n.is_active());
+        n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+        n.archived_reason = Some("stale".to_string());
         assert!(!n.is_active());
     }
 

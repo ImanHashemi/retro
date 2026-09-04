@@ -168,6 +168,41 @@ mod tests {
     }
 
     #[test]
+    fn archived_node_is_not_projected() {
+        // Isolation: `project_global_md` takes the CLAUDE.md path directly as
+        // an argument (no `Config`), so pointing it at a `TempDir` path — as
+        // every other test in this file does — is sufficient; there is no
+        // `Config::default()` in this path that could resolve to the real
+        // `~/.claude`.
+        let store_tmp = TempDir::new().unwrap();
+        let store = Store::open(store_tmp.path());
+        store.ensure_layout().unwrap();
+        store
+            .write_node(&node(
+                "kept",
+                Scope::Global,
+                NodeType::Rule,
+                0.9,
+                "kept rule",
+            ))
+            .unwrap();
+        let mut archived = node("gone", Scope::Global, NodeType::Rule, 0.9, "archived rule");
+        archived.archived = Some(Utc::now().date_naive());
+        archived.archived_reason = Some("stale".to_string());
+        store.write_node(&archived).unwrap();
+
+        let claude_tmp = TempDir::new().unwrap();
+        let md = claude_tmp.path().join("CLAUDE.md");
+        project_global_md(&store, &md, 0.7, None).unwrap();
+        let content = std::fs::read_to_string(&md).unwrap();
+        assert!(content.contains("- kept rule"));
+        assert!(
+            !content.contains("archived rule"),
+            "archived node must not produce a projected bullet: {content}"
+        );
+    }
+
+    #[test]
     fn unchanged_projection_writes_nothing_and_makes_no_backup() {
         let store_tmp = TempDir::new().unwrap();
         let store = Store::open(store_tmp.path());

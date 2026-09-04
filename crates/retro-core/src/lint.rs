@@ -207,6 +207,28 @@ mod tests {
     }
 
     #[test]
+    fn archived_nodes_are_excluded_from_lint() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        // Same shape as `old-weak` in `stale_low_confidence_candidates_are_flagged`
+        // (sub-threshold confidence, stale age) — it WOULD be flagged if not
+        // archived, so this proves exclusion rather than just an empty store.
+        let mut n = node("old-weak", Scope::Global, 0.5, 60, "some tentative pattern");
+        n.archived = Some(Utc::now().date_naive());
+        n.archived_reason = Some("stale".to_string());
+        store.write_node(&n).unwrap();
+
+        let report = run_lint(&store, &Config::default()).unwrap();
+        assert_eq!(report.nodes_scanned, 0, "archived node must not be scanned");
+        assert!(
+            report.findings.is_empty(),
+            "archived node must not be reported: {:?}",
+            report.findings
+        );
+    }
+
+    #[test]
     fn clean_store_yields_no_findings() {
         let tmp = TempDir::new().unwrap();
         let store = Store::open(tmp.path());
