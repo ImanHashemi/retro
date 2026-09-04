@@ -5,6 +5,7 @@
 
 pub mod git;
 pub mod index;
+pub mod meta;
 pub mod queue;
 pub mod state;
 pub mod projects;
@@ -104,6 +105,7 @@ impl Store {
         if !gitignore.exists() {
             std::fs::write(&gitignore, gitignore_content()).map_err(io)?;
         }
+        meta::write(&self.root)?;
         Ok(())
     }
 
