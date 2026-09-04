@@ -245,7 +245,7 @@ Spec: `docs/superpowers/specs/2026-08-10-retro-v3-context-curator-design.md`.
 
 - **Plan 1 of 4: DONE** — Data model & config foundation. `Node` gained `archived`/`archived_reason` (emitted only when actually archived); `is_active()` excludes archived nodes; a `[curator]` config section (per-op policies, `merge_similarity`, auto-run caps); a `~/.retro/meta.toml` store-format marker (written, not yet enforced by any command). No curator behavior — merging, archiving, or skill extraction — is implemented yet; Plans 2–4 build that on top of this foundation.
 
-Test coverage: 222 tests across the workspace.
+Test coverage: 230 tests across the workspace.
 
 ## Testing
 
