@@ -235,11 +235,29 @@ impl Config {
                 .map_err(|e| CoreError::Io(format!("reading config: {e}")))?;
             let config: Config =
                 toml::from_str(&contents).map_err(|e| CoreError::Config(e.to_string()))?;
+            config.validate()?;
 
             Ok(config)
         } else {
             Ok(Config::default())
         }
+    }
+
+    /// Validate fields that TOML deserialization alone can't constrain.
+    ///
+    /// Scope: only `curator.merge_similarity`, introduced by this branch.
+    /// `knowledge.confidence_threshold` has the same unvalidated-range
+    /// weakness but predates this branch and is deliberately left alone —
+    /// fixing it here would be an unreviewed behaviour change to a value
+    /// this branch never touched.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        let s = self.curator.merge_similarity;
+        if !s.is_finite() || s <= 0.0 || s > 1.0 {
+            return Err(CoreError::Config(format!(
+                "curator.merge_similarity must be finite and in (0.0, 1.0], got {s}"
+            )));
+        }
+        Ok(())
     }
 
     /// Write config to the given path.
@@ -437,6 +455,42 @@ max_auto_merges_per_run = 5
         assert_eq!(loaded.curator.merge_similarity, 0.8);
         assert_eq!(loaded.curator.max_auto_merges_per_run, 3);
         assert_eq!(loaded.curator.max_auto_archives_per_run, 3);
+    }
+
+    #[test]
+    fn merge_similarity_out_of_range_is_rejected() {
+        for bad in ["nan", "-0.5", "1.5", "0.0"] {
+            let mut config = Config::default();
+            config.curator.merge_similarity = bad.parse().unwrap();
+            assert!(
+                config.validate().is_err(),
+                "should reject merge_similarity = {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_similarity_in_range_is_accepted() {
+        for good in [0.8, 1.0] {
+            let mut config = Config::default();
+            config.curator.merge_similarity = good;
+            assert!(
+                config.validate().is_ok(),
+                "should accept merge_similarity = {good}"
+            );
+        }
+    }
+
+    #[test]
+    fn load_rejects_a_config_file_with_invalid_merge_similarity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[curator]\nmerge_similarity = 1.5\n").unwrap();
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("merge_similarity"),
+            "got: {err}"
+        );
     }
 
     #[test]

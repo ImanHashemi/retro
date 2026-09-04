@@ -270,8 +270,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let store = Store::open(tmp.path());
         store.ensure_layout().unwrap();
-        store.write_node(&node("a", Scope::Global, 0.8, 1, a)).unwrap();
-        store.write_node(&node("b", Scope::Global, 0.8, 1, b)).unwrap();
+        store
+            .write_node(&node("a", Scope::Global, 0.8, 1, a))
+            .unwrap();
+        store
+            .write_node(&node("b", Scope::Global, 0.8, 1, b))
+            .unwrap();
 
         // At the default threshold (0.8), 0.7049 similarity doesn't clear
         // it — no near-duplicate finding.

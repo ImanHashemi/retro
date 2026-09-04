@@ -36,13 +36,23 @@ pub fn read(root: &Path) -> Result<Option<StoreMeta>, CoreError> {
 }
 
 /// Write this binary's format marker. Idempotent.
+///
+/// `ensure_layout` calls this on every `retro observe` (i.e. every session
+/// end), so a crash mid-write must not leave a truncated marker — an
+/// unparseable marker is a hard `CoreError::Config` in `read`/
+/// `check_compatible`, which would be worse than the absent-marker case
+/// `read` treats as fine. Tmp-sibling + rename, matching the convention
+/// already used for settings.json and the CLAUDE.md family.
 pub fn write(root: &Path) -> Result<(), CoreError> {
     let meta = StoreMeta {
         store_format: STORE_FORMAT,
     };
     let contents = toml::to_string(&meta).map_err(|e| CoreError::Config(e.to_string()))?;
-    std::fs::write(meta_path(root), contents)
-        .map_err(|e| CoreError::Io(format!("writing store meta: {e}")))
+    let path = meta_path(root);
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, contents)
+        .map_err(|e| CoreError::Io(format!("writing store meta: {e}")))?;
+    std::fs::rename(&tmp, &path).map_err(|e| CoreError::Io(format!("writing store meta: {e}")))
 }
 
 /// Refuse a store written by a newer binary. A missing marker is fine.
@@ -65,7 +75,10 @@ mod tests {
     fn writes_then_reads_current_format() {
         let tmp = TempDir::new().unwrap();
         write(tmp.path()).unwrap();
-        assert_eq!(read(tmp.path()).unwrap().unwrap().store_format, STORE_FORMAT);
+        assert_eq!(
+            read(tmp.path()).unwrap().unwrap().store_format,
+            STORE_FORMAT
+        );
     }
 
     #[test]
@@ -98,7 +111,10 @@ mod tests {
         let first = std::fs::read(tmp.path().join("meta.toml")).unwrap();
         write(tmp.path()).unwrap();
         let second = std::fs::read(tmp.path().join("meta.toml")).unwrap();
-        assert_eq!(first, second, "rewriting the marker must not churn the file");
+        assert_eq!(
+            first, second,
+            "rewriting the marker must not churn the file"
+        );
     }
 
     #[test]

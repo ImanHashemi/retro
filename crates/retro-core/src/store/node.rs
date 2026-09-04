@@ -111,10 +111,14 @@ impl Node {
 
     /// Serialize to markdown.
     ///
-    /// Fails if `archived_reason` is multi-line or is set without `archived`.
+    /// Fails if `archived_reason` is multi-line, empty, the literal `"null"`,
+    /// padded with leading/trailing whitespace, or set without `archived`.
     /// The frontmatter serialiser is line-oriented and unescaped, so a stray
     /// `\n` in a model-derived reason would inject frontmatter keys and make
     /// the node unparseable — which `load_all` handles by silently skipping it.
+    /// `from_markdown` trims every value it parses, so an empty/"null"/padded
+    /// reason would otherwise round-trip to something other than what was
+    /// written — rejected here rather than silently dropped or mutated on read.
     pub fn to_markdown(&self) -> Result<String, CoreError> {
         // NOTE: source IDs must not contain commas (comma-joined list format).
         let sources = self.sources.join(", ");
@@ -139,12 +143,22 @@ impl Node {
                     "archived_reason must be single-line: {reason:?}"
                 )));
             }
-            if reason.is_empty() || reason == "null" {
+            // `from_markdown` trims every frontmatter value before matching
+            // on it, so a padded value reaches the same arm as its trimmed
+            // form — check the trimmed value, and additionally reject
+            // padding itself so the round-trip stays exact.
+            let trimmed = reason.trim();
+            if trimmed.is_empty() || trimmed == "null" {
                 // Both parse back as None on the "null" | "" => None arm —
                 // accepting them here would be Ok on write and a silent
                 // data drop on read.
                 return Err(CoreError::Parse(format!(
                     "archived_reason must not be empty or \"null\": {reason:?}"
+                )));
+            }
+            if trimmed != reason {
+                return Err(CoreError::Parse(format!(
+                    "archived_reason must not be padded (parsing trims): {reason:?}"
                 )));
             }
             archived_keys.push_str(&format!("archived_reason: {reason}\n"));
@@ -268,6 +282,15 @@ impl Node {
             return Err(CoreError::Parse(format!(
                 "invalid id (must be lowercase kebab-case): {id:?}"
             )));
+        }
+        if archived_reason.is_some() && archived.is_none() {
+            // Mirrors the write-side check in `to_markdown` — without it, a
+            // hand-edited or older-format file could parse successfully into
+            // a state that can never be rewritten (every rewrite path would
+            // then hard-error), which isn't actually a store invariant.
+            return Err(CoreError::Parse(
+                "archived_reason set without archived".to_string(),
+            ));
         }
         Ok(Node {
             id,
@@ -588,6 +611,42 @@ A/B comparisons must always use paired observations.
         n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
         n.archived_reason = Some("null".to_string());
         assert!(n.to_markdown().is_err());
+    }
+
+    #[test]
+    fn archived_reason_padded_values_are_rejected() {
+        // `from_markdown` trims every frontmatter value, so a padded reason
+        // would either land on the same "empty"/"null" arm as its trimmed
+        // form (silent data drop) or round-trip to a different value than
+        // what was written (silent mutation). Both are rejected on write.
+        for bad in [" ", " null ", "stale ", " stale", "\tstale"] {
+            let mut n = sample_node();
+            n.archived = Some(NaiveDate::from_ymd_opt(2026, 9, 3).unwrap());
+            n.archived_reason = Some(bad.to_string());
+            assert!(n.to_markdown().is_err(), "should reject: {bad:?}");
+        }
+    }
+
+    #[test]
+    fn from_markdown_rejects_archived_reason_without_archived() {
+        // Enforced on write by `to_markdown`; must also be enforced on read
+        // so the combination can never be parsed into an unrewritable Node.
+        let md = "\
+---
+id: ab-paired-observations
+scope: project/my-api-service
+type: rule
+confidence: 0.90
+sources: []
+created: 2026-05-19
+updated: 2026-06-02
+invalidated_by: null
+archived_reason: stale
+---
+body
+";
+        let err = Node::from_markdown(md).unwrap_err();
+        assert!(err.to_string().contains("archived_reason"), "got: {err}");
     }
 
     #[test]
