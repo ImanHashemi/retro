@@ -36,19 +36,23 @@ pub fn run_lint(store: &Store, config: &Config) -> Result<LintReport, CoreError>
     };
 
     // Near-duplicates: pairwise within the same scope (store scale is small).
+    let threshold = config.curator.merge_similarity;
     for (i, a) in active.iter().enumerate() {
         for b in active.iter().skip(i + 1) {
             if a.scope != b.scope {
                 continue;
             }
-            // Length-ratio pre-filter: bodies differing by >20% in length
-            // can't reach 0.8 similarity — skip the O(len²) Levenshtein DP.
+            // Length-ratio pre-filter derived from the active threshold:
+            // Levenshtein distance is at least the length difference, so a
+            // wider gap than (1 - threshold) can never reach the threshold.
+            // Deriving it (rather than hardcoding 0.2) keeps a lowered
+            // merge_similarity from being silently capped here.
             let (la, lb) = (a.body.chars().count(), b.body.chars().count());
             let max_len = la.max(lb);
-            if max_len > 0 && (la.abs_diff(lb) as f64) / (max_len as f64) > 0.2 {
+            if max_len > 0 && (la.abs_diff(lb) as f64) / (max_len as f64) > 1.0 - threshold {
                 continue;
             }
-            if crate::util::normalized_similarity(&a.body, &b.body) > 0.8 {
+            if crate::util::normalized_similarity(&a.body, &b.body) > threshold {
                 let cross_type = if a.node_type == b.node_type {
                     "consider merging (invalidate one)"
                 } else {
@@ -249,6 +253,55 @@ mod tests {
             "archived node must not be reported: {:?}",
             report.findings
         );
+    }
+
+    #[test]
+    fn lowering_merge_similarity_widens_detection() {
+        // Fixture (measured via crate::util::normalized_similarity, see
+        // scratch measurement in task history): length-gap ratio = 0.2951,
+        // normalized_similarity = 0.7049. The gap ratio exceeds the old
+        // hardcoded 0.2 pre-filter, so at a lowered threshold this pair
+        // proves derivation: the old hardcoded pre-filter would still skip
+        // it on length alone, even though the similarity comfortably clears
+        // a lowered threshold.
+        let a = "Run the smoke test before the full backfill";
+        let b = "Always run the smoke test first before the full backfill runs";
+
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path());
+        store.ensure_layout().unwrap();
+        store.write_node(&node("a", Scope::Global, 0.8, 1, a)).unwrap();
+        store.write_node(&node("b", Scope::Global, 0.8, 1, b)).unwrap();
+
+        // At the default threshold (0.8), 0.7049 similarity doesn't clear
+        // it — no near-duplicate finding.
+        let mut config = Config::default();
+        assert_eq!(config.curator.merge_similarity, 0.8);
+        let report = run_lint(&store, &config).unwrap();
+        assert!(
+            !report.findings.iter().any(|f| f.kind == "near-duplicate"),
+            "should not be flagged at the default threshold: {:?}",
+            report.findings
+        );
+
+        // Lowering merge_similarity to 0.5 must widen detection to catch
+        // this pair — the derived pre-filter (1 - 0.5 = 0.5) admits a 0.2951
+        // length-gap ratio, and 0.7049 similarity clears 0.5.
+        config.curator.merge_similarity = 0.5;
+        let report = run_lint(&store, &config).unwrap();
+        let dups: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|f| f.kind == "near-duplicate")
+            .collect();
+        assert_eq!(
+            dups.len(),
+            1,
+            "lowered threshold should detect the pair: {:?}",
+            report.findings
+        );
+        assert!(dups[0].node_ids.contains(&"a".to_string()));
+        assert!(dups[0].node_ids.contains(&"b".to_string()));
     }
 
     #[test]
